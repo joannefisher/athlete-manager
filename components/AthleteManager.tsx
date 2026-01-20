@@ -1130,7 +1130,7 @@ const AvailabilityChart = ({ athleteId, availabilityRecords, seasonDates }: any)
 };
 
 const ReportingPage = ({ athletes, availabilityRecords, seasonDates, teamStructure }: any) => {
-  const assignedPositions: number[] = useMemo(() => [...new Set(athletes.flatMap((a: any) => a.positionNumbers || []))].sort((a: number, b: number) => a - b), [athletes]);
+  const assignedPositions: number[] = useMemo(() => Array.from(new Set(athletes.flatMap((a: any) => a.positionNumbers || []) as number[])).sort((a, b) => a - b), [athletes]);
   const defaultPeriod = seasonDates.find((sd: any) => sd.isDefault);
   const [dateMode, setDateMode] = useState(defaultPeriod ? 'period' : 'all');
   const [selectedPeriodId, setSelectedPeriodId] = useState(defaultPeriod?.id.toString() || '');
