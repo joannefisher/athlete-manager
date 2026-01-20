@@ -1274,12 +1274,12 @@ const ReportingPage = ({ athletes, availabilityRecords, seasonDates, teamStructu
 };
 
 const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, onDeleteDrillType, onSaveSeasonDate, onDeleteSeasonDate, onSaveTeamStructure, onDeleteTeamStructure, saving }: any) => {
-  const [expanded, setExpanded] = useState('teamStructure');
-  const [editingId, setEditingId] = useState(null);
-  const [editData, setEditData] = useState({});
-  const [showAdd, setShowAdd] = useState(null);
-  const [newData, setNewData] = useState({});
-  const fmtDate = d => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+  const [expanded, setExpanded] = useState<string | null>('teamStructure');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editData, setEditData] = useState<any>({});
+  const [showAdd, setShowAdd] = useState<string | null>(null);
+  const [newData, setNewData] = useState<any>({});
+  const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
 
   return (
     <div className="max-w-md mx-auto p-4 space-y-3">
