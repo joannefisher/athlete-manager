@@ -372,6 +372,10 @@ const AthleteManager = () => {
         sessionPlan = data;
       }
 
+      if (!sessionPlan) {
+        throw new Error('Failed to create session plan');
+      }
+
       // Delete existing drills for this session
       await supabase.from('drills').delete().eq('session_plan_id', sessionPlan.id);
 
@@ -390,6 +394,8 @@ const AthleteManager = () => {
           })
           .select()
           .single();
+
+        if (!newDrill) continue;
 
         // Insert team assignments
         const assignments: any[] = [];
