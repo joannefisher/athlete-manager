@@ -1509,8 +1509,12 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
 
   if (!athlete) return <div className="max-w-md mx-auto p-4"><div className="bg-white rounded-xl shadow-sm border p-6 text-center"><p>Athlete not found</p><button onClick={() => navigateTo('availability')} className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm">Back</button></div></div>;
 
-  const genAvatar = n => { if (!n) return ''; const p = n.trim().split(' '); return p.length >= 2 ? p[0][0].toUpperCase() + p[p.length-1][0].toUpperCase() : n.substring(0,2).toUpperCase(); };
-  const handleSave = () => { setAthletes(athletes.map(a => a.id === athleteId ? {...a, name, positionNumbers, photo, avatar: genAvatar(name), injuries} : a)); setShowSaveSuccess(true); setTimeout(() => setShowSaveSuccess(false), 2000); };
+  const genAvatar = (n: string) => { if (!n) return ''; const p = n.trim().split(' '); return p.length >= 2 ? p[0][0].toUpperCase() + p[p.length-1][0].toUpperCase() : n.substring(0,2).toUpperCase(); };
+  const handleSave = async () => { 
+    await onSave({...athlete, name, positionNumbers, photo, avatar: genAvatar(name), injuries}); 
+    setShowSaveSuccess(true); 
+    setTimeout(() => setShowSaveSuccess(false), 2000); 
+  };
 
   const uniqueNames = [...new Set(teamStructure.map(p => p.name))];
   const selectedNames = [...new Set(positionNumbers.map(n => teamStructure.find(p => p.number === n)?.name).filter(Boolean))];
