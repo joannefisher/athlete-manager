@@ -110,7 +110,7 @@ const AthleteManager = () => {
         .from('team_structure')
         .select('*')
         .order('number');
-      if (teamData) setTeamStructure(teamData.map((t: any) => ({ 
+      if (teamData) setLocalTeamStructure(teamData.map((t: any) => ({ 
         id: t.id, 
         number: t.number, 
         name: t.name, 
@@ -152,7 +152,7 @@ const AthleteManager = () => {
           drill_type_positions(position_number)
         `)
         .order('name');
-      if (drillTypesData) setDrillTypes(drillTypesData.map((dt: any) => ({
+      if (drillTypesData) setLocalDrillTypes(drillTypesData.map((dt: any) => ({
         id: dt.id,
         name: dt.name,
         positions: dt.drill_type_positions?.map((p: any) => p.position_number) || []
@@ -163,7 +163,7 @@ const AthleteManager = () => {
         .from('season_dates')
         .select('*')
         .order('from_date');
-      if (seasonData) setSeasonDates(seasonData.map((s: any) => ({
+      if (seasonData) setLocalSeasonDates(seasonData.map((s: any) => ({
         id: s.id,
         title: s.title,
         fromDate: s.from_date,
@@ -1279,7 +1279,15 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
   const [editData, setEditData] = useState<any>({});
   const [showAdd, setShowAdd] = useState<string | null>(null);
   const [newData, setNewData] = useState<any>({});
+  const [localTeamStructure, setLocalTeamStructure] = useState(teamStructure);
+  const [localDrillTypes, setLocalDrillTypes] = useState(drillTypes);
+  const [localSeasonDates, setLocalSeasonDates] = useState(seasonDates);
   const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+
+  // Sync local state with props
+  React.useEffect(() => { setLocalTeamStructure(teamStructure); }, [teamStructure]);
+  React.useEffect(() => { setLocalDrillTypes(drillTypes); }, [drillTypes]);
+  React.useEffect(() => { setLocalSeasonDates(seasonDates); }, [seasonDates]);
 
   return (
     <div className="max-w-md mx-auto p-4 space-y-3">
@@ -1299,12 +1307,12 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                       <div className="space-y-2">
                         <div className="flex gap-2"><input type="number" value={editData.number || ''} onChange={e => setEditData({...editData, number: e.target.value})} className="w-16 px-2 py-1 text-sm border rounded" placeholder="#" /><input type="text" value={editData.name || ''} onChange={e => setEditData({...editData, name: e.target.value})} className="flex-1 px-2 py-1 text-sm border rounded" placeholder="Name" /></div>
                         <select value={editData.group || 'Forward'} onChange={e => setEditData({...editData, group: e.target.value})} className="w-full px-2 py-1 text-sm border rounded"><option>Forward</option><option>Back</option></select>
-                        <div className="flex gap-2"><button onClick={() => { setTeamStructure(teamStructure.map(p => p.id === pos.id ? {...p, number: parseInt(editData.number), name: editData.name, group: editData.group} : p).sort((a,b) => a.number - b.number)); setEditingId(null); }} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Save</button><button onClick={() => setEditingId(null)} className="flex-1 px-2 py-1 bg-gray-100 rounded text-xs">Cancel</button></div>
+                        <div className="flex gap-2"><button onClick={() => { setLocalTeamStructure(teamStructure.map(p => p.id === pos.id ? {...p, number: parseInt(editData.number), name: editData.name, group: editData.group} : p).sort((a,b) => a.number - b.number)); setEditingId(null); }} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Save</button><button onClick={() => setEditingId(null)} className="flex-1 px-2 py-1 bg-gray-100 rounded text-xs">Cancel</button></div>
                       </div>
                     ) : (
                       <div className="flex justify-between items-center">
                         <span className="text-sm">{pos.number}. {pos.name}</span>
-                        <div className="flex gap-1"><button onClick={() => { setEditingId(pos.id); setEditData({number: pos.number, name: pos.name, group: pos.group}); }} className="p-1 hover:bg-gray-100 rounded"><Edit2 className="w-4 h-4 text-gray-500" /></button><button onClick={() => setTeamStructure(teamStructure.filter(p => p.id !== pos.id))} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button></div>
+                        <div className="flex gap-1"><button onClick={() => { setEditingId(pos.id); setEditData({number: pos.number, name: pos.name, group: pos.group}); }} className="p-1 hover:bg-gray-100 rounded"><Edit2 className="w-4 h-4 text-gray-500" /></button><button onClick={() => setLocalTeamStructure(teamStructure.filter(p => p.id !== pos.id))} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button></div>
                       </div>
                     )}
                   </div>
@@ -1315,7 +1323,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
               <div className="p-3 border-t space-y-2">
                 <div className="flex gap-2"><input type="number" value={newData.number || ''} onChange={e => setNewData({...newData, number: e.target.value})} className="w-16 px-2 py-1 text-sm border rounded" placeholder="#" /><input type="text" value={newData.name || ''} onChange={e => setNewData({...newData, name: e.target.value})} className="flex-1 px-2 py-1 text-sm border rounded" placeholder="Name" /></div>
                 <select value={newData.group || 'Forward'} onChange={e => setNewData({...newData, group: e.target.value})} className="w-full px-2 py-1 text-sm border rounded"><option>Forward</option><option>Back</option></select>
-                <div className="flex gap-2"><button onClick={() => { if (newData.name && newData.number) { setTeamStructure([...teamStructure, {id: Date.now(), number: parseInt(newData.number), name: newData.name, group: newData.group || 'Forward'}].sort((a,b) => a.number - b.number)); setNewData({}); setShowAdd(null); }}} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Add</button><button onClick={() => { setShowAdd(null); setNewData({}); }} className="flex-1 px-2 py-1 bg-gray-100 rounded text-xs">Cancel</button></div>
+                <div className="flex gap-2"><button onClick={() => { if (newData.name && newData.number) { setLocalTeamStructure([...teamStructure, {id: Date.now(), number: parseInt(newData.number), name: newData.name, group: newData.group || 'Forward'}].sort((a,b) => a.number - b.number)); setNewData({}); setShowAdd(null); }}} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Add</button><button onClick={() => { setShowAdd(null); setNewData({}); }} className="flex-1 px-2 py-1 bg-gray-100 rounded text-xs">Cancel</button></div>
               </div>
             ) : <div className="p-3 border-t"><button onClick={() => setShowAdd('position')} className="w-full px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium"><Plus className="w-4 h-4 inline mr-1" />Add Position</button></div>}
           </div>
@@ -1334,7 +1342,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                   <div className="space-y-3">
                     <div className="flex gap-2">
                       <input type="text" value={editData.name || ''} onChange={e => setEditData({...editData, name: e.target.value})} className="flex-1 px-2 py-1 text-sm border rounded" />
-                      <button onClick={() => { setDrillTypes(drillTypes.map(d => d.id === dt.id ? {...d, name: editData.name, positions: editData.positions || d.positions} : d)); setEditingId(null); }} className="p-1 bg-green-100 text-green-700 rounded"><Check className="w-4 h-4" /></button>
+                      <button onClick={() => { setLocalDrillTypes(drillTypes.map(d => d.id === dt.id ? {...d, name: editData.name, positions: editData.positions || d.positions} : d)); setEditingId(null); }} className="p-1 bg-green-100 text-green-700 rounded"><Check className="w-4 h-4" /></button>
                       <button onClick={() => setEditingId(null)} className="p-1 bg-gray-100 rounded"><X className="w-4 h-4" /></button>
                     </div>
                     <div>
@@ -1389,7 +1397,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                     </div>
                     <div className="flex gap-1">
                       <button onClick={() => { setEditingId('dt-' + dt.id); setEditData({name: dt.name, positions: dt.positions}); }} className="p-1 hover:bg-gray-100 rounded"><Edit2 className="w-4 h-4 text-gray-500" /></button>
-                      <button onClick={() => setDrillTypes(drillTypes.filter(d => d.id !== dt.id))} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button>
+                      <button onClick={() => setLocalDrillTypes(drillTypes.filter(d => d.id !== dt.id))} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button>
                     </div>
                   </div>
                 )}
@@ -1440,7 +1448,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => { if (newData.name) { setDrillTypes([...drillTypes, {id: Date.now(), name: newData.name, positions: newData.positions || teamStructure.map(p => p.number)}]); setNewData({}); setShowAdd(null); }}} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Add</button>
+                  <button onClick={() => { if (newData.name) { setLocalDrillTypes([...drillTypes, {id: Date.now(), name: newData.name, positions: newData.positions || teamStructure.map(p => p.number)}]); setNewData({}); setShowAdd(null); }}} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Add</button>
                   <button onClick={() => { setShowAdd(null); setNewData({}); }} className="flex-1 px-2 py-1 bg-gray-100 rounded text-xs">Cancel</button>
                 </div>
               </div>
@@ -1462,12 +1470,12 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                     <input type="text" value={editData.title || ''} onChange={e => setEditData({...editData, title: e.target.value})} className="w-full px-2 py-1 text-sm border rounded" placeholder="Title" />
                     <div className="grid grid-cols-2 gap-2"><input type="date" value={editData.fromDate || ''} onChange={e => setEditData({...editData, fromDate: e.target.value})} className="px-2 py-1 text-sm border rounded" /><input type="date" value={editData.toDate || ''} onChange={e => setEditData({...editData, toDate: e.target.value})} className="px-2 py-1 text-sm border rounded" /></div>
                     <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={editData.isDefault || false} onChange={e => setEditData({...editData, isDefault: e.target.checked})} />Default</label>
-                    <div className="flex gap-2"><button onClick={() => { let upd = seasonDates; if (editData.isDefault) upd = seasonDates.map(s => ({...s, isDefault: false})); setSeasonDates(upd.map(s => s.id === sd.id ? {...s, ...editData} : s)); setEditingId(null); }} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Save</button><button onClick={() => setEditingId(null)} className="flex-1 px-2 py-1 bg-gray-100 rounded text-xs">Cancel</button></div>
+                    <div className="flex gap-2"><button onClick={() => { let upd = seasonDates; if (editData.isDefault) upd = seasonDates.map(s => ({...s, isDefault: false})); setLocalSeasonDates(upd.map(s => s.id === sd.id ? {...s, ...editData} : s)); setEditingId(null); }} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Save</button><button onClick={() => setEditingId(null)} className="flex-1 px-2 py-1 bg-gray-100 rounded text-xs">Cancel</button></div>
                   </div>
                 ) : (
                   <div className="flex justify-between items-center">
                     <div><div className="flex items-center gap-2"><p className="text-sm font-medium">{sd.title}</p>{sd.isDefault && <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full">Default</span>}</div><p className="text-xs text-gray-500">{fmtDate(sd.fromDate)} - {fmtDate(sd.toDate)}</p></div>
-                    <div className="flex gap-1"><button onClick={() => setSeasonDates(seasonDates.map(s => ({...s, isDefault: s.id === sd.id ? !s.isDefault : false})))} className={`p-1 rounded ${sd.isDefault ? 'bg-indigo-50 text-indigo-600' : 'hover:bg-gray-100 text-gray-500'}`}><Target className="w-4 h-4" /></button><button onClick={() => { setEditingId('sd-' + sd.id); setEditData({title: sd.title, fromDate: sd.fromDate, toDate: sd.toDate, isDefault: sd.isDefault}); }} className="p-1 hover:bg-gray-100 rounded"><Edit2 className="w-4 h-4 text-gray-500" /></button><button onClick={() => setSeasonDates(seasonDates.filter(s => s.id !== sd.id))} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button></div>
+                    <div className="flex gap-1"><button onClick={() => setLocalSeasonDates(seasonDates.map(s => ({...s, isDefault: s.id === sd.id ? !s.isDefault : false})))} className={`p-1 rounded ${sd.isDefault ? 'bg-indigo-50 text-indigo-600' : 'hover:bg-gray-100 text-gray-500'}`}><Target className="w-4 h-4" /></button><button onClick={() => { setEditingId('sd-' + sd.id); setEditData({title: sd.title, fromDate: sd.fromDate, toDate: sd.toDate, isDefault: sd.isDefault}); }} className="p-1 hover:bg-gray-100 rounded"><Edit2 className="w-4 h-4 text-gray-500" /></button><button onClick={() => setLocalSeasonDates(seasonDates.filter(s => s.id !== sd.id))} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button></div>
                   </div>
                 )}
               </div>
@@ -1477,7 +1485,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                 <input type="text" value={newData.title || ''} onChange={e => setNewData({...newData, title: e.target.value})} className="w-full px-2 py-1 text-sm border rounded" placeholder="Title" />
                 <div className="grid grid-cols-2 gap-2"><input type="date" value={newData.fromDate || ''} onChange={e => setNewData({...newData, fromDate: e.target.value})} className="px-2 py-1 text-sm border rounded" /><input type="date" value={newData.toDate || ''} onChange={e => setNewData({...newData, toDate: e.target.value})} className="px-2 py-1 text-sm border rounded" /></div>
                 <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={newData.isDefault || false} onChange={e => setNewData({...newData, isDefault: e.target.checked})} />Default</label>
-                <div className="flex gap-2"><button onClick={() => { if (newData.title && newData.fromDate && newData.toDate) { let upd = seasonDates; if (newData.isDefault) upd = seasonDates.map(s => ({...s, isDefault: false})); setSeasonDates([...upd, {id: Date.now(), ...newData}]); setNewData({}); setShowAdd(null); }}} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Add</button><button onClick={() => { setShowAdd(null); setNewData({}); }} className="flex-1 px-2 py-1 bg-gray-100 rounded text-xs">Cancel</button></div>
+                <div className="flex gap-2"><button onClick={() => { if (newData.title && newData.fromDate && newData.toDate) { let upd = seasonDates; if (newData.isDefault) upd = seasonDates.map(s => ({...s, isDefault: false})); setLocalSeasonDates([...upd, {id: Date.now(), ...newData}]); setNewData({}); setShowAdd(null); }}} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Add</button><button onClick={() => { setShowAdd(null); setNewData({}); }} className="flex-1 px-2 py-1 bg-gray-100 rounded text-xs">Cancel</button></div>
               </div>
             ) : <div className="p-3"><button onClick={() => setShowAdd('seasonDate')} className="w-full px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium"><Plus className="w-4 h-4 inline mr-1" />Add Time Period</button></div>}
           </div>
