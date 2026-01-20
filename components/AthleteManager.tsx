@@ -110,7 +110,7 @@ const AthleteManager = () => {
         .from('team_structure')
         .select('*')
         .order('number');
-      if (teamData) setTeamStructure(teamData.map(t => ({ 
+      if (teamData) setTeamStructure(teamData.map((t: any) => ({ 
         id: t.id, 
         number: t.number, 
         name: t.name, 
@@ -126,7 +126,7 @@ const AthleteManager = () => {
           athlete_injuries(*)
         `)
         .order('name');
-      if (athletesData) setAthletes(athletesData.map(a => ({
+      if (athletesData) setAthletes(athletesData.map((a: any) => ({
         id: a.id,
         name: a.name,
         status: a.status,
@@ -134,8 +134,8 @@ const AthleteManager = () => {
         isPublic: a.is_public,
         avatar: a.avatar,
         photo: a.photo_url,
-        positionNumbers: a.athlete_positions?.map(p => p.position_number) || [],
-        injuries: a.athlete_injuries?.map(i => ({
+        positionNumbers: a.athlete_positions?.map((p: any) => p.position_number) || [],
+        injuries: a.athlete_injuries?.map((i: any) => ({
           id: i.id,
           bodyPart: i.body_part,
           startDate: i.start_date,
@@ -152,10 +152,10 @@ const AthleteManager = () => {
           drill_type_positions(position_number)
         `)
         .order('name');
-      if (drillTypesData) setDrillTypes(drillTypesData.map(dt => ({
+      if (drillTypesData) setDrillTypes(drillTypesData.map((dt: any) => ({
         id: dt.id,
         name: dt.name,
-        positions: dt.drill_type_positions?.map(p => p.position_number) || []
+        positions: dt.drill_type_positions?.map((p: any) => p.position_number) || []
       })));
 
       // Fetch season dates
@@ -163,7 +163,7 @@ const AthleteManager = () => {
         .from('season_dates')
         .select('*')
         .order('from_date');
-      if (seasonData) setSeasonDates(seasonData.map(s => ({
+      if (seasonData) setSeasonDates(seasonData.map((s: any) => ({
         id: s.id,
         title: s.title,
         fromDate: s.from_date,
@@ -175,7 +175,7 @@ const AthleteManager = () => {
       const { data: availData } = await supabase
         .from('availability_records')
         .select('*');
-      if (availData) setAvailabilityRecords(availData.map(r => ({
+      if (availData) setAvailabilityRecords(availData.map((r: any) => ({
         id: r.id,
         date: r.date,
         athleteId: r.athlete_id,
@@ -188,8 +188,8 @@ const AthleteManager = () => {
         .from('default_team')
         .select('*');
       if (defaultTeamData) {
-        const team1 = {}, team2 = {}, subs1 = {}, subs2 = {};
-        defaultTeamData.forEach(dt => {
+        const team1: Record<number, string> = {}, team2: Record<number, string> = {}, subs1: Record<number, string> = {}, subs2: Record<number, string> = {};
+        defaultTeamData.forEach((dt: any) => {
           if (dt.team_number === 1) {
             if (dt.is_substitute) subs1[dt.position_number] = dt.athlete_id;
             else team1[dt.position_number] = dt.athlete_id;
@@ -211,7 +211,7 @@ const AthleteManager = () => {
     }
   }, []);
 
-  const loadSessionPlan = async (date) => {
+  const loadSessionPlan = async (date: string) => {
     const { data: sessionPlan } = await supabase
       .from('session_plans')
       .select(`
@@ -225,9 +225,9 @@ const AthleteManager = () => {
       .single();
     
     if (sessionPlan?.drills) {
-      setDrills(sessionPlan.drills.map(d => {
-        const team1 = {}, team2 = {}, subs1 = {}, subs2 = {};
-        d.drill_team_assignments?.forEach(a => {
+      setDrills(sessionPlan.drills.map((d: any) => {
+        const team1: Record<number, string> = {}, team2: Record<number, string> = {}, subs1: Record<number, string> = {}, subs2: Record<number, string> = {};
+        d.drill_team_assignments?.forEach((a: any) => {
           if (a.team_number === 1) {
             if (a.is_substitute) subs1[a.position_number] = a.athlete_id;
             else team1[a.position_number] = a.athlete_id;
@@ -258,7 +258,7 @@ const AthleteManager = () => {
   // SUPABASE SAVE FUNCTIONS
   // ============================================
 
-  const saveAthlete = async (athlete) => {
+  const saveAthlete = async (athlete: Athlete) => {
     setSaving(true);
     try {
       const isNew = typeof athlete.id === 'number' || !athlete.id;
@@ -294,7 +294,7 @@ const AthleteManager = () => {
       await supabase.from('athlete_positions').delete().eq('athlete_id', athleteId);
       if (athlete.positionNumbers?.length > 0) {
         await supabase.from('athlete_positions').insert(
-          athlete.positionNumbers.map(pn => ({ athlete_id: athleteId, position_number: pn }))
+          athlete.positionNumbers.map((pn: number) => ({ athlete_id: athleteId, position_number: pn }))
         );
       }
 
@@ -302,7 +302,7 @@ const AthleteManager = () => {
       await supabase.from('athlete_injuries').delete().eq('athlete_id', athleteId);
       if (athlete.injuries?.length > 0) {
         await supabase.from('athlete_injuries').insert(
-          athlete.injuries.map(i => ({
+          athlete.injuries.map((i: Injury) => ({
             athlete_id: athleteId,
             body_part: i.bodyPart,
             start_date: i.startDate,
@@ -321,7 +321,7 @@ const AthleteManager = () => {
     }
   };
 
-  const deleteAthlete = async (athleteId) => {
+  const deleteAthlete = async (athleteId: string) => {
     try {
       await supabase.from('athletes').delete().eq('id', athleteId);
       await fetchAllData();
@@ -330,14 +330,14 @@ const AthleteManager = () => {
     }
   };
 
-  const saveAvailability = async (date) => {
+  const saveAvailability = async (date: string) => {
     setSaving(true);
     try {
       // Delete existing records for this date
       await supabase.from('availability_records').delete().eq('date', date);
       
       // Insert new records
-      const records = athletes.map(a => ({
+      const records = athletes.map((a: Athlete) => ({
         date,
         athlete_id: a.id,
         status: a.status,
@@ -353,7 +353,7 @@ const AthleteManager = () => {
     }
   };
 
-  const saveSessionPlan = async (date, drillsToSave) => {
+  const saveSessionPlan = async (date: string, drillsToSave: Drill[]) => {
     setSaving(true);
     try {
       // Get or create session plan
@@ -392,7 +392,7 @@ const AthleteManager = () => {
           .single();
 
         // Insert team assignments
-        const assignments = [];
+        const assignments: any[] = [];
         Object.entries(drill.team1 || {}).forEach(([pos, athleteId]) => {
           if (athleteId) assignments.push({ drill_id: newDrill.id, position_number: parseInt(pos), team_number: 1, is_substitute: false, athlete_id: athleteId });
         });
@@ -417,12 +417,12 @@ const AthleteManager = () => {
     }
   };
 
-  const saveDefaultTeam = async (team) => {
+  const saveDefaultTeam = async (team: DefaultTeam) => {
     setSaving(true);
     try {
       await supabase.from('default_team').delete();
       
-      const assignments = [];
+      const assignments: any[] = [];
       Object.entries(team.team1 || {}).forEach(([pos, athleteId]) => {
         if (athleteId) assignments.push({ position_number: parseInt(pos), team_number: 1, is_substitute: false, athlete_id: athleteId });
       });
@@ -448,7 +448,7 @@ const AthleteManager = () => {
     }
   };
 
-  const saveDrillType = async (drillType) => {
+  const saveDrillType = async (drillType: DrillType) => {
     setSaving(true);
     try {
       const isNew = typeof drillType.id === 'number' || !drillType.id;
@@ -468,7 +468,7 @@ const AthleteManager = () => {
       await supabase.from('drill_type_positions').delete().eq('drill_type_id', drillTypeId);
       if (drillType.positions?.length > 0) {
         await supabase.from('drill_type_positions').insert(
-          drillType.positions.map(pn => ({ drill_type_id: drillTypeId, position_number: pn }))
+          drillType.positions.map((pn: number) => ({ drill_type_id: drillTypeId, position_number: pn }))
         );
       }
 
@@ -480,7 +480,7 @@ const AthleteManager = () => {
     }
   };
 
-  const deleteDrillType = async (drillTypeId) => {
+  const deleteDrillType = async (drillTypeId: string) => {
     try {
       await supabase.from('drill_types').delete().eq('id', drillTypeId);
       await fetchAllData();
@@ -489,7 +489,7 @@ const AthleteManager = () => {
     }
   };
 
-  const saveSeasonDate = async (seasonDate) => {
+  const saveSeasonDate = async (seasonDate: SeasonDate) => {
     setSaving(true);
     try {
       const isNew = typeof seasonDate.id === 'number' || !seasonDate.id;
@@ -519,7 +519,7 @@ const AthleteManager = () => {
     }
   };
 
-  const deleteSeasonDate = async (seasonDateId) => {
+  const deleteSeasonDate = async (seasonDateId: string) => {
     try {
       await supabase.from('season_dates').delete().eq('id', seasonDateId);
       await fetchAllData();
@@ -528,7 +528,7 @@ const AthleteManager = () => {
     }
   };
 
-  const saveTeamStructure = async (position) => {
+  const saveTeamStructure = async (position: TeamPosition) => {
     setSaving(true);
     try {
       const isNew = typeof position.id === 'number' || !position.id;
@@ -553,7 +553,7 @@ const AthleteManager = () => {
     }
   };
 
-  const deleteTeamStructurePosition = async (positionId) => {
+  const deleteTeamStructurePosition = async (positionId: string) => {
     try {
       await supabase.from('team_structure').delete().eq('id', positionId);
       await fetchAllData();
@@ -563,12 +563,12 @@ const AthleteManager = () => {
   };
 
   // Handle date change for session plan
-  const handleDateChange = async (newDate) => {
+  const handleDateChange = async (newDate: string) => {
     setSelectedDate(newDate);
     await loadSessionPlan(newDate);
   };
 
-  const navigateTo = (page) => { setCurrentPage(page); setShowMenu(false); };
+  const navigateTo = (page: string) => { setCurrentPage(page); setShowMenu(false); };
   const getPageTitle = () => ({ home: 'Home', availability: 'Availability', 'session-plan': 'Session Plan', 'add-drill': 'Create Drill', 'athlete-profile': 'Athlete Profile', setup: 'Setup', reporting: 'Reporting' }[currentPage] || 'Team');
 
   if (loading) {
@@ -616,24 +616,24 @@ const AthleteManager = () => {
   );
 };
 
-const getPositionDisplay = (positionNumbers, teamStructure) => {
+const getPositionDisplay = (positionNumbers: number[], teamStructure: TeamPosition[]): string => {
   if (!positionNumbers || positionNumbers.length === 0) return '-';
   return [...new Set(positionNumbers.map(num => teamStructure.find(p => p.number === num)?.name).filter(Boolean))].join(', ');
 };
 
-const getPositionGroup = (positionNumbers, teamStructure) => {
+const getPositionGroup = (positionNumbers: number[], teamStructure: TeamPosition[]): string => {
   if (!positionNumbers || positionNumbers.length === 0) return '';
   const groups = [...new Set(positionNumbers.map(num => teamStructure.find(p => p.number === num)?.group).filter(Boolean))];
-  return groups.length === 1 ? groups[0] : groups.length > 1 ? 'Forward/Back' : '';
+  return groups.length === 1 ? groups[0] as string : groups.length > 1 ? 'Forward/Back' : '';
 };
 
-const getActiveInjuries = (athlete) => {
+const getActiveInjuries = (athlete: Athlete): Injury[] => {
   if (!athlete?.injuries) return [];
   const today = new Date().toISOString().split('T')[0];
   return athlete.injuries.filter(inj => !inj.returnDate || inj.returnDate >= today);
 };
 
-const InjuryDisplay = ({ athlete }) => {
+const InjuryDisplay = ({ athlete }: { athlete: Athlete }) => {
   const activeInjuries = getActiveInjuries(athlete);
   if (activeInjuries.length === 0) return null;
   return (
@@ -650,10 +650,10 @@ const InjuryDisplay = ({ athlete }) => {
   );
 };
 
-const HomePage = ({ athletes, navigateTo, setSelectedAthleteId, teamStructure }) => {
+const HomePage = ({ athletes, navigateTo, setSelectedAthleteId, teamStructure }: { athletes: Athlete[], navigateTo: (page: string) => void, setSelectedAthleteId: (id: string | null) => void, teamStructure: TeamPosition[] }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [availableOnly, setAvailableOnly] = useState(false);
-  const getStatusColor = (s) => s === 'Available' ? 'bg-green-500' : s === 'Modified' ? 'bg-amber-500' : 'bg-red-500';
+  const getStatusColor = (s: string) => s === 'Available' ? 'bg-green-500' : s === 'Modified' ? 'bg-amber-500' : 'bg-red-500';
   const filtered = athletes.filter(a => a.name.toLowerCase().includes(searchTerm.toLowerCase()) && (!availableOnly || a.status !== 'Unavailable'));
 
   return (
@@ -687,10 +687,10 @@ const HomePage = ({ athletes, navigateTo, setSelectedAthleteId, teamStructure })
   );
 };
 
-const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthleteId, selectedDate, setSelectedDate, availabilityRecords, teamStructure, onSave, saving }) => {
+const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthleteId, selectedDate, setSelectedDate, availabilityRecords, teamStructure, onSave, saving }: any) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showNotesModal, setShowNotesModal] = useState(false);
-  const [selectedAthlete, setSelectedAthlete] = useState(null);
+  const [selectedAthlete, setSelectedAthlete] = useState<Athlete | null>(null);
   const [tempNotes, setTempNotes] = useState('');
   const [tempIsPublic, setTempIsPublic] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
@@ -757,7 +757,7 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
   );
 };
 
-const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, teamStructure, defaultTeam, onSaveDefaultTeam, selectedDate, onDateChange, onSaveSessionPlan, saving }) => {
+const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, teamStructure, defaultTeam, onSaveDefaultTeam, selectedDate, onDateChange, onSaveSessionPlan, saving }: any) => {
   const [expandedDrill, setExpandedDrill] = useState(null);
   const [editingTeam, setEditingTeam] = useState(null);
   const [editingDefaultTeam, setEditingDefaultTeam] = useState(false);
@@ -843,7 +843,7 @@ const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, 
   );
 };
 
-const AddDrillPage = ({ drills, setDrills, navigateTo, drillTypes, defaultTeam, athletes, teamStructure }) => {
+const AddDrillPage = ({ drills, setDrills, navigateTo, drillTypes, defaultTeam, athletes, teamStructure }: any) => {
   const [name, setName] = useState('');
   const [type, setType] = useState(drillTypes[0]?.name || '');
   const [notes, setNotes] = useState('');
@@ -912,7 +912,7 @@ const AddDrillPage = ({ drills, setDrills, navigateTo, drillTypes, defaultTeam, 
   );
 };
 
-const TeamSelectionModal = ({ athletes, team1, setTeam1, team2, setTeam2, subs1, setSubs1, subs2, setSubs2, onBack, positions, teamStructure, title = "Team Selection" }) => {
+const TeamSelectionModal = ({ athletes, team1, setTeam1, team2, setTeam2, subs1, setSubs1, subs2, setSubs2, onBack, positions, teamStructure, title = "Team Selection" }: any) => {
   const [selectedCell, setSelectedCell] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -1064,7 +1064,7 @@ const TeamSelectionModal = ({ athletes, team1, setTeam1, team2, setTeam2, subs1,
   );
 };
 
-const AvailabilityChart = ({ athleteId, availabilityRecords, seasonDates }) => {
+const AvailabilityChart = ({ athleteId, availabilityRecords, seasonDates }: any) => {
   const defaultPeriod = seasonDates.find(sd => sd.isDefault);
   const [selectedPeriod, setSelectedPeriod] = useState(defaultPeriod ? defaultPeriod.id.toString() : 'all');
 
@@ -1105,7 +1105,7 @@ const AvailabilityChart = ({ athleteId, availabilityRecords, seasonDates }) => {
   );
 };
 
-const ReportingPage = ({ athletes, availabilityRecords, seasonDates, teamStructure }) => {
+const ReportingPage = ({ athletes, availabilityRecords, seasonDates, teamStructure }: any) => {
   const assignedPositions = useMemo(() => [...new Set(athletes.flatMap(a => a.positionNumbers || []))].sort((a,b) => a - b), [athletes]);
   const defaultPeriod = seasonDates.find(sd => sd.isDefault);
   const [dateMode, setDateMode] = useState(defaultPeriod ? 'period' : 'all');
@@ -1249,7 +1249,7 @@ const ReportingPage = ({ athletes, availabilityRecords, seasonDates, teamStructu
   );
 };
 
-const SetupPage = ({ drillTypes, setDrillTypes, seasonDates, setSeasonDates, teamStructure, setTeamStructure }) => {
+const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, onDeleteDrillType, onSaveSeasonDate, onDeleteSeasonDate, onSaveTeamStructure, onDeleteTeamStructure, saving }: any) => {
   const [expanded, setExpanded] = useState('teamStructure');
   const [editingId, setEditingId] = useState(null);
   const [editData, setEditData] = useState({});
@@ -1463,7 +1463,7 @@ const SetupPage = ({ drillTypes, setDrillTypes, seasonDates, setSeasonDates, tea
   );
 };
 
-const AthleteProfilePage = ({ athletes, setAthletes, athleteId, navigateTo, availabilityRecords, seasonDates, teamStructure }) => {
+const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecords, seasonDates, teamStructure, onSave, onDelete, saving }: any) => {
   const athlete = athletes.find(a => a.id === athleteId);
   const [name, setName] = useState(athlete?.name || '');
   const [positionNumbers, setPositionNumbers] = useState(athlete?.positionNumbers || []);
