@@ -6,23 +6,97 @@ import { supabase } from '@/lib/supabase';
 
 const BODY_PARTS = ['Head', 'Neck', 'Shoulder', 'Arm', 'Elbow', 'Wrist', 'Hand', 'Chest', 'Back', 'Hip', 'Groin', 'Thigh', 'Hamstring', 'Knee', 'Calf', 'Ankle', 'Foot', 'Other'];
 
+// Type definitions
+interface TeamPosition {
+  id: string;
+  number: number;
+  name: string;
+  group: string;
+}
+
+interface Injury {
+  id: string;
+  bodyPart: string;
+  startDate: string;
+  returnDate: string | null;
+  notes: string;
+}
+
+interface Athlete {
+  id: string;
+  name: string;
+  status: string;
+  notes: string;
+  isPublic: boolean;
+  avatar: string;
+  photo: string;
+  positionNumbers: number[];
+  injuries: Injury[];
+}
+
+interface DrillType {
+  id: string;
+  name: string;
+  positions: number[];
+}
+
+interface SeasonDate {
+  id: string;
+  title: string;
+  fromDate: string;
+  toDate: string;
+  isDefault: boolean;
+}
+
+interface AvailabilityRecord {
+  id: string;
+  date: string;
+  athleteId: string;
+  status: string;
+  note: string;
+}
+
+interface Drill {
+  id: string;
+  name: string;
+  type: string;
+  intensity: string;
+  notes: string;
+  team1: Record<number, string>;
+  team2: Record<number, string>;
+  subs1: Record<number, string>;
+  subs2: Record<number, string>;
+}
+
+interface SessionPlanRecord {
+  date: string;
+  drills: Drill[];
+}
+
+interface DefaultTeam {
+  team1: Record<number, string>;
+  team2: Record<number, string>;
+  subs1: Record<number, string>;
+  subs2: Record<number, string>;
+}
+
 const AthleteManager = () => {
   const [currentPage, setCurrentPage] = useState('home');
   const [showMenu, setShowMenu] = useState(false);
-  const [selectedAthleteId, setSelectedAthleteId] = useState(null);
+  const [selectedAthleteId, setSelectedAthleteId] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
-  // Data states
-  const [athletes, setAthletes] = useState([]);
-  const [drills, setDrills] = useState([]);
-  const [drillTypes, setDrillTypes] = useState([]);
-  const [seasonDates, setSeasonDates] = useState([]);
-  const [availabilityRecords, setAvailabilityRecords] = useState([]);
-  const [sessionPlanRecords, setSessionPlanRecords] = useState([]);
-  const [teamStructure, setTeamStructure] = useState([]);
-  const [defaultTeam, setDefaultTeam] = useState({ team1: {}, team2: {}, subs1: {}, subs2: {} });
+  // Data states with types
+  const [athletes, setAthletes] = useState<Athlete[]>([]);
+  const [drills, setDrills] = useState<Drill[]>([]);
+  const [drillTypes, setDrillTypes] = useState<DrillType[]>([]);
+  const [seasonDates, setSeasonDates] = useState<SeasonDate[]>([]);
+  const [availabilityRecords, setAvailabilityRecords] = useState<AvailabilityRecord[]>([]);
+  const [sessionPlanRecords, setSessionPlanRecords] = useState<SessionPlanRecord[]>([]);
+  const [teamStructure, setTeamStructure] = useState<TeamPosition[]>([]);
+  const [defaultTeam, setDefaultTeam] = useState<DefaultTeam>({ team1: {}, team2: {}, subs1: {}, subs2: {} });
 
   // ============================================
   // SUPABASE DATA FETCHING
