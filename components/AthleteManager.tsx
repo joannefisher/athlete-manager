@@ -1586,7 +1586,7 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
                 <div><label className="block text-xs text-gray-500 mb-1">Start Date</label><input type="date" value={injuryData.startDate} onChange={e => setInjuryData({...injuryData, startDate: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" /></div>
                 <div><label className="block text-xs text-gray-500 mb-1">Est. Return</label><input type="date" value={injuryData.returnDate} onChange={e => setInjuryData({...injuryData, returnDate: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" /></div>
               </div>
-              <div><label className="block text-xs text-gray-500 mb-1">Notes</label><textarea value={injuryData.notes} onChange={e => setInjuryData({...injuryData, notes: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" rows="2" /></div>
+              <div><label className="block text-xs text-gray-500 mb-1">Notes</label><textarea value={injuryData.notes} onChange={e => setInjuryData({...injuryData, notes: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" rows={2} /></div>
               <div className="flex gap-2"><button onClick={saveInjury} className="flex-1 px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium">{editingInjuryId ? 'Update' : 'Add'}</button><button onClick={() => { setShowAddInjury(false); setEditingInjuryId(null); }} className="flex-1 px-3 py-2 bg-gray-100 rounded-lg text-sm">Cancel</button></div>
             </div>
           )}
