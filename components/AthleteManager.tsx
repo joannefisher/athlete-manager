@@ -917,7 +917,7 @@ const AddDrillPage = ({ drills, setDrills, navigateTo, drillTypes, defaultTeam, 
         <div><label className="block text-xs font-medium mb-1">Name</label><input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full px-3 py-2 text-sm border rounded-lg" /></div>
         <div><label className="block text-xs font-medium mb-1">Type</label><select value={type} onChange={e => setType(e.target.value)} className="w-full px-3 py-2 text-sm border rounded-lg">{drillTypes.map(dt => <option key={dt.id}>{dt.name}</option>)}</select></div>
         <div><label className="block text-xs font-medium mb-1">Intensity</label><select value={intensity} onChange={e => setIntensity(e.target.value)} className="w-full px-3 py-2 text-sm border rounded-lg"><option>Low</option><option>Medium</option><option>High</option></select></div>
-        <div><label className="block text-xs font-medium mb-1">Notes</label><textarea value={notes} onChange={e => setNotes(e.target.value)} className="w-full px-3 py-2 text-sm border rounded-lg" rows="3" /></div>
+        <div><label className="block text-xs font-medium mb-1">Notes</label><textarea value={notes} onChange={e => setNotes(e.target.value)} className="w-full px-3 py-2 text-sm border rounded-lg" rows={3} /></div>
         <div>
           <label className="block text-xs font-medium mb-1">Team</label>
           <button onClick={() => setShowTeamSelection(true)} className="w-full px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition text-sm font-medium flex items-center justify-center gap-2">
