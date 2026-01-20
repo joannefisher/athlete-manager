@@ -1130,14 +1130,14 @@ const AvailabilityChart = ({ athleteId, availabilityRecords, seasonDates }: any)
 };
 
 const ReportingPage = ({ athletes, availabilityRecords, seasonDates, teamStructure }: any) => {
-  const assignedPositions = useMemo(() => [...new Set(athletes.flatMap(a => a.positionNumbers || []))].sort((a,b) => a - b), [athletes]);
-  const defaultPeriod = seasonDates.find(sd => sd.isDefault);
+  const assignedPositions: number[] = useMemo(() => [...new Set(athletes.flatMap((a: any) => a.positionNumbers || []))].sort((a: number, b: number) => a - b), [athletes]);
+  const defaultPeriod = seasonDates.find((sd: any) => sd.isDefault);
   const [dateMode, setDateMode] = useState(defaultPeriod ? 'period' : 'all');
   const [selectedPeriodId, setSelectedPeriodId] = useState(defaultPeriod?.id.toString() || '');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
-  const [selectedAthleteIds, setSelectedAthleteIds] = useState(athletes.map(a => a.id));
-  const [selectedPositions, setSelectedPositions] = useState(assignedPositions);
+  const [selectedAthleteIds, setSelectedAthleteIds] = useState(athletes.map((a: any) => a.id));
+  const [selectedPositions, setSelectedPositions] = useState<number[]>(assignedPositions);
   const [selectedGroups, setSelectedGroups] = useState(['Forward', 'Back']);
   const [showFilters, setShowFilters] = useState(false);
   const [showAvailable, setShowAvailable] = useState(true);
@@ -1147,8 +1147,8 @@ const ReportingPage = ({ athletes, availabilityRecords, seasonDates, teamStructu
   // Get unique position names from assigned positions
   const uniquePositionNames = useMemo(() => {
     const names = new Map();
-    assignedPositions.forEach(posNum => {
-      const pos = teamStructure.find(p => p.number === posNum);
+    assignedPositions.forEach((posNum: number) => {
+      const pos = teamStructure.find((p: any) => p.number === posNum);
       if (pos && !names.has(pos.name)) {
         names.set(pos.name, { name: pos.name, numbers: [], group: pos.group });
       }
