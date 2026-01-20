@@ -110,7 +110,7 @@ const AthleteManager = () => {
         .from('team_structure')
         .select('*')
         .order('number');
-      if (teamData) setLocalTeamStructure(teamData.map((t: any) => ({ 
+      if (teamData) setTeamStructure(teamData.map((t: any) => ({ 
         id: t.id, 
         number: t.number, 
         name: t.name, 
@@ -152,7 +152,7 @@ const AthleteManager = () => {
           drill_type_positions(position_number)
         `)
         .order('name');
-      if (drillTypesData) setLocalDrillTypes(drillTypesData.map((dt: any) => ({
+      if (drillTypesData) setDrillTypes(drillTypesData.map((dt: any) => ({
         id: dt.id,
         name: dt.name,
         positions: dt.drill_type_positions?.map((p: any) => p.position_number) || []
@@ -163,7 +163,7 @@ const AthleteManager = () => {
         .from('season_dates')
         .select('*')
         .order('from_date');
-      if (seasonData) setLocalSeasonDates(seasonData.map((s: any) => ({
+      if (seasonData) setSeasonDates(seasonData.map((s: any) => ({
         id: s.id,
         title: s.title,
         fromDate: s.from_date,
