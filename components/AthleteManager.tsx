@@ -700,6 +700,8 @@ const HomePage = ({ athletes, navigateTo, setSelectedAthleteId, teamStructure }:
 };
 
 const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthleteId, selectedDate, setSelectedDate, availabilityRecords, teamStructure, onSave, saving }: any) => {
+  const typedAthletes: Athlete[] = athletes;
+  const typedTeamStructure: TeamPosition[] = teamStructure;
   const [searchTerm, setSearchTerm] = useState('');
   const [showNotesModal, setShowNotesModal] = useState(false);
   const [selectedAthlete, setSelectedAthlete] = useState<Athlete | null>(null);
@@ -713,6 +715,8 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
     setTimeout(() => setShowSaveSuccess(false), 2000);
   };
 
+  const filteredAthletes = typedAthletes.filter(a => a.name.toLowerCase().includes(searchTerm.toLowerCase()));
+
   return (
     <div className="max-w-md mx-auto">
       <div className="bg-white shadow-sm border-b px-4 py-3 mb-4">
@@ -721,13 +725,13 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
             <input type="text" placeholder="Search..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-9 pr-3 py-2 text-sm border rounded-lg" />
           </div>
-          <button onClick={() => { const id = Date.now(); setAthletes([...athletes, { id, name: '', status: 'Available', notes: '', isPublic: false, photo: '', positionNumbers: [], avatar: '', injuries: [] }]); setSelectedAthleteId(id); navigateTo('athlete-profile'); }} className="px-3 py-2 bg-indigo-600 text-white rounded-lg"><Plus className="w-4 h-4" /></button>
+          <button onClick={() => { const id = String(Date.now()); setAthletes([...typedAthletes, { id, name: '', status: 'Available', notes: '', isPublic: false, photo: '', positionNumbers: [], avatar: '', injuries: [] }]); setSelectedAthleteId(id); navigateTo('athlete-profile'); }} className="px-3 py-2 bg-indigo-600 text-white rounded-lg"><Plus className="w-4 h-4" /></button>
         </div>
         <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="w-full px-3 py-2 text-sm border rounded-lg" />
       </div>
       {showSaveSuccess && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-sm">✓ Saved!</div>}
       <div className="px-4 space-y-2 pb-20">
-        {athletes.filter(a => a.name.toLowerCase().includes(searchTerm.toLowerCase())).map(athlete => (
+        {filteredAthletes.map(athlete => (
           <div key={athlete.id} className="bg-white rounded-xl shadow-sm border p-3">
             <div className="flex items-center gap-3 mb-2">
               <div className="cursor-pointer" onClick={() => { setSelectedAthleteId(athlete.id); navigateTo('athlete-profile'); }}>
@@ -735,9 +739,9 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
               </div>
               <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { setSelectedAthleteId(athlete.id); navigateTo('athlete-profile'); }}>
                 <h3 className="text-sm font-semibold truncate">{athlete.name}</h3>
-                <p className="text-xs text-gray-600 truncate">{getPositionDisplay(athlete.positionNumbers, teamStructure)}</p>
+                <p className="text-xs text-gray-600 truncate">{getPositionDisplay(athlete.positionNumbers, typedTeamStructure)}</p>
               </div>
-              <select value={athlete.status} onChange={e => setAthletes(athletes.map(a => a.id === athlete.id ? { ...a, status: e.target.value } : a))} className="px-2 py-1 text-xs rounded-lg border">
+              <select value={athlete.status} onChange={e => setAthletes(typedAthletes.map(a => a.id === athlete.id ? { ...a, status: e.target.value } : a))} className="px-2 py-1 text-xs rounded-lg border">
                 <option>Available</option><option>Modified</option><option>Unavailable</option>
               </select>
             </div>
@@ -756,10 +760,10 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-30">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-4">
             <div className="flex justify-between mb-4"><h3 className="font-semibold">{selectedAthlete.name}</h3><button onClick={() => setShowNotesModal(false)}><X className="w-5 h-5" /></button></div>
-            <textarea value={tempNotes} onChange={e => setTempNotes(e.target.value)} placeholder="Notes..." className="w-full px-3 py-2 border rounded-lg mb-3" rows="3" />
+            <textarea value={tempNotes} onChange={e => setTempNotes(e.target.value)} placeholder="Notes..." className="w-full px-3 py-2 border rounded-lg mb-3" rows={3} />
             <label className="flex items-center gap-2 mb-4"><input type="checkbox" checked={tempIsPublic} onChange={e => setTempIsPublic(e.target.checked)} className="w-4 h-4" /><span className="text-sm">Public Note</span></label>
             <div className="flex gap-2">
-              <button onClick={() => { setAthletes(athletes.map(a => a.id === selectedAthlete.id ? { ...a, notes: tempNotes, isPublic: tempIsPublic } : a)); setShowNotesModal(false); }} className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg">Save</button>
+              <button onClick={() => { setAthletes(typedAthletes.map(a => a.id === selectedAthlete.id ? { ...a, notes: tempNotes, isPublic: tempIsPublic } : a)); setShowNotesModal(false); }} className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg">Save</button>
               <button onClick={() => setShowNotesModal(false)} className="flex-1 px-4 py-2 bg-gray-100 rounded-lg">Cancel</button>
             </div>
           </div>
@@ -770,17 +774,21 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
 };
 
 const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, teamStructure, defaultTeam, onSaveDefaultTeam, selectedDate, onDateChange, onSaveSessionPlan, saving }: any) => {
-  const [expandedDrill, setExpandedDrill] = useState(null);
-  const [editingTeam, setEditingTeam] = useState(null);
+  const typedAthletes: Athlete[] = athletes;
+  const typedDrills: Drill[] = drills;
+  const typedDrillTypes: DrillType[] = drillTypes;
+  const typedTeamStructure: TeamPosition[] = teamStructure;
+  const [expandedDrill, setExpandedDrill] = useState<string | null>(null);
+  const [editingTeam, setEditingTeam] = useState<Drill | null>(null);
   const [editingDefaultTeam, setEditingDefaultTeam] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [tempDefaultTeam, setTempDefaultTeam] = useState(defaultTeam);
 
-  const getPositionsForDrill = (drill) => drillTypes.find(dt => dt.name === drill.type)?.positions || teamStructure.map(p => p.number);
+  const getPositionsForDrill = (drill: Drill) => typedDrillTypes.find(dt => dt.name === drill.type)?.positions || typedTeamStructure.map(p => p.number);
 
   const handleSave = async () => {
-    if (drills.length > 0) {
-      await onSaveSessionPlan(selectedDate, drills);
+    if (typedDrills.length > 0) {
+      await onSaveSessionPlan(selectedDate, typedDrills);
       setShowSaveSuccess(true);
       setTimeout(() => setShowSaveSuccess(false), 2000);
     }
@@ -795,11 +803,11 @@ const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, 
   const isToday = selectedDate === today;
 
   if (editingDefaultTeam) {
-    return <TeamSelectionModal athletes={athletes} team1={tempDefaultTeam.team1} setTeam1={t => setTempDefaultTeam({...tempDefaultTeam, team1: t})} team2={tempDefaultTeam.team2} setTeam2={t => setTempDefaultTeam({...tempDefaultTeam, team2: t})} subs1={tempDefaultTeam.subs1} setSubs1={t => setTempDefaultTeam({...tempDefaultTeam, subs1: t})} subs2={tempDefaultTeam.subs2} setSubs2={t => setTempDefaultTeam({...tempDefaultTeam, subs2: t})} onBack={handleSaveDefaultTeam} positions={teamStructure.map(p => p.number)} teamStructure={teamStructure} title="Edit Default Team" />;
+    return <TeamSelectionModal athletes={typedAthletes} team1={tempDefaultTeam.team1} setTeam1={(t: any) => setTempDefaultTeam({...tempDefaultTeam, team1: t})} team2={tempDefaultTeam.team2} setTeam2={(t: any) => setTempDefaultTeam({...tempDefaultTeam, team2: t})} subs1={tempDefaultTeam.subs1} setSubs1={(t: any) => setTempDefaultTeam({...tempDefaultTeam, subs1: t})} subs2={tempDefaultTeam.subs2} setSubs2={(t: any) => setTempDefaultTeam({...tempDefaultTeam, subs2: t})} onBack={handleSaveDefaultTeam} positions={typedTeamStructure.map(p => p.number)} teamStructure={typedTeamStructure} title="Edit Default Team" />;
   }
 
   if (editingTeam) {
-    return <TeamSelectionModal athletes={athletes} team1={editingTeam.team1 || {}} setTeam1={t => { setDrills(drills.map(d => d.id === editingTeam.id ? {...d, team1: t} : d)); setEditingTeam({...editingTeam, team1: t}); }} team2={editingTeam.team2 || {}} setTeam2={t => { setDrills(drills.map(d => d.id === editingTeam.id ? {...d, team2: t} : d)); setEditingTeam({...editingTeam, team2: t}); }} subs1={editingTeam.subs1 || {}} setSubs1={t => { setDrills(drills.map(d => d.id === editingTeam.id ? {...d, subs1: t} : d)); setEditingTeam({...editingTeam, subs1: t}); }} subs2={editingTeam.subs2 || {}} setSubs2={t => { setDrills(drills.map(d => d.id === editingTeam.id ? {...d, subs2: t} : d)); setEditingTeam({...editingTeam, subs2: t}); }} onBack={() => setEditingTeam(null)} positions={getPositionsForDrill(editingTeam)} teamStructure={teamStructure} title="Edit Team" />;
+    return <TeamSelectionModal athletes={typedAthletes} team1={editingTeam.team1 || {}} setTeam1={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, team1: t} : d)); setEditingTeam({...editingTeam, team1: t}); }} team2={editingTeam.team2 || {}} setTeam2={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, team2: t} : d)); setEditingTeam({...editingTeam, team2: t}); }} subs1={editingTeam.subs1 || {}} setSubs1={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, subs1: t} : d)); setEditingTeam({...editingTeam, subs1: t}); }} subs2={editingTeam.subs2 || {}} setSubs2={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, subs2: t} : d)); setEditingTeam({...editingTeam, subs2: t}); }} onBack={() => setEditingTeam(null)} positions={getPositionsForDrill(editingTeam)} teamStructure={typedTeamStructure} title="Edit Team" />;
   }
 
   return (
@@ -818,13 +826,13 @@ const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, 
       </button>
       
       <div className="space-y-2 mb-24">
-        {drills.length === 0 ? (
+        {typedDrills.length === 0 ? (
           <div className="bg-white rounded-xl shadow-sm border p-8 text-center">
             <p className="text-gray-500 text-sm">No drills for this day</p>
             <p className="text-gray-400 text-xs mt-1">Add a drill to get started</p>
           </div>
         ) : (
-          drills.map(drill => (
+          typedDrills.map(drill => (
             <div key={drill.id} className="bg-white rounded-xl shadow-sm border overflow-hidden">
               <button onClick={() => setExpandedDrill(expandedDrill === drill.id ? null : drill.id)} className="w-full p-4 flex items-center justify-between hover:bg-gray-50">
                 <div className="text-left"><h3 className="font-semibold text-sm">{drill.name}</h3><p className="text-xs text-gray-600">{drill.type}</p></div>
@@ -836,7 +844,7 @@ const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, 
                   <p><span className="text-gray-500">Notes:</span> {drill.notes}</p>
                   <div className="flex gap-2 mt-2">
                     <button onClick={() => setEditingTeam(drill)} className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-medium"><Users className="w-4 h-4 inline mr-1" />Edit Team</button>
-                    <button onClick={() => setDrills(drills.filter(d => d.id !== drill.id))} className="px-4 py-2 bg-red-50 text-red-600 rounded-lg text-xs font-medium"><Trash2 className="w-4 h-4" /></button>
+                    <button onClick={() => setDrills(typedDrills.filter(d => d.id !== drill.id))} className="px-4 py-2 bg-red-50 text-red-600 rounded-lg text-xs font-medium"><Trash2 className="w-4 h-4" /></button>
                   </div>
                 </div>
               )}
@@ -848,7 +856,7 @@ const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, 
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4">
         <div className="max-w-md mx-auto flex gap-2">
           <button onClick={() => navigateTo('add-drill')} className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-lg font-medium text-sm"><Plus className="w-4 h-4 inline mr-1" />Add Drill</button>
-          <button onClick={handleSave} disabled={drills.length === 0} className={`flex-1 px-4 py-3 rounded-lg font-medium text-sm ${drills.length > 0 ? 'bg-gray-900 text-white' : 'bg-gray-200 text-gray-400'}`}>Save</button>
+          <button onClick={handleSave} disabled={typedDrills.length === 0} className={`flex-1 px-4 py-3 rounded-lg font-medium text-sm ${typedDrills.length > 0 ? 'bg-gray-900 text-white' : 'bg-gray-200 text-gray-400'}`}>Save</button>
         </div>
       </div>
     </div>
@@ -856,8 +864,12 @@ const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, 
 };
 
 const AddDrillPage = ({ drills, setDrills, navigateTo, drillTypes, defaultTeam, athletes, teamStructure }: any) => {
+  const typedDrills: Drill[] = drills;
+  const typedDrillTypes: DrillType[] = drillTypes;
+  const typedAthletes: Athlete[] = athletes;
+  const typedTeamStructure: TeamPosition[] = teamStructure;
   const [name, setName] = useState('');
-  const [type, setType] = useState(drillTypes[0]?.name || '');
+  const [type, setType] = useState(typedDrillTypes[0]?.name || '');
   const [notes, setNotes] = useState('');
   const [intensity, setIntensity] = useState('Low');
   const [team1, setTeam1] = useState({...defaultTeam.team1});
