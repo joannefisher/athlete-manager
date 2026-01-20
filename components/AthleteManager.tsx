@@ -1516,15 +1516,15 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
     setTimeout(() => setShowSaveSuccess(false), 2000); 
   };
 
-  const uniqueNames = [...new Set(teamStructure.map(p => p.name))];
-  const selectedNames = [...new Set(positionNumbers.map(n => teamStructure.find(p => p.number === n)?.name).filter(Boolean))];
+  const uniqueNames: string[] = Array.from(new Set(teamStructure.map((p: any) => p.name)));
+  const selectedNames: string[] = Array.from(new Set(positionNumbers.map((n: number) => teamStructure.find((p: any) => p.number === n)?.name).filter(Boolean))) as string[];
   const today = new Date().toISOString().split('T')[0];
-  const activeInjuries = injuries.filter(i => !i.returnDate || i.returnDate >= today);
-  const pastInjuries = injuries.filter(i => i.returnDate && i.returnDate < today);
+  const activeInjuries = injuries.filter((i: any) => !i.returnDate || i.returnDate >= today);
+  const pastInjuries = injuries.filter((i: any) => i.returnDate && i.returnDate < today);
 
   const saveInjury = () => {
     if (injuryData.bodyPart && injuryData.startDate) {
-      if (editingInjuryId) setInjuries(injuries.map(i => i.id === editingInjuryId ? {...i, ...injuryData} : i));
+      if (editingInjuryId) setInjuries(injuries.map((i: any) => i.id === editingInjuryId ? {...i, ...injuryData} : i));
       else setInjuries([...injuries, {id: Date.now(), ...injuryData}]);
       setInjuryData({ bodyPart: 'Head', startDate: '', returnDate: '', notes: '' });
       setEditingInjuryId(null);
@@ -1559,10 +1559,10 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
                   <div key={group} className="mb-3 last:mb-0">
                     <p className="text-xs font-semibold text-gray-500 mb-2">{group}s</p>
                     <div className="flex flex-wrap gap-2">
-                      {uniqueNames.filter(pn => teamStructure.find(p => p.name === pn && p.group === group)).map(pn => {
-                        const nums = teamStructure.filter(p => p.name === pn).map(p => p.number);
-                        const sel = nums.some(n => positionNumbers.includes(n));
-                        return <button key={pn} onClick={() => { if (sel) setPositionNumbers(positionNumbers.filter(n => !nums.includes(n))); else setPositionNumbers([...new Set([...positionNumbers, ...nums])].sort((a,b) => a - b)); }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${sel ? 'bg-indigo-600 text-white' : 'bg-white border hover:bg-gray-100'}`}>{pn}</button>;
+                      {uniqueNames.filter((pn: string) => teamStructure.find((p: any) => p.name === pn && p.group === group)).map((pn: string) => {
+                        const nums = teamStructure.filter((p: any) => p.name === pn).map((p: any) => p.number);
+                        const sel = nums.some((n: number) => positionNumbers.includes(n));
+                        return <button key={pn} onClick={() => { if (sel) setPositionNumbers(positionNumbers.filter((n: number) => !nums.includes(n))); else setPositionNumbers(Array.from(new Set([...positionNumbers, ...nums])).sort((a: number, b: number) => a - b)); }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${sel ? 'bg-indigo-600 text-white' : 'bg-white border hover:bg-gray-100'}`}>{pn}</button>;
                       })}
                     </div>
                   </div>
@@ -1571,7 +1571,7 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
             )}
           </div>
           {positionNumbers.length > 0 && <p className="text-xs text-gray-500">Group: {getPositionGroup(positionNumbers, teamStructure)}</p>}
-          <button onClick={() => { if (window.confirm('Delete?')) { setAthletes(athletes.filter(a => a.id !== athleteId)); navigateTo('availability'); }}} className="w-full px-4 py-2 bg-red-50 text-red-600 rounded-lg text-sm font-medium">Delete Athlete</button>
+          <button onClick={async () => { if (window.confirm('Delete?')) { await onDelete(athleteId); navigateTo('availability'); }}} className="w-full px-4 py-2 bg-red-50 text-red-600 rounded-lg text-sm font-medium">Delete Athlete</button>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border p-4">
