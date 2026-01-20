@@ -602,7 +602,13 @@ const AthleteManager = () => {
           <div className="bg-white w-64 h-full shadow-xl" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b"><h2 className="text-lg font-semibold">Menu</h2></div>
             <div className="p-2">
-              {[['home', Target, 'Home'], ['availability', Calendar, 'Availability'], ['session-plan', Zap, 'Session Plan'], ['reporting', BarChart3, 'Reporting'], ['setup', Settings, 'Setup']].map(([page, Icon, label]) => (
+              {[
+                { page: 'home', Icon: Target, label: 'Home' },
+                { page: 'availability', Icon: Calendar, label: 'Availability' },
+                { page: 'session-plan', Icon: Zap, label: 'Session Plan' },
+                { page: 'reporting', Icon: BarChart3, label: 'Reporting' },
+                { page: 'setup', Icon: Settings, label: 'Setup' }
+              ].map(({ page, Icon, label }) => (
                 <button key={page} onClick={() => navigateTo(page)} className={`w-full text-left px-4 py-3 rounded-lg flex items-center gap-3 ${currentPage === page ? 'bg-indigo-50 text-indigo-700 font-medium' : 'hover:bg-gray-100'}`}>
                   <Icon className="w-5 h-5" />{label}
                 </button>
