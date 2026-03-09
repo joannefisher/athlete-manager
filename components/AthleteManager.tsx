@@ -43,6 +43,18 @@ const statusColour: Record<Status, string> = {
   Unavailable: 'bg-red-500',
 };
 
+const statusBadge: Record<Status, string> = {
+  Available: 'bg-green-100 text-green-700 border border-green-300',
+  Modified: 'bg-amber-100 text-amber-700 border border-amber-300',
+  Unavailable: 'bg-red-100 text-red-700 border border-red-300',
+};
+
+const statusSelectColour: Record<Status, string> = {
+  Available: 'bg-green-50 text-green-700 border-green-300',
+  Modified: 'bg-amber-50 text-amber-700 border-amber-300',
+  Unavailable: 'bg-red-50 text-red-700 border-red-300',
+};
+
 const emptyForm = (): NewAthlete => ({
   name: '',
   status: 'Available',
@@ -245,7 +257,10 @@ const HomePage = ({ athletes, loading, navigateTo, setSelectedAthleteId }: {
                 </div>
               </div>
               {a.notes && a.is_public && (
-                <div className="mt-2 text-xs text-gray-700 bg-gray-50 rounded-lg p-2">{a.notes}</div>
+                <div className="mt-2 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg p-2 flex items-start gap-1">
+                  <MessageSquare className="w-3 h-3 text-blue-400 mt-0.5 flex-shrink-0" />
+                  <span>{a.notes}</span>
+                </div>
               )}
             </div>
           ))}
@@ -365,25 +380,28 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
                 <h3 className="text-sm font-semibold text-gray-900 truncate">{athlete.name}</h3>
               </div>
               <select value={athlete.status} onChange={(e) => handleStatusChange(athlete.id, e.target.value as Status)}
-                className="px-2 py-1 text-xs font-medium rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500">
+                className={`px-2 py-1 text-xs font-medium rounded-lg border focus:ring-2 focus:ring-indigo-500 ${statusSelectColour[athlete.status]}`}>
                 <option>Available</option>
                 <option>Modified</option>
                 <option>Unavailable</option>
               </select>
             </div>
             {athlete.notes && athlete.is_public && (
-              <div className="mb-2 p-2 bg-gray-50 rounded-lg text-xs text-gray-700 flex items-start gap-1">
-                <MessageSquare className="w-3 h-3 text-gray-500 mt-0.5 flex-shrink-0" />
+              <div className="mb-2 p-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700 flex items-start gap-1">
+                <MessageSquare className="w-3 h-3 text-blue-400 mt-0.5 flex-shrink-0" />
                 <span className="line-clamp-2">{athlete.notes}</span>
               </div>
             )}
+            {athlete.notes && !athlete.is_public && (
+              <div className="mb-2 p-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700 flex items-start gap-1">
+                <MessageSquare className="w-3 h-3 text-blue-400 mt-0.5 flex-shrink-0" />
+                <span className="line-clamp-2">{athlete.notes} <span className="text-blue-400">(private)</span></span>
+              </div>
+            )}
             <button onClick={() => openNotesModal(athlete)}
-              className="w-full flex items-center justify-center gap-1 px-2 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition text-xs font-medium">
+              className={`w-full flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg transition text-xs font-medium ${athlete.notes ? 'bg-blue-100 text-blue-700 hover:bg-blue-200 border border-blue-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
               <MessageSquare className="w-3 h-3" />
               {athlete.notes ? 'Edit Note' : 'Add Note'}
-              {athlete.notes && (
-                <span className={`ml-1 w-1.5 h-1.5 rounded-full ${athlete.is_public ? 'bg-indigo-500' : 'bg-gray-400'}`} />
-              )}
             </button>
           </div>
         ))}
@@ -512,7 +530,7 @@ const AthleteProfilePage = ({ athletes, setAthletes, athleteId, navigateTo, fetc
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1">Status</label>
           <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as Status })}
-            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+            className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-indigo-500 font-medium ${statusSelectColour[form.status]}`}>
             <option>Available</option>
             <option>Modified</option>
             <option>Unavailable</option>
@@ -777,7 +795,7 @@ const TeamSelectionModal = ({ athletes, team1, setTeam1, team2, setTeam2, onBack
                     {a.avatar || getInitials(a.name)}
                   </div>
                   {a.name}
-                  <span className={`ml-auto w-2 h-2 rounded-full ${statusColour[a.status]}`} />
+                  <span className={`ml-auto px-1.5 py-0.5 rounded text-xs font-medium ${statusBadge[a.status]}`}>{a.status}</span>
                 </button>
               ))}
               {availableAthletes.length === 0 && (
