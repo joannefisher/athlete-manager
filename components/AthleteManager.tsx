@@ -117,15 +117,10 @@ const AthleteManager = () => {
         group: t.position_group 
       })));
 
-      // Fetch athletes with positions and injuries
-      const { data: athletesData } = await supabase
-        .from('athletes')
-        .select(`
-          *,
-          athlete_positions(position_number),
-          athlete_injuries(*)
-        `)
-        .order('name');
+      // Fetch athletes
+      const { data: athletesData } = await supabase.from('athletes').select('*').order('name');
+      const { data: allPositions } = await supabase.from('athlete_positions').select('*');
+      const { data: allInjuries } = await supabase.from('athlete_injuries').select('*');
       if (athletesData) setAthletes(athletesData.map((a: any) => ({
         id: a.id,
         name: a.name,
@@ -134,28 +129,23 @@ const AthleteManager = () => {
         isPublic: a.is_public,
         avatar: a.avatar,
         photo: a.photo_url,
-        positionNumbers: a.athlete_positions?.map((p: any) => p.position_number) || [],
-        injuries: a.athlete_injuries?.map((i: any) => ({
+        positionNumbers: (allPositions || []).filter((p: any) => p.athlete_id === a.id).map((p: any) => p.position_number),
+        injuries: (allInjuries || []).filter((i: any) => i.athlete_id === a.id).map((i: any) => ({
           id: i.id,
           bodyPart: i.body_part,
           startDate: i.start_date,
           returnDate: i.return_date,
           notes: i.notes
-        })) || []
+        }))
       })));
 
       // Fetch drill types with positions
-      const { data: drillTypesData } = await supabase
-        .from('drill_types')
-        .select(`
-          *,
-          drill_type_positions(position_number)
-        `)
-        .order('name');
+      const { data: drillTypesData } = await supabase.from('drill_types').select('*').order('name');
+      const { data: allDrillTypePositions } = await supabase.from('drill_type_positions').select('*');
       if (drillTypesData) setDrillTypes(drillTypesData.map((dt: any) => ({
         id: dt.id,
         name: dt.name,
-        positions: dt.drill_type_positions?.map((p: any) => p.position_number) || []
+        positions: (allDrillTypePositions || []).filter((p: any) => p.drill_type_id === dt.id).map((p: any) => p.position_number)
       })));
 
       // Fetch season dates
@@ -212,42 +202,44 @@ const AthleteManager = () => {
   }, []);
 
   const loadSessionPlan = async (date: string) => {
+    // Step 1: get session plan for this date
     const { data: sessionPlan } = await supabase
       .from('session_plans')
-      .select(`
-        *,
-        drills(
-          *,
-          drill_team_assignments(*)
-        )
-      `)
+      .select('*')
       .eq('date', date)
-      .single();
+      .maybeSingle();
 
-    if (sessionPlan?.drills) {
-      setDrills(sessionPlan.drills.map((d: any) => {
-        const team1: Record<number, string> = {}, team2: Record<number, string> = {}, subs1: Record<number, string> = {}, subs2: Record<number, string> = {};
-        d.drill_team_assignments?.forEach((a: any) => {
-          if (a.team_number === 1) {
-            if (a.is_substitute) subs1[a.position_number] = a.athlete_id;
-            else team1[a.position_number] = a.athlete_id;
-          } else {
-            if (a.is_substitute) subs2[a.position_number] = a.athlete_id;
-            else team2[a.position_number] = a.athlete_id;
-          }
-        });
-        return {
-          id: d.id,
-          name: d.name,
-          type: d.drill_type,
-          intensity: d.intensity,
-          notes: d.notes,
-          team1, team2, subs1, subs2
-        };
-      }));
-    } else {
-      setDrills([]);
-    }
+    if (!sessionPlan) { setDrills([]); return; }
+
+    // Step 2: get drills for this session plan
+    const { data: drillsData } = await supabase
+      .from('drills')
+      .select('*')
+      .eq('session_plan_id', sessionPlan.id)
+      .order('sort_order');
+
+    if (!drillsData || drillsData.length === 0) { setDrills([]); return; }
+
+    // Step 3: get all team assignments for these drills
+    const drillIds = drillsData.map((d: any) => d.id);
+    const { data: assignments } = await supabase
+      .from('drill_team_assignments')
+      .select('*')
+      .in('drill_id', drillIds);
+
+    setDrills(drillsData.map((d: any) => {
+      const team1: Record<number, string> = {}, team2: Record<number, string> = {}, subs1: Record<number, string> = {}, subs2: Record<number, string> = {};
+      (assignments || []).filter((a: any) => a.drill_id === d.id).forEach((a: any) => {
+        if (a.team_number === 1) {
+          if (a.is_substitute) subs1[a.position_number] = a.athlete_id;
+          else team1[a.position_number] = a.athlete_id;
+        } else {
+          if (a.is_substitute) subs2[a.position_number] = a.athlete_id;
+          else team2[a.position_number] = a.athlete_id;
+        }
+      });
+      return { id: d.id, name: d.name, type: d.drill_type, intensity: d.intensity, notes: d.notes, team1, team2, subs1, subs2 };
+    }));
   };
 
   useEffect(() => {
@@ -361,7 +353,7 @@ const AthleteManager = () => {
         .from('session_plans')
         .select('id')
         .eq('date', date)
-        .single();
+        .maybeSingle();
 
       if (!sessionPlan) {
         const { data } = await supabase
