@@ -1505,7 +1505,7 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
   const handleSave = async () => { 
     await onSave({...athlete, name, positionNumbers, photo, avatar: genAvatar(name), injuries}); 
     setShowSaveSuccess(true); 
-    setTimeout(() => setShowSaveSuccess(false), 2000); 
+    setTimeout(() => { setShowSaveSuccess(false); navigateTo('availability'); }, 1000);
   };
 
   const uniqueNames: string[] = Array.from(new Set(teamStructure.map((p: any) => p.name)));
