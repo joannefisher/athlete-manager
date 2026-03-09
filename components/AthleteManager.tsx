@@ -618,7 +618,7 @@ const AthleteManager = () => {
         </div>
       )}
       {currentPage === 'home' && <HomePage athletes={athletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} teamStructure={teamStructure} />}
-      {currentPage === 'availability' && <AvailabilityPage athletes={athletes} setAthletes={setAthletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} selectedDate={selectedDate} setSelectedDate={setSelectedDate} availabilityRecords={availabilityRecords} teamStructure={teamStructure} onSave={saveAvailability} saving={saving} />}
+      {currentPage === 'availability' && <AvailabilityPage athletes={athletes} setAthletes={setAthletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} selectedDate={selectedDate} setSelectedDate={setSelectedDate} availabilityRecords={availabilityRecords} teamStructure={teamStructure} onSave={saveAvailability} saving={saving} fetchAllData={fetchAllData} />}
       {currentPage === 'session-plan' && <SessionPlanPage drills={drills} setDrills={setDrills} navigateTo={navigateTo} athletes={athletes} drillTypes={drillTypes} teamStructure={teamStructure} defaultTeam={defaultTeam} onSaveDefaultTeam={saveDefaultTeam} selectedDate={selectedDate} onDateChange={handleDateChange} onSaveSessionPlan={saveSessionPlan} saving={saving} />}
       {currentPage === 'add-drill' && <AddDrillPage drills={drills} setDrills={setDrills} navigateTo={navigateTo} drillTypes={drillTypes} defaultTeam={defaultTeam} athletes={athletes} teamStructure={teamStructure} />}
       {currentPage === 'athlete-profile' && <AthleteProfilePage athletes={athletes} athleteId={selectedAthleteId} navigateTo={navigateTo} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} onSave={saveAthlete} onDelete={deleteAthlete} saving={saving} />}
@@ -699,7 +699,7 @@ const HomePage = ({ athletes, navigateTo, setSelectedAthleteId, teamStructure }:
   );
 };
 
-const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthleteId, selectedDate, setSelectedDate, availabilityRecords, teamStructure, onSave, saving }: any) => {
+const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthleteId, selectedDate, setSelectedDate, availabilityRecords, teamStructure, onSave, saving, fetchAllData }: any) => {
   const typedAthletes: Athlete[] = athletes;
   const typedTeamStructure: TeamPosition[] = teamStructure;
   const [searchTerm, setSearchTerm] = useState('');
@@ -725,7 +725,7 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
             <input type="text" placeholder="Search..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-9 pr-3 py-2 text-sm border rounded-lg" />
           </div>
-          <button onClick={() => { const id = String(Date.now()); setAthletes([...typedAthletes, { id, name: '', status: 'Available', notes: '', isPublic: false, photo: '', positionNumbers: [], avatar: '', injuries: [] }]); setSelectedAthleteId(id); navigateTo('athlete-profile'); }} className="px-3 py-2 bg-indigo-600 text-white rounded-lg"><Plus className="w-4 h-4" /></button>
+          <button onClick={async () => { const { data, error } = await supabase.from('athletes').insert({ name: 'New Athlete', status: 'Available', notes: '', is_public: false, avatar: 'NA', photo_url: '' }).select().single(); if (!error && data) { await fetchAllData(); setSelectedAthleteId(data.id); navigateTo('athlete-profile'); } }} className="px-3 py-2 bg-indigo-600 text-white rounded-lg"><Plus className="w-4 h-4" /></button>
         </div>
         <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="w-full px-3 py-2 text-sm border rounded-lg" />
       </div>
