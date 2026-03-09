@@ -453,7 +453,9 @@ const AthleteProfilePage = ({ athletes, setAthletes, athleteId, navigateTo, fetc
   const handleSave = async () => {
     if (!form.name.trim()) { setError('Name is required.'); return; }
     setSaving(true);
-    const payload = { ...form, name: form.name.trim(), avatar: form.avatar || getInitials(form.name) };
+    // Strip any stale local id — Supabase generates the UUID automatically on insert
+    const { id: _id, ...formWithoutId } = form as any;
+    const payload = { ...formWithoutId, name: form.name.trim(), avatar: form.avatar || getInitials(form.name) };
 
     if (athleteId) {
       const { error } = await supabase.from('athletes').update(payload).eq('id', athleteId);
