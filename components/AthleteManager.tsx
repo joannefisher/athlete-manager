@@ -3,7 +3,7 @@
 import React, { useEffect } from 'react';
 import { useState } from 'react';
 
-const SetupPage = ({ onSaveTeamStructure, onDeleteTeamStructure, onSaveDrillType, onDeleteDrillType, onSaveSeasonDate, onDeleteSeasonDate }) => {
+const SetupPage = ({ onSaveTeamStructure = async () => {}, onDeleteTeamStructure = async () => {}, onSaveDrillType = async () => {}, onDeleteDrillType = async () => {}, onSaveSeasonDate = async () => {}, onDeleteSeasonDate = async () => {} }: { onSaveTeamStructure?: (data: any) => Promise<void>; onDeleteTeamStructure?: (id: any) => Promise<void>; onSaveDrillType?: (data: any) => Promise<void>; onDeleteDrillType?: (id: any) => Promise<void>; onSaveSeasonDate?: (data: any) => Promise<void>; onDeleteSeasonDate?: (id: any) => Promise<void>; } = {}) => {
     const [localTeamStructure, setLocalTeamStructure] = useState([]);
     const [localDrillTypes, setLocalDrillTypes] = useState([]);
     const [localSeasonDates, setLocalSeasonDates] = useState([]);
