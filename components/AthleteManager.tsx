@@ -657,8 +657,49 @@ const InjuryDisplay = ({ athlete }: { athlete: Athlete }) => {
 const HomePage = ({ athletes, navigateTo, setSelectedAthleteId, teamStructure }: { athletes: Athlete[], navigateTo: (page: string) => void, setSelectedAthleteId: (id: string | null) => void, teamStructure: TeamPosition[] }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [availableOnly, setAvailableOnly] = useState(false);
+  const [selectedGroups, setSelectedGroups] = useState<string[]>(['Forward', 'Back']);
+  const [selectedPositionNames, setSelectedPositionNames] = useState<string[]>([]);
+  const [showFilters, setShowFilters] = useState(false);
+
   const getStatusColor = (s: string) => s === 'Available' ? 'bg-green-500' : s === 'Modified' ? 'bg-amber-500' : 'bg-red-500';
-  const filtered = athletes.filter(a => a.name.toLowerCase().includes(searchTerm.toLowerCase()) && (!availableOnly || a.status !== 'Unavailable'));
+
+  const uniquePositionNames = useMemo(() => {
+    const names = new Map();
+    athletes.forEach((a: Athlete) => {
+      (a.positionNumbers || []).forEach((posNum: number) => {
+        const pos = teamStructure.find((p: TeamPosition) => p.number === posNum);
+        if (pos && !names.has(pos.name)) names.set(pos.name, { name: pos.name, numbers: [], group: pos.group });
+        if (pos) names.get(pos.name).numbers.push(posNum);
+      });
+    });
+    return Array.from(names.values());
+  }, [athletes, teamStructure]);
+
+  const toggleGroup = (group: string) => {
+    const groupPositionNames = uniquePositionNames.filter(p => p.group === group).map(p => p.name);
+    if (selectedGroups.includes(group)) {
+      setSelectedGroups(prev => prev.filter(g => g !== group));
+      setSelectedPositionNames(prev => prev.filter(n => !groupPositionNames.includes(n)));
+    } else {
+      setSelectedGroups(prev => [...prev, group]);
+    }
+  };
+
+  const togglePositionName = (posName: string) => {
+    setSelectedPositionNames(prev => prev.includes(posName) ? prev.filter(n => n !== posName) : [...prev, posName]);
+  };
+
+  const filtered = athletes.filter(a => {
+    if (!a.name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+    if (availableOnly && a.status === 'Unavailable') return false;
+    if (selectedGroups.length < 2 || selectedPositionNames.length > 0) {
+      const posNames = (a.positionNumbers || []).map((n: number) => teamStructure.find(p => p.number === n)?.name).filter(Boolean);
+      const groups = (a.positionNumbers || []).map((n: number) => teamStructure.find(p => p.number === n)?.group).filter(Boolean);
+      if (selectedPositionNames.length > 0 && !posNames.some(n => selectedPositionNames.includes(n as string))) return false;
+      if (selectedGroups.length < 2 && !groups.some(g => selectedGroups.includes(g as string))) return false;
+    }
+    return true;
+  });
 
   return (
     <div className="max-w-md mx-auto p-4">
@@ -668,10 +709,37 @@ const HomePage = ({ athletes, navigateTo, setSelectedAthleteId, teamStructure }:
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
           <input type="text" placeholder="Search athletes..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-9 pr-3 py-2 text-sm border rounded-lg" />
         </div>
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" checked={availableOnly} onChange={e => setAvailableOnly(e.target.checked)} className="w-4 h-4 rounded" />
-          <span className="text-sm">Available Only</span>
-        </label>
+        <div className="flex items-center justify-between">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={availableOnly} onChange={e => setAvailableOnly(e.target.checked)} className="w-4 h-4 rounded" />
+            <span className="text-sm">Available Only</span>
+          </label>
+          <button onClick={() => setShowFilters(!showFilters)} className="flex items-center gap-1 text-xs text-indigo-600 font-medium">
+            {showFilters ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />} Filters
+          </button>
+        </div>
+        {showFilters && (
+          <div className="mt-3 space-y-3 pt-3 border-t border-gray-100">
+            <div>
+              <p className="text-xs text-gray-500 mb-2">Position Group</p>
+              <div className="flex gap-2">
+                {['Forward', 'Back'].map(group => (
+                  <button key={group} onClick={() => toggleGroup(group)} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedGroups.includes(group) ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600'}`}>{group}s</button>
+                ))}
+              </div>
+            </div>
+            {uniquePositionNames.length > 0 && (
+              <div>
+                <p className="text-xs text-gray-500 mb-2">Position</p>
+                <div className="flex flex-wrap gap-1">
+                  {uniquePositionNames.map(pos => (
+                    <button key={pos.name} onClick={() => togglePositionName(pos.name)} className={`px-2 py-1 rounded text-xs font-medium ${selectedPositionNames.includes(pos.name) ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600'}`}>{pos.name}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
       <div className="space-y-2">
         {filtered.map(a => (
@@ -733,8 +801,12 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
                 <h3 className="text-sm font-semibold truncate">{athlete.name}</h3>
                 <p className="text-xs text-gray-600 truncate">{getPositionDisplay(athlete.positionNumbers, typedTeamStructure)}</p>
               </div>
-              <select value={athlete.status} onChange={e => setAthletes(typedAthletes.map(a => a.id === athlete.id ? { ...a, status: e.target.value } : a))} className="px-2 py-1 text-xs rounded-lg border">
-                <option>Available</option><option>Modified</option><option>Unavailable</option>
+              <select value={athlete.status} onChange={async e => {
+                  const newStatus = e.target.value;
+                  setAthletes(typedAthletes.map(a => a.id === athlete.id ? { ...a, status: newStatus } : a));
+                  await supabase.from('athletes').update({ status: newStatus }).eq('id', athlete.id);
+                }} className={`px-2 py-1 text-xs rounded-lg border font-medium ${athlete.status === 'Available' ? 'bg-green-100 text-green-700 border-green-300' : athlete.status === 'Modified' ? 'bg-amber-100 text-amber-700 border-amber-300' : 'bg-red-100 text-red-700 border-red-300'}`}>
+                <option value="Available">Available</option><option value="Modified">Modified</option><option value="Unavailable">Unavailable</option>
               </select>
             </div>
             {athlete.notes && athlete.isPublic && <div className="mb-2 p-2 bg-gray-50 rounded-lg text-xs">{athlete.notes}</div>}
