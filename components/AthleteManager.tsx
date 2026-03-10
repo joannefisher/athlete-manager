@@ -806,13 +806,15 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
                   setAthletes(typedAthletes.map(a => a.id === athlete.id ? { ...a, status: newStatus } : a));
                   await supabase.from('athletes').update({ status: newStatus }).eq('id', athlete.id);
                 }} className={`px-2 py-1 text-xs rounded-lg border font-medium ${athlete.status === 'Available' ? 'bg-green-100 text-green-700 border-green-300' : athlete.status === 'Modified' ? 'bg-amber-100 text-amber-700 border-amber-300' : 'bg-red-100 text-red-700 border-red-300'}`}>
-                <option value="Available">Available</option><option value="Modified">Modified</option><option value="Unavailable">Unavailable</option>
+                <option value="Available" className="bg-white text-gray-900">Available</option>
+                <option value="Modified" className="bg-white text-gray-900">Modified</option>
+                <option value="Unavailable" className="bg-white text-gray-900">Unavailable</option>
               </select>
             </div>
-            {athlete.notes && athlete.isPublic && <div className="mb-2 p-2 bg-gray-50 rounded-lg text-xs">{athlete.notes}</div>}
+            {athlete.notes && athlete.isPublic && <div className="mb-2 p-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700 flex items-start gap-1"><MessageSquare className="w-3 h-3 mt-0.5 flex-shrink-0 text-blue-400" /><span>{athlete.notes}</span></div>}
             {athlete.status === 'Unavailable' && <InjuryDisplay athlete={athlete} />}
-            <button onClick={() => { setSelectedAthlete(athlete); setTempNotes(athlete.notes); setTempIsPublic(athlete.isPublic); setShowNotesModal(true); }} className="w-full flex items-center justify-center gap-1 px-2 py-1.5 bg-gray-100 rounded-lg text-xs mt-2">
-              <MessageSquare className="w-3 h-3" />{athlete.notes ? 'Edit Note' : 'Add Note'}
+            <button onClick={() => { setSelectedAthlete(athlete); setTempNotes(athlete.notes); setTempIsPublic(athlete.isPublic); setShowNotesModal(true); }} className={`w-full flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-xs mt-2 font-medium ${athlete.notes ? 'bg-blue-100 text-blue-700 border border-blue-200' : 'bg-gray-100 text-gray-600'}`}>
+              <MessageSquare className="w-3 h-3" />{athlete.notes ? (athlete.isPublic ? 'Edit Public Note' : 'Edit Private Note') : 'Add Note'}
             </button>
           </div>
         ))}
@@ -1574,6 +1576,7 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
   if (!athlete) return <div className="max-w-md mx-auto p-4"><div className="bg-white rounded-xl shadow-sm border p-6 text-center"><p>Athlete not found</p><button onClick={() => navigateTo('availability')} className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm">Back</button></div></div>;
 
   const genAvatar = (n: string) => { if (!n) return ''; const p = n.trim().split(' '); return p.length >= 2 ? p[0][0].toUpperCase() + p[p.length-1][0].toUpperCase() : n.substring(0,2).toUpperCase(); };
+  const isNew = athlete?.name === 'New Athlete' && !athlete?.positionNumbers?.length;
   const handleSave = async () => { 
     await onSave({...athlete, name, positionNumbers, photo, avatar: genAvatar(name), injuries}); 
     setShowSaveSuccess(true); 
@@ -1635,7 +1638,6 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
             )}
           </div>
           {positionNumbers.length > 0 && <p className="text-xs text-gray-500">Group: {getPositionGroup(positionNumbers, teamStructure)}</p>}
-          <button onClick={async () => { if (window.confirm('Delete?')) { await onDelete(athleteId); navigateTo('availability'); }}} className="w-full px-4 py-2 bg-red-50 text-red-600 rounded-lg text-sm font-medium">Delete Athlete</button>
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border p-4">
@@ -1695,9 +1697,14 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
         <AvailabilityChart athleteId={athleteId} availabilityRecords={availabilityRecords} seasonDates={seasonDates} />
       </div>
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4">
-        <div className="max-w-md mx-auto flex gap-2">
-          <button onClick={handleSave} className="flex-1 px-4 py-3 bg-gray-900 text-white rounded-lg font-medium text-sm">Save</button>
-          <button onClick={() => navigateTo('availability')} className="flex-1 px-4 py-3 bg-gray-100 rounded-lg text-sm">Cancel</button>
+        <div className="max-w-md mx-auto space-y-2">
+          <div className="flex gap-2">
+            <button onClick={handleSave} className="flex-1 px-4 py-3 bg-gray-900 text-white rounded-lg font-medium text-sm">Save</button>
+            <button onClick={() => navigateTo('availability')} className="px-4 py-3 bg-gray-100 rounded-lg text-sm">Cancel</button>
+          </div>
+          {!isNew && (
+            <button onClick={async () => { if (window.confirm('Delete this athlete?')) { await onDelete(athleteId); navigateTo('availability'); }}} className="w-full px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-sm font-medium">Delete Athlete</button>
+          )}
         </div>
       </div>
     </div>
