@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Search, Plus, User, Menu, MessageSquare, X, ChevronDown, ChevronUp, Users, Calendar, Zap, Target, ArrowLeft, Camera, Settings, Trash2, Edit2, Check, BarChart3, AlertCircle, Loader2 } from 'lucide-react';
+import { Search, Plus, User, Menu, MessageSquare, X, ChevronDown, ChevronUp, Users, Calendar, Zap, Target, ArrowLeft, Camera, Settings, Trash2, Edit2, Check, BarChart3, AlertCircle, Loader2, SlidersHorizontal } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 const BODY_PARTS = ['Head', 'Neck', 'Shoulder', 'Arm', 'Elbow', 'Wrist', 'Hand', 'Chest', 'Back', 'Hip', 'Groin', 'Thigh', 'Hamstring', 'Knee', 'Calf', 'Ankle', 'Foot', 'Other'];
@@ -582,10 +582,10 @@ const AthleteManager = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
         <div className="text-center">
-          <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mx-auto mb-2" />
-          <p className="text-gray-600">Loading...</p>
+          <Loader2 className="w-6 h-6 animate-spin text-blue-400 mx-auto mb-3" />
+          <p className="text-slate-400 text-sm">Loading...</p>
         </div>
       </div>
     );
@@ -604,32 +604,47 @@ const AthleteManager = () => {
   const allowedPages = ROLE_ACCESS[role];
   const effectivePage = allowedPages.includes(currentPage) ? currentPage : allowedPages[0];
 
-  const RoleDropdown = () => (
-    <select value={role} onChange={e => { const r = e.target.value as Role; setRole(r); setCurrentPage(ROLE_ACCESS[r][0]); }}
-      className="text-xs border border-gray-300 rounded-lg px-2 py-1.5 bg-white text-gray-700 font-medium focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-      {(['Admin', 'S&C', 'Physio', 'Coach'] as Role[]).map(r => <option key={r} value={r}>{r}</option>)}
-    </select>
+  const RoleDropdown = ({ dark = false }: { dark?: boolean }) => (
+    <div className="relative">
+      <select value={role} onChange={e => { const r = e.target.value as Role; setRole(r); setCurrentPage(ROLE_ACCESS[r][0]); }}
+        className={dark
+          ? "text-xs rounded px-2 py-1.5 pr-6 appearance-none cursor-pointer outline-none w-full bg-white/[0.07] border border-white/10 text-white/65"
+          : "text-xs border border-slate-200 rounded px-2 py-1.5 bg-white text-slate-700 font-medium focus:ring-2 focus:ring-blue-500"}>
+        {(['Admin', 'S&C', 'Physio', 'Coach'] as Role[]).map(r => <option key={r} value={r} className="bg-slate-800 text-white">{r}</option>)}
+      </select>
+      {dark && <ChevronDown className="w-3 h-3 text-white/30 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />}
+    </div>
   );
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
+    <div className="min-h-screen bg-slate-50 flex">
 
       {/* Desktop sidebar — visible md+ */}
-      <aside className="hidden md:flex flex-col w-52 shrink-0 bg-white border-r border-gray-200 sticky top-0 h-screen z-10">
-        <div className="px-5 py-4 border-b border-gray-200">
-          <span className="text-sm font-bold text-gray-900 tracking-tight">Athlete Manager</span>
+      <aside className="hidden md:flex flex-col w-52 shrink-0 bg-slate-900 sticky top-0 h-screen z-10">
+        {/* Brand */}
+        <div className="px-4 py-5 border-b border-white/[0.06]">
+          <div className="flex items-center gap-2.5">
+            <div className="w-6 h-6 rounded bg-blue-600 flex items-center justify-center shrink-0">
+              <Target className="w-3.5 h-3.5 text-white" strokeWidth={2.5} />
+            </div>
+            <span className="text-[13px] font-semibold text-slate-100 tracking-tight">Athlete Manager</span>
+          </div>
         </div>
-        <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto">
+        {/* Nav */}
+        <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto pt-3">
+          <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] px-2.5 pb-2">Menu</p>
           {navItems.map(({ page, Icon, label }) => (
             <button key={page} onClick={() => navigateTo(page)}
-              className={`w-full text-left px-3 py-2.5 rounded-lg flex items-center gap-2.5 text-sm transition-colors ${effectivePage === page ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-100'}`}>
-              <Icon className="w-4 h-4 shrink-0" />{label}
+              className={`w-full text-left px-2.5 py-2 rounded flex items-center gap-2.5 text-[13px] transition-colors relative ${effectivePage === page ? 'bg-white/[0.08] text-slate-100 font-medium' : 'text-white/40 hover:bg-white/[0.06] hover:text-white/70'}`}>
+              {effectivePage === page && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-blue-500 rounded-r" />}
+              <Icon className="w-3.5 h-3.5 shrink-0" strokeWidth={effectivePage === page ? 2 : 1.8} />{label}
             </button>
           ))}
         </nav>
-        <div className="p-3 border-t border-gray-200">
-          <p className="text-xs text-gray-400 mb-1.5">Viewing as</p>
-          <RoleDropdown />
+        {/* Role */}
+        <div className="p-3 border-t border-white/[0.06]">
+          <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] mb-2">Viewing as</p>
+          <RoleDropdown dark={true} />
         </div>
       </aside>
 
@@ -637,30 +652,45 @@ const AthleteManager = () => {
       <div className="flex-1 flex flex-col min-w-0 min-h-screen">
 
         {/* Mobile top bar — hidden md+ */}
-        <header className="md:hidden bg-white shadow-sm sticky top-0 z-10 border-b px-4 py-3">
+        <header className="md:hidden bg-white sticky top-0 z-10 border-b border-slate-200 px-4 py-3">
           <div className="flex items-center justify-between max-w-md mx-auto">
-            <button onClick={() => setShowMenu(!showMenu)} className="p-2 hover:bg-gray-100 rounded-lg"><Menu className="w-5 h-5" /></button>
-            <h1 className="text-lg font-semibold">{getPageTitle()}</h1>
-            <RoleDropdown />
+            <button onClick={() => setShowMenu(!showMenu)} className="p-1.5 hover:bg-slate-100 rounded-lg"><Menu className="w-5 h-5 text-slate-600" /></button>
+            <h1 className="text-[15px] font-semibold text-slate-900">{getPageTitle()}</h1>
+            <RoleDropdown dark={false} />
           </div>
         </header>
 
         {/* Desktop page header — visible md+ */}
-        <div className="hidden md:flex items-center justify-between bg-white border-b border-gray-200 px-8 py-4">
-          <h2 className="text-xl font-semibold text-gray-900">{getPageTitle()}</h2>
+        <div className="hidden md:flex items-center justify-between bg-white border-b border-slate-200 px-6 py-3.5">
+          <div>
+            <h2 className="text-[15px] font-semibold text-slate-900 leading-none">{getPageTitle()}</h2>
+            <p className="text-[11px] text-slate-400 mt-1 font-light">{new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
+          </div>
         </div>
 
         {/* Mobile slide-out menu */}
         {showMenu && (
           <div className="fixed inset-0 bg-black/20 z-20 md:hidden" onClick={() => setShowMenu(false)}>
-            <div className="bg-white w-64 h-full shadow-xl flex flex-col" onClick={e => e.stopPropagation()}>
-              <div className="p-4 border-b"><h2 className="text-lg font-semibold">Menu</h2></div>
+            <div className="bg-slate-900 w-60 h-full shadow-xl flex flex-col" onClick={e => e.stopPropagation()}>
+              <div className="px-4 py-5 border-b border-white/[0.06]">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-6 h-6 rounded bg-blue-600 flex items-center justify-center shrink-0">
+                    <Target className="w-3.5 h-3.5 text-white" strokeWidth={2.5} />
+                  </div>
+                  <span className="text-[13px] font-semibold text-slate-100">Athlete Manager</span>
+                </div>
+              </div>
               <div className="p-2 flex-1">
                 {navItems.map(({ page, Icon, label }) => (
-                  <button key={page} onClick={() => navigateTo(page)} className={`w-full text-left px-4 py-3 rounded-lg flex items-center gap-3 ${effectivePage === page ? 'bg-indigo-50 text-indigo-700 font-medium' : 'hover:bg-gray-100'}`}>
-                    <Icon className="w-5 h-5" />{label}
+                  <button key={page} onClick={() => navigateTo(page)}
+                    className={`w-full text-left px-2.5 py-2.5 rounded flex items-center gap-2.5 text-[13px] ${effectivePage === page ? 'bg-white/[0.08] text-slate-100 font-medium' : 'text-white/40 hover:bg-white/[0.06]'}`}>
+                    <Icon className="w-3.5 h-3.5 shrink-0" />{label}
                   </button>
                 ))}
+              </div>
+              <div className="p-3 border-t border-white/[0.06]">
+                <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] mb-2">Viewing as</p>
+                <RoleDropdown dark={true} />
               </div>
             </div>
           </div>
@@ -702,12 +732,12 @@ const InjuryDisplay = ({ athlete }: { athlete: Athlete }) => {
   const activeInjuries = getActiveInjuries(athlete);
   if (activeInjuries.length === 0) return null;
   return (
-    <div className="mt-2 p-2 bg-red-50 rounded-lg border border-red-100">
+    <div className="mt-2 p-2 bg-red-50 rounded border border-red-100">
       <div className="flex items-start gap-1.5">
         <AlertCircle className="w-3 h-3 text-red-500 mt-0.5 flex-shrink-0" />
-        <div className="text-xs text-red-700">
+        <div className="text-xs text-red-700 space-y-0.5">
           {activeInjuries.map(inj => (
-            <div key={inj.id}>{inj.bodyPart}{inj.notes ? `: ${inj.notes}` : ''}{inj.returnDate ? ` (ETR: ${new Date(inj.returnDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})` : ''}</div>
+            <div key={inj.id}>{inj.bodyPart}{inj.notes ? ` — ${inj.notes}` : ''}{inj.returnDate ? <span className="text-slate-400 ml-1">ETR {new Date(inj.returnDate).toLocaleDateString('en-GB', { month: 'short', day: 'numeric' })}</span> : <span className="text-red-600 font-medium ml-1">Season</span>}</div>
           ))}
         </div>
       </div>
@@ -721,8 +751,6 @@ const HomePage = ({ athletes, navigateTo, setSelectedAthleteId, teamStructure }:
   const [selectedGroups, setSelectedGroups] = useState<string[]>(['Forward', 'Back']);
   const [selectedPositionNames, setSelectedPositionNames] = useState<string[]>([]);
   const [showFilters, setShowFilters] = useState(false);
-
-  const getStatusColor = (s: string) => s === 'Available' ? 'bg-green-500' : s === 'Modified' ? 'bg-amber-500' : 'bg-red-500';
 
   const uniquePositionNames = useMemo(() => {
     const names = new Map();
@@ -762,56 +790,115 @@ const HomePage = ({ athletes, navigateTo, setSelectedAthleteId, teamStructure }:
     return true;
   });
 
+  const getStatusDotColor = (s: string) => s === 'Available' ? 'bg-green-500' : s === 'Modified' ? 'bg-amber-500' : 'bg-red-500';
+
+  const totals = {
+    available: athletes.filter(a => a.status === 'Available').length,
+    modified: athletes.filter(a => a.status === 'Modified').length,
+    unavailable: athletes.filter(a => a.status === 'Unavailable').length,
+  };
+
   return (
     <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6">
-      <div className="bg-white rounded-xl shadow-sm border p-4 mb-4">
-        <p className="text-sm text-gray-600 mb-3">{new Date().toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
-        <div className="relative mb-3">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-          <input type="text" placeholder="Search athletes..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-9 pr-3 py-2 text-sm border rounded-lg" />
-        </div>
-        <div className="flex items-center justify-between">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={availableOnly} onChange={e => setAvailableOnly(e.target.checked)} className="w-4 h-4 rounded" />
-            <span className="text-sm">Available Only</span>
-          </label>
-          <button onClick={() => setShowFilters(!showFilters)} className="flex items-center gap-1 text-xs text-indigo-600 font-medium">
-            {showFilters ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />} Filters
+
+      {/* KPI strip */}
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        {[
+          { label: 'Available', value: totals.available, bar: 'bg-green-500' },
+          { label: 'Modified', value: totals.modified, bar: 'bg-amber-500' },
+          { label: 'Unavailable', value: totals.unavailable, bar: 'bg-red-500' },
+        ].map(k => (
+          <div key={k.label} className="bg-white rounded-lg border border-slate-200 px-4 py-3 flex items-center justify-between">
+            <div>
+              <div className="text-2xl font-semibold text-slate-900 leading-none tracking-tight">{k.value}</div>
+              <div className="text-[11px] text-slate-400 mt-1.5">{k.label}</div>
+            </div>
+            <div className={`w-1 h-7 rounded-sm ${k.bar}`} />
+          </div>
+        ))}
+      </div>
+
+      {/* Toolbar */}
+      <div className="bg-white rounded-lg border border-slate-200 mb-4 overflow-hidden">
+        <div className="flex gap-2 p-2.5">
+          <div className="flex-1 relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 w-3.5 h-3.5" />
+            <input type="text" placeholder="Search athletes…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+              className="w-full pl-8 pr-3 h-8 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          </div>
+          <button onClick={() => setShowFilters(!showFilters)}
+            className="flex items-center gap-1.5 h-8 px-3 border border-slate-200 rounded text-[12px] text-slate-600 bg-white hover:bg-slate-50 transition-colors">
+            <SlidersHorizontal className="w-3 h-3" />Filter
+            {showFilters ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
           </button>
         </div>
         {showFilters && (
-          <div className="mt-3 space-y-3 pt-3 border-t border-gray-100">
-            <div>
-              <p className="text-xs text-gray-500 mb-2">Position Group</p>
-              <div className="flex gap-2">
+          <div className="px-3 pb-3 border-t border-slate-100 pt-2.5 flex flex-wrap gap-4 items-center">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-medium text-slate-500">Group</span>
+              <div className="flex gap-1">
                 {['Forward', 'Back'].map(group => (
-                  <button key={group} onClick={() => toggleGroup(group)} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedGroups.includes(group) ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600'}`}>{group}s</button>
+                  <button key={group} onClick={() => toggleGroup(group)}
+                    className={`h-6 px-2.5 rounded text-[11px] font-medium border transition-colors ${selectedGroups.includes(group) ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'}`}>
+                    {group}s
+                  </button>
                 ))}
               </div>
             </div>
             {uniquePositionNames.length > 0 && (
-              <div>
-                <p className="text-xs text-gray-500 mb-2">Position</p>
+              <div className="flex items-start gap-2">
+                <span className="text-[11px] font-medium text-slate-500 mt-0.5">Position</span>
                 <div className="flex flex-wrap gap-1">
                   {uniquePositionNames.map(pos => (
-                    <button key={pos.name} onClick={() => togglePositionName(pos.name)} className={`px-2 py-1 rounded text-xs font-medium ${selectedPositionNames.includes(pos.name) ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600'}`}>{pos.name}</button>
+                    <button key={pos.name} onClick={() => togglePositionName(pos.name)}
+                      className={`h-6 px-2 rounded text-[11px] border transition-colors ${selectedPositionNames.includes(pos.name) ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'}`}>
+                      {pos.name}
+                    </button>
                   ))}
                 </div>
               </div>
             )}
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input type="checkbox" checked={availableOnly} onChange={e => setAvailableOnly(e.target.checked)} className="w-3.5 h-3.5 accent-blue-600" />
+              <span className="text-[11px] font-medium text-slate-500">Available only</span>
+            </label>
           </div>
         )}
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-4">
+
+      {/* Count */}
+      <p className="text-[11px] text-slate-400 mb-3">{filtered.length} of {athletes.length} athletes</p>
+
+      {/* Athlete cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
         {filtered.map(a => (
-          <div key={a.id} className="bg-white rounded-xl shadow-sm border p-3 cursor-pointer hover:shadow-md" onClick={() => { setSelectedAthleteId(a.id); navigateTo('athlete-profile'); }}>
+          <div key={a.id} className="bg-white rounded-lg border border-slate-200 p-3.5 cursor-pointer hover:border-slate-300 hover:shadow-sm transition-all"
+            onClick={() => { setSelectedAthleteId(a.id); navigateTo('athlete-profile'); }}>
             <div className="flex items-center gap-3">
-              <div className={`w-2.5 h-2.5 rounded-full ${getStatusColor(a.status)}`}></div>
-              {a.photo ? <img src={a.photo} alt="" className="w-10 h-10 rounded-full object-cover" /> : <div className="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center text-xs font-semibold">{a.avatar}</div>}
-              <div className="flex-1"><h3 className="text-sm font-semibold">{a.name}</h3><p className="text-xs text-gray-600">{getPositionDisplay(a.positionNumbers, teamStructure)}</p></div>
-              <span className="text-xs text-gray-400">{getPositionGroup(a.positionNumbers, teamStructure)}</span>
+              {a.photo
+                ? <img src={a.photo} alt="" className="w-8 h-8 rounded-md object-cover flex-shrink-0" />
+                : <div className="w-8 h-8 bg-slate-100 rounded-md flex items-center justify-center text-[10px] font-semibold text-slate-500 flex-shrink-0">{a.avatar}</div>}
+              <div className="flex-1 min-w-0">
+                <h3 className="text-[13px] font-medium text-slate-900 leading-none">{a.name}</h3>
+                <p className="text-[11px] text-slate-400 mt-1">{getPositionDisplay(a.positionNumbers, teamStructure)}</p>
+              </div>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <div className={`w-1.5 h-1.5 rounded-full ${getStatusDotColor(a.status)}`} />
+                <span className="text-[11px] text-slate-500">{a.status}</span>
+              </div>
             </div>
-            {a.notes && a.isPublic && <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700 flex items-start gap-1"><MessageSquare className="w-3 h-3 mt-0.5 flex-shrink-0 text-blue-400" /><span>{a.notes}</span></div>}
+            {/* Group tag */}
+            {getPositionGroup(a.positionNumbers, teamStructure) && (
+              <div className="mt-2.5">
+                <span className="text-[10px] font-medium text-slate-400 bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5">{getPositionGroup(a.positionNumbers, teamStructure)}</span>
+              </div>
+            )}
+            {a.notes && a.isPublic && (
+              <div className="mt-2 p-2 bg-blue-50 border border-blue-100 rounded flex items-start gap-1.5">
+                <MessageSquare className="w-3 h-3 mt-0.5 flex-shrink-0 text-blue-400" />
+                <span className="text-[11px] text-blue-700">{a.notes}</span>
+              </div>
+            )}
             <InjuryDisplay athlete={a} />
           </div>
         ))}
@@ -840,62 +927,97 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
 
   return (
     <div className="max-w-md md:max-w-3xl mx-auto">
-      <div className="bg-white shadow-sm border-b px-4 py-3 mb-4">
-        <div className="flex gap-2 mb-3">
+      {/* Toolbar */}
+      <div className="bg-white border-b border-slate-200 px-4 py-2.5 mb-4">
+        <div className="flex gap-2 mb-2.5">
           <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-            <input type="text" placeholder="Search..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-9 pr-3 py-2 text-sm border rounded-lg" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 w-3.5 h-3.5" />
+            <input type="text" placeholder="Search athletes…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+              className="w-full pl-8 pr-3 h-8 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500" />
           </div>
-          <button onClick={async () => { const { data, error } = await supabase.from('athletes').insert({ name: 'New Athlete', status: 'Available', notes: '', is_public: false, avatar: 'NA', photo_url: '' }).select().single(); if (!error && data) { await fetchAllData(); setSelectedAthleteId(data.id); navigateTo('athlete-profile'); } }} className="px-3 py-2 bg-indigo-600 text-white rounded-lg"><Plus className="w-4 h-4" /></button>
+          <button onClick={async () => { const { data, error } = await supabase.from('athletes').insert({ name: 'New Athlete', status: 'Available', notes: '', is_public: false, avatar: 'NA', photo_url: '' }).select().single(); if (!error && data) { await fetchAllData(); setSelectedAthleteId(data.id); navigateTo('athlete-profile'); } }}
+            className="h-8 px-3 bg-slate-900 text-white rounded text-[12px] font-medium flex items-center gap-1.5 hover:bg-slate-700 transition-colors">
+            <Plus className="w-3.5 h-3.5" />Add
+          </button>
         </div>
-        <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="w-full px-3 py-2 text-sm border rounded-lg" />
+        <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
+          className="w-full h-8 px-3 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500" />
       </div>
-      {showSaveSuccess && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-sm">✓ Saved!</div>}
-      <div className="px-4 md:px-6 pb-20">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-        {filteredAthletes.map(athlete => (
-          <div key={athlete.id} className="bg-white rounded-xl shadow-sm border p-3">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="cursor-pointer" onClick={() => { setSelectedAthleteId(athlete.id); navigateTo('athlete-profile'); }}>
-                {athlete.photo ? <img src={athlete.photo} alt="" className="w-10 h-10 rounded-full object-cover" /> : <div className="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center text-xs font-semibold">{athlete.avatar}</div>}
+
+      {showSaveSuccess && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-[13px] font-medium">✓ Saved</div>}
+
+      <div className="px-4 md:px-6 pb-24">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+          {filteredAthletes.map(athlete => (
+            <div key={athlete.id} className="bg-white rounded-lg border border-slate-200 p-3.5">
+              {/* Header row */}
+              <div className="flex items-center gap-3 mb-2.5">
+                <div className="cursor-pointer flex-shrink-0" onClick={() => { setSelectedAthleteId(athlete.id); navigateTo('athlete-profile'); }}>
+                  {athlete.photo
+                    ? <img src={athlete.photo} alt="" className="w-8 h-8 rounded-md object-cover" />
+                    : <div className="w-8 h-8 bg-slate-100 rounded-md flex items-center justify-center text-[10px] font-semibold text-slate-500">{athlete.avatar}</div>}
+                </div>
+                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { setSelectedAthleteId(athlete.id); navigateTo('athlete-profile'); }}>
+                  <h3 className="text-[13px] font-medium text-slate-900 truncate leading-none">{athlete.name}</h3>
+                  <p className="text-[11px] text-slate-400 mt-1 truncate">{getPositionDisplay(athlete.positionNumbers, typedTeamStructure)}</p>
+                </div>
+                <select value={athlete.status} onChange={async e => {
+                    const newStatus = e.target.value;
+                    setAthletes(typedAthletes.map(a => a.id === athlete.id ? { ...a, status: newStatus } : a));
+                    await supabase.from('athletes').update({ status: newStatus }).eq('id', athlete.id);
+                  }}
+                  className={`h-7 px-2 text-[11px] rounded border font-medium focus:outline-none focus:ring-1 focus:ring-blue-500 ${athlete.status === 'Available' ? 'bg-green-50 text-green-700 border-green-200' : athlete.status === 'Modified' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                  <option value="Available" className="bg-white text-slate-900">Available</option>
+                  <option value="Modified" className="bg-white text-slate-900">Modified</option>
+                  <option value="Unavailable" className="bg-white text-slate-900">Unavailable</option>
+                </select>
               </div>
-              <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { setSelectedAthleteId(athlete.id); navigateTo('athlete-profile'); }}>
-                <h3 className="text-sm font-semibold truncate">{athlete.name}</h3>
-                <p className="text-xs text-gray-600 truncate">{getPositionDisplay(athlete.positionNumbers, typedTeamStructure)}</p>
-              </div>
-              <select value={athlete.status} onChange={async e => {
-                  const newStatus = e.target.value;
-                  setAthletes(typedAthletes.map(a => a.id === athlete.id ? { ...a, status: newStatus } : a));
-                  await supabase.from('athletes').update({ status: newStatus }).eq('id', athlete.id);
-                }} className={`px-2 py-1 text-xs rounded-lg border font-medium ${athlete.status === 'Available' ? 'bg-green-100 text-green-700 border-green-300' : athlete.status === 'Modified' ? 'bg-amber-100 text-amber-700 border-amber-300' : 'bg-red-100 text-red-700 border-red-300'}`}>
-                <option value="Available" className="bg-white text-gray-900">Available</option>
-                <option value="Modified" className="bg-white text-gray-900">Modified</option>
-                <option value="Unavailable" className="bg-white text-gray-900">Unavailable</option>
-              </select>
+              {/* Public note */}
+              {athlete.notes && athlete.isPublic && (
+                <div className="mb-2 p-2 bg-blue-50 border border-blue-100 rounded flex items-start gap-1.5">
+                  <MessageSquare className="w-3 h-3 mt-0.5 flex-shrink-0 text-blue-400" />
+                  <span className="text-[11px] text-blue-700">{athlete.notes}</span>
+                </div>
+              )}
+              <InjuryDisplay athlete={athlete} />
+              {/* Note button */}
+              <button onClick={() => { setSelectedAthlete(athlete); setTempNotes(athlete.notes); setTempIsPublic(athlete.isPublic); setShowNotesModal(true); }}
+                className={`w-full mt-2 flex items-center justify-center gap-1.5 h-7 rounded text-[11px] font-medium transition-colors ${athlete.notes ? 'bg-blue-50 text-blue-700 border border-blue-100 hover:bg-blue-100' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                <MessageSquare className="w-3 h-3" />{athlete.notes ? 'Edit Note' : 'Add Note'}
+              </button>
             </div>
-            {athlete.notes && athlete.isPublic && <div className="mb-2 p-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700 flex items-start gap-1"><MessageSquare className="w-3 h-3 mt-0.5 flex-shrink-0 text-blue-400" /><span>{athlete.notes}</span></div>}
-            {athlete.status === 'Unavailable' && <InjuryDisplay athlete={athlete} />}
-            <button onClick={() => { setSelectedAthlete(athlete); setTempNotes(athlete.notes); setTempIsPublic(athlete.isPublic); setShowNotesModal(true); }} className={`w-full flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-xs mt-2 font-medium ${athlete.notes ? 'bg-blue-100 text-blue-700 border border-blue-200' : 'bg-gray-100 text-gray-600'}`}>
-              <MessageSquare className="w-3 h-3" />{athlete.notes ? 'Edit Note' : 'Add Note'}
-            </button>
-          </div>
-        ))}
+          ))}
         </div>
       </div>
-      <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t p-4">
+
+      {/* Bottom bar */}
+      <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t border-slate-200 p-4">
         <div className="max-w-md md:max-w-lg mx-auto">
-          <button onClick={handleSave} className="w-full px-4 py-3 bg-gray-900 text-white rounded-lg font-medium text-sm">Save</button>
+          <button onClick={handleSave} className="w-full h-10 bg-slate-900 text-white rounded-lg text-[13px] font-medium hover:bg-slate-700 transition-colors">Save</button>
         </div>
       </div>
+
+      {/* Notes modal */}
       {showNotesModal && selectedAthlete && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-30">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-4">
-            <div className="flex justify-between mb-4"><h3 className="font-semibold">{selectedAthlete.name}</h3><button onClick={() => setShowNotesModal(false)}><X className="w-5 h-5" /></button></div>
-            <textarea value={tempNotes} onChange={e => setTempNotes(e.target.value)} placeholder="Notes..." className="w-full px-3 py-2 border rounded-lg mb-3" rows={3} />
-            <label className="flex items-center gap-2 mb-4"><input type="checkbox" checked={tempIsPublic} onChange={e => setTempIsPublic(e.target.checked)} className="w-4 h-4" /><span className="text-sm">Public Note</span></label>
-            <div className="flex gap-2">
-              <button onClick={() => { setAthletes(typedAthletes.map(a => a.id === selectedAthlete.id ? { ...a, notes: tempNotes, isPublic: tempIsPublic } : a)); setShowNotesModal(false); }} className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg">Save</button>
-              <button onClick={() => setShowNotesModal(false)} className="flex-1 px-4 py-2 bg-gray-100 rounded-lg">Cancel</button>
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-30">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+              <h3 className="text-[14px] font-semibold text-slate-900">{selectedAthlete.name}</h3>
+              <button onClick={() => setShowNotesModal(false)} className="p-1 hover:bg-slate-100 rounded"><X className="w-4 h-4 text-slate-500" /></button>
+            </div>
+            <div className="p-4 space-y-3">
+              <textarea value={tempNotes} onChange={e => setTempNotes(e.target.value)} placeholder="Add a note…"
+                className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none text-slate-900" rows={4} />
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={tempIsPublic} onChange={e => setTempIsPublic(e.target.checked)} className="w-3.5 h-3.5 accent-blue-600" />
+                <span className="text-[12px] text-slate-600">Public note</span>
+              </label>
+            </div>
+            <div className="flex gap-2 px-4 pb-4">
+              <button onClick={() => { setAthletes(typedAthletes.map(a => a.id === selectedAthlete.id ? { ...a, notes: tempNotes, isPublic: tempIsPublic } : a)); setShowNotesModal(false); }}
+                className="flex-1 h-9 bg-slate-900 text-white rounded-lg text-[13px] font-medium hover:bg-slate-700 transition-colors">Save</button>
+              <button onClick={() => setShowNotesModal(false)}
+                className="flex-1 h-9 bg-slate-100 text-slate-700 rounded-lg text-[13px] hover:bg-slate-200 transition-colors">Cancel</button>
             </div>
           </div>
         </div>
@@ -943,39 +1065,51 @@ const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, 
 
   return (
     <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6">
-      {showSaveSuccess && <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-sm">✓ Session Plan Saved!</div>}
+      {showSaveSuccess && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-[13px] font-medium">✓ Session plan saved</div>}
 
-      <div className="bg-white rounded-xl shadow-sm border p-3 mb-4">
+      <div className="bg-white rounded-lg border border-slate-200 p-3 mb-3">
         <div className="flex items-center gap-3">
-          <input type="date" value={selectedDate} onChange={e => onDateChange(e.target.value)} className="flex-1 px-3 py-2 text-sm border rounded-lg" />
-          {isToday && <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full font-medium">Today</span>}
+          <input type="date" value={selectedDate} onChange={e => onDateChange(e.target.value)}
+            className="flex-1 h-8 px-3 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          {isToday && <span className="px-2 py-1 bg-green-50 text-green-700 border border-green-200 text-[11px] rounded font-medium">Today</span>}
         </div>
       </div>
 
-      <button onClick={() => { setTempDefaultTeam(defaultTeam); setEditingDefaultTeam(true); }} className="w-full mb-4 px-4 py-3 bg-white border-2 border-dashed border-gray-300 text-gray-700 rounded-xl hover:border-indigo-400 hover:text-indigo-600 font-medium text-sm flex items-center justify-center gap-2">
-        <Users className="w-4 h-4" />Edit Default Team
+      <button onClick={() => { setTempDefaultTeam(defaultTeam); setEditingDefaultTeam(true); }}
+        className="w-full mb-3 h-10 bg-white border border-dashed border-slate-300 text-slate-500 rounded-lg hover:border-slate-400 hover:text-slate-700 text-[13px] font-medium flex items-center justify-center gap-2 transition-colors">
+        <Users className="w-3.5 h-3.5" />Edit Default Team
       </button>
 
       <div className="space-y-2 mb-24">
         {typedDrills.length === 0 ? (
-          <div className="bg-white rounded-xl shadow-sm border p-8 text-center">
-            <p className="text-gray-500 text-sm">No drills for this day</p>
-            <p className="text-gray-400 text-xs mt-1">Add a drill to get started</p>
+          <div className="bg-white rounded-lg border border-slate-200 p-10 text-center">
+            <p className="text-slate-400 text-[13px]">No drills for this day</p>
+            <p className="text-slate-300 text-[11px] mt-1">Add a drill below to get started</p>
           </div>
         ) : (
           typedDrills.map(drill => (
-            <div key={drill.id} className="bg-white rounded-xl shadow-sm border overflow-hidden">
-              <button onClick={() => setExpandedDrill(expandedDrill === drill.id ? null : drill.id)} className="w-full p-4 flex items-center justify-between hover:bg-gray-50">
-                <div className="text-left"><h3 className="font-semibold text-sm">{drill.name}</h3><p className="text-xs text-gray-600">{drill.type}</p></div>
-                {expandedDrill === drill.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            <div key={drill.id} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+              <button onClick={() => setExpandedDrill(expandedDrill === drill.id ? null : drill.id)}
+                className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                <div className="text-left">
+                  <h3 className="text-[13px] font-medium text-slate-900">{drill.name}</h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5">{drill.type}</p>
+                </div>
+                {expandedDrill === drill.id ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
               </button>
               {expandedDrill === drill.id && (
-                <div className="p-4 border-t bg-gray-50 space-y-2 text-sm">
-                  <p><span className="text-gray-500">Intensity:</span> {drill.intensity}</p>
-                  <p><span className="text-gray-500">Notes:</span> {drill.notes}</p>
-                  <div className="flex gap-2 mt-2">
-                    <button onClick={() => setEditingTeam(drill)} className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-medium"><Users className="w-4 h-4 inline mr-1" />Edit Team</button>
-                    <button onClick={() => setDrills(typedDrills.filter(d => d.id !== drill.id))} className="px-4 py-2 bg-red-50 text-red-600 rounded-lg text-xs font-medium"><Trash2 className="w-4 h-4" /></button>
+                <div className="px-4 pb-4 border-t border-slate-100 bg-slate-50 pt-3 space-y-2 text-[13px]">
+                  <p><span className="text-slate-400 text-[11px]">Intensity</span> <span className="text-slate-700 ml-1">{drill.intensity}</span></p>
+                  {drill.notes && <p><span className="text-slate-400 text-[11px]">Notes</span> <span className="text-slate-700 ml-1">{drill.notes}</span></p>}
+                  <div className="flex gap-2 pt-1">
+                    <button onClick={() => setEditingTeam(drill)}
+                      className="flex-1 h-8 bg-slate-900 text-white rounded text-[12px] font-medium flex items-center justify-center gap-1.5 hover:bg-slate-700 transition-colors">
+                      <Users className="w-3.5 h-3.5" />Edit Team
+                    </button>
+                    <button onClick={() => setDrills(typedDrills.filter(d => d.id !== drill.id))}
+                      className="h-8 px-3 bg-red-50 text-red-600 border border-red-100 rounded text-[12px] hover:bg-red-100 transition-colors">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
               )}
@@ -984,10 +1118,16 @@ const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, 
         )}
       </div>
 
-      <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t p-4">
+      <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t border-slate-200 p-4">
         <div className="max-w-md md:max-w-lg mx-auto flex gap-2">
-          <button onClick={() => navigateTo('add-drill')} className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-lg font-medium text-sm"><Plus className="w-4 h-4 inline mr-1" />Add Drill</button>
-          <button onClick={handleSave} disabled={typedDrills.length === 0} className={`flex-1 px-4 py-3 rounded-lg font-medium text-sm ${typedDrills.length > 0 ? 'bg-gray-900 text-white' : 'bg-gray-200 text-gray-400'}`}>Save</button>
+          <button onClick={() => navigateTo('add-drill')}
+            className="flex-1 h-10 bg-blue-600 text-white rounded-lg text-[13px] font-medium flex items-center justify-center gap-1.5 hover:bg-blue-700 transition-colors">
+            <Plus className="w-3.5 h-3.5" />Add Drill
+          </button>
+          <button onClick={handleSave} disabled={typedDrills.length === 0}
+            className={`flex-1 h-10 rounded-lg text-[13px] font-medium transition-colors ${typedDrills.length > 0 ? 'bg-slate-900 text-white hover:bg-slate-700' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>
+            Save
+          </button>
         </div>
       </div>
     </div>
@@ -1044,23 +1184,46 @@ const AddDrillPage = ({ drills, setDrills, navigateTo, drillTypes, defaultTeam, 
 
   return (
     <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6">
-      <div className="bg-white rounded-xl shadow-sm border p-4 space-y-4 mb-20">
-        <div><label className="block text-xs font-medium mb-1">Name</label><input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full px-3 py-2 text-sm border rounded-lg" /></div>
-        <div><label className="block text-xs font-medium mb-1">Type</label><select value={type} onChange={e => setType(e.target.value)} className="w-full px-3 py-2 text-sm border rounded-lg">{drillTypes.map(dt => <option key={dt.id}>{dt.name}</option>)}</select></div>
-        <div><label className="block text-xs font-medium mb-1">Intensity</label><select value={intensity} onChange={e => setIntensity(e.target.value)} className="w-full px-3 py-2 text-sm border rounded-lg"><option>Low</option><option>Medium</option><option>High</option></select></div>
-        <div><label className="block text-xs font-medium mb-1">Notes</label><textarea value={notes} onChange={e => setNotes(e.target.value)} className="w-full px-3 py-2 text-sm border rounded-lg" rows={3} /></div>
+      <div className="bg-white rounded-lg border border-slate-200 p-4 space-y-4 mb-24">
         <div>
-          <label className="block text-xs font-medium mb-1">Team</label>
-          <button onClick={() => setShowTeamSelection(true)} className="w-full px-4 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition text-sm font-medium flex items-center justify-center gap-2">
-            <Users className="w-4 h-4" />
+          <label className="block text-[11px] font-medium text-slate-500 mb-1.5">Name</label>
+          <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Drill name"
+            className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-900 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+        </div>
+        <div>
+          <label className="block text-[11px] font-medium text-slate-500 mb-1.5">Type</label>
+          <select value={type} onChange={e => setType(e.target.value)}
+            className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500">
+            {drillTypes.map(dt => <option key={dt.id}>{dt.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-[11px] font-medium text-slate-500 mb-1.5">Intensity</label>
+          <select value={intensity} onChange={e => setIntensity(e.target.value)}
+            className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500">
+            <option>Low</option><option>Medium</option><option>High</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-[11px] font-medium text-slate-500 mb-1.5">Notes</label>
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional notes…"
+            className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-900 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none" rows={3} />
+        </div>
+        <div>
+          <label className="block text-[11px] font-medium text-slate-500 mb-1.5">Team</label>
+          <button onClick={() => setShowTeamSelection(true)}
+            className="w-full h-9 bg-slate-100 text-slate-600 rounded border border-slate-200 hover:bg-slate-200 transition-colors text-[13px] font-medium flex items-center justify-center gap-2">
+            <Users className="w-3.5 h-3.5" />
             {countSelectedPlayers() > 0 ? `${countSelectedPlayers()} players selected` : 'Select Team'}
           </button>
         </div>
       </div>
-      <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t p-4">
+      <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t border-slate-200 p-4">
         <div className="max-w-md md:max-w-lg mx-auto flex gap-2">
-          <button onClick={() => { if (name) { setDrills([...drills, { id: Date.now(), name, type, notes, intensity, team1, team2, subs1, subs2 }]); navigateTo('session-plan'); }}} className="flex-1 px-4 py-3 bg-gray-900 text-white rounded-lg font-medium text-sm">Save</button>
-          <button onClick={() => navigateTo('session-plan')} className="px-4 py-3 bg-gray-100 rounded-lg text-sm">Cancel</button>
+          <button onClick={() => { if (name) { setDrills([...drills, { id: Date.now(), name, type, notes, intensity, team1, team2, subs1, subs2 }]); navigateTo('session-plan'); }}}
+            className="flex-1 h-10 bg-slate-900 text-white rounded-lg text-[13px] font-medium hover:bg-slate-700 transition-colors">Save</button>
+          <button onClick={() => navigateTo('session-plan')}
+            className="h-10 px-5 bg-slate-100 text-slate-600 rounded-lg text-[13px] hover:bg-slate-200 transition-colors">Cancel</button>
         </div>
       </div>
     </div>
@@ -1142,7 +1305,7 @@ const TeamSelectionModal = ({ athletes, team1, setTeam1, team2, setTeam2, subs1,
 
     return (
       <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6">
-        <div className="bg-white rounded-xl shadow-sm border">
+        <div className="bg-white rounded-lg border border-slate-200">
           <div className="p-4 border-b flex items-center gap-3">
             <button onClick={() => setSelectedCell(null)} className="p-1 hover:bg-gray-100 rounded-lg"><ArrowLeft className="w-5 h-5" /></button>
             <h3 className="font-semibold text-sm">{selectedCell.isSub ? 'Sub for ' : ''}{posName}</h3>
@@ -1154,7 +1317,7 @@ const TeamSelectionModal = ({ athletes, team1, setTeam1, team2, setTeam2, subs1,
 
               {matchingPosition.length > 0 && (
                 <div className="mb-3">
-                  <div className="text-xs font-semibold text-indigo-600 px-2 py-1 bg-indigo-50 rounded mb-1">★ {posName}</div>
+                  <div className="text-xs font-semibold text-blue-600 px-2 py-1 bg-blue-50 rounded mb-1">★ {posName}</div>
                   <div className="space-y-1">{matchingPosition.map(renderAthlete)}</div>
                 </div>
               )}
@@ -1183,7 +1346,7 @@ const TeamSelectionModal = ({ athletes, team1, setTeam1, team2, setTeam2, subs1,
 
   return (
     <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6">
-      <div className="bg-white rounded-xl shadow-sm border">
+      <div className="bg-white rounded-lg border border-slate-200">
         <div className="p-4 border-b flex items-center gap-3">
           <button onClick={onBack} className="p-1 hover:bg-gray-100 rounded-lg"><ArrowLeft className="w-5 h-5" /></button>
           <h3 className="font-semibold text-sm">{title}</h3>
@@ -1235,11 +1398,11 @@ const AvailabilityChart = ({ athleteId, availabilityRecords, seasonDates }: any)
   }, [athleteId, availabilityRecords, selectedPeriod, seasonDates]);
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border p-4">
+    <div className="bg-white rounded-lg border border-slate-200 p-4">
       <h3 className="font-semibold text-sm mb-3">Availability Report</h3>
       <div className="flex flex-wrap gap-2 mb-4">
-        <button onClick={() => setSelectedPeriod('all')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedPeriod === 'all' ? 'bg-indigo-600 text-white' : 'bg-gray-100'}`}>All Time</button>
-        {seasonDates.map(p => <button key={p.id} onClick={() => setSelectedPeriod(p.id.toString())} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedPeriod === p.id.toString() ? 'bg-indigo-600 text-white' : 'bg-gray-100'}`}>{p.title}</button>)}
+        <button onClick={() => setSelectedPeriod('all')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedPeriod === 'all' ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>All Time</button>
+        {seasonDates.map(p => <button key={p.id} onClick={() => setSelectedPeriod(p.id.toString())} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedPeriod === p.id.toString() ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>{p.title}</button>)}
       </div>
       {stats.total === 0 ? <p className="text-center py-6 text-gray-500 text-sm">No data.</p> : (
         <>
@@ -1343,24 +1506,24 @@ const ReportingPage = ({ athletes, availabilityRecords, seasonDates, teamStructu
 
   return (
     <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6 space-y-4">
-      <div className="bg-white rounded-xl shadow-sm border p-4">
+      <div className="bg-white rounded-lg border border-slate-200 p-4">
         <h3 className="font-semibold text-sm mb-3">Time Period</h3>
         <div className="flex flex-wrap gap-2 mb-3">
-          <button onClick={() => setDateMode('all')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${dateMode === 'all' ? 'bg-indigo-600 text-white' : 'bg-gray-100'}`}>All Time</button>
-          {seasonDates.map(p => <button key={p.id} onClick={() => { setDateMode('period'); setSelectedPeriodId(p.id.toString()); }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${dateMode === 'period' && selectedPeriodId === p.id.toString() ? 'bg-indigo-600 text-white' : 'bg-gray-100'}`}>{p.title}</button>)}
-          <button onClick={() => setDateMode('custom')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${dateMode === 'custom' ? 'bg-indigo-600 text-white' : 'bg-gray-100'}`}>Custom</button>
+          <button onClick={() => setDateMode('all')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${dateMode === 'all' ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>All Time</button>
+          {seasonDates.map(p => <button key={p.id} onClick={() => { setDateMode('period'); setSelectedPeriodId(p.id.toString()); }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${dateMode === 'period' && selectedPeriodId === p.id.toString() ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>{p.title}</button>)}
+          <button onClick={() => setDateMode('custom')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${dateMode === 'custom' ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>Custom</button>
         </div>
         {dateMode === 'custom' && <div className="grid grid-cols-2 gap-2"><input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} className="px-3 py-2 text-sm border rounded-lg" /><input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} className="px-3 py-2 text-sm border rounded-lg" /></div>}
       </div>
-      <div className="bg-white rounded-xl shadow-sm border p-4">
+      <div className="bg-white rounded-lg border border-slate-200 p-4">
         <button onClick={() => setShowFilters(!showFilters)} className="w-full flex justify-between items-center"><h3 className="font-semibold text-sm">Filters</h3>{showFilters ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</button>
         {showFilters && (
           <div className="mt-3 space-y-3">
             <div>
               <p className="text-xs text-gray-500 mb-2">Position Group</p>
               <div className="flex gap-2">
-                <button onClick={() => toggleGroup('Forward')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedGroups.includes('Forward') ? 'bg-indigo-600 text-white' : 'bg-gray-100'}`}>Forwards</button>
-                <button onClick={() => toggleGroup('Back')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedGroups.includes('Back') ? 'bg-indigo-600 text-white' : 'bg-gray-100'}`}>Backs</button>
+                <button onClick={() => toggleGroup('Forward')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedGroups.includes('Forward') ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>Forwards</button>
+                <button onClick={() => toggleGroup('Back')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedGroups.includes('Back') ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>Backs</button>
               </div>
             </div>
             <div>
@@ -1369,7 +1532,7 @@ const ReportingPage = ({ athletes, availabilityRecords, seasonDates, teamStructu
                 {uniquePositionNames.map(pos => {
                   const allSelected = pos.numbers.every(n => selectedPositions.includes(n));
                   return (
-                    <button key={pos.name} onClick={() => togglePositionName(pos.name)} className={`px-2 py-1 rounded text-xs ${allSelected ? 'bg-indigo-600 text-white' : 'bg-gray-100'}`}>
+                    <button key={pos.name} onClick={() => togglePositionName(pos.name)} className={`px-2 py-1 rounded text-xs ${allSelected ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>
                       {pos.name}
                     </button>
                   );
@@ -1380,7 +1543,7 @@ const ReportingPage = ({ athletes, availabilityRecords, seasonDates, teamStructu
           </div>
         )}
       </div>
-      <div className="bg-white rounded-xl shadow-sm border p-4">
+      <div className="bg-white rounded-lg border border-slate-200 p-4">
         <h3 className="font-semibold text-sm mb-3">Availability Over Time</h3>
         <div className="flex flex-wrap gap-2 mb-3">
           <label className="flex items-center gap-1.5 text-xs cursor-pointer"><input type="checkbox" checked={showAvailable} onChange={e => setShowAvailable(e.target.checked)} className="w-3 h-3" /><div className="w-2.5 h-2.5 rounded bg-green-500"></div>Available</label>
@@ -1422,7 +1585,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
 
   return (
     <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6 space-y-3">
-      <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
         <button onClick={() => setExpanded(expanded === 'teamStructure' ? null : 'teamStructure')} className="w-full p-4 flex justify-between items-center hover:bg-gray-50">
           <div><h3 className="font-semibold text-sm text-left">Team Structure</h3><p className="text-xs text-gray-500">{teamStructure.length} positions</p></div>
           {expanded === 'teamStructure' ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
@@ -1456,11 +1619,11 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                 <select value={newData.group || 'Forward'} onChange={e => setNewData({...newData, group: e.target.value})} className="w-full px-2 py-1 text-sm border rounded"><option>Forward</option><option>Back</option></select>
                 <div className="flex gap-2"><button onClick={() => { if (newData.name && newData.number) { const newPos = {id: String(Date.now()), number: parseInt(newData.number), name: newData.name, group: newData.group || 'Forward'}; onSaveTeamStructure(newPos); setLocalTeamStructure([...teamStructure, newPos].sort((a,b) => a.number - b.number)); setNewData({}); setShowAdd(null); }}} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Add</button><button onClick={() => { setShowAdd(null); setNewData({}); }} className="flex-1 px-2 py-1 bg-gray-100 rounded text-xs">Cancel</button></div>
               </div>
-            ) : <div className="p-3 border-t"><button onClick={() => setShowAdd('position')} className="w-full px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium"><Plus className="w-4 h-4 inline mr-1" />Add Position</button></div>}
+            ) : <div className="p-3 border-t"><button onClick={() => setShowAdd('position')} className="w-full px-4 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium"><Plus className="w-4 h-4 inline mr-1" />Add Position</button></div>}
           </div>
         )}
       </div>
-      <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
         <button onClick={() => setExpanded(expanded === 'drillTypes' ? null : 'drillTypes')} className="w-full p-4 flex justify-between items-center hover:bg-gray-50">
           <div><h3 className="font-semibold text-sm text-left">Drill Types</h3><p className="text-xs text-gray-500">{drillTypes.length} types</p></div>
           {expanded === 'drillTypes' ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
@@ -1490,7 +1653,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                               } else {
                                 setEditData({...editData, positions: [...new Set([...currentPositions, ...groupPositions])].sort((a,b) => a - b)});
                               }
-                            }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${allSelected ? 'bg-indigo-600 text-white' : 'bg-gray-100'}`}>
+                            }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${allSelected ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>
                               {group}s
                             </button>
                           );
@@ -1507,7 +1670,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                                   ? currentPositions.filter(p => p !== pos.number)
                                   : [...currentPositions, pos.number].sort((a,b) => a - b);
                                 setEditData({...editData, positions: newPositions});
-                              }} className={`px-2 py-1 rounded text-xs ${(editData.positions || dt.positions || []).includes(pos.number) ? 'bg-indigo-600 text-white' : 'bg-gray-100'}`}>
+                              }} className={`px-2 py-1 rounded text-xs ${(editData.positions || dt.positions || []).includes(pos.number) ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>
                                 {pos.number}. {pos.name}
                               </button>
                             ))}
@@ -1515,7 +1678,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                         ))}
                       </div>
                       <div className="flex gap-2 mt-2">
-                        <button onClick={() => setEditData({...editData, positions: teamStructure.map(p => p.number)})} className="text-xs text-indigo-600">Select All</button>
+                        <button onClick={() => setEditData({...editData, positions: teamStructure.map(p => p.number)})} className="text-xs text-blue-600">Select All</button>
                         <button onClick={() => setEditData({...editData, positions: []})} className="text-xs text-gray-500">Clear All</button>
                       </div>
                     </div>
@@ -1553,7 +1716,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                           } else {
                             setNewData({...newData, positions: [...new Set([...currentPositions, ...groupPositions])].sort((a,b) => a - b)});
                           }
-                        }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${allSelected ? 'bg-indigo-600 text-white' : 'bg-gray-100'}`}>
+                        }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${allSelected ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>
                           {group}s
                         </button>
                       );
@@ -1570,7 +1733,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                               ? currentPositions.filter(p => p !== pos.number)
                               : [...currentPositions, pos.number].sort((a,b) => a - b);
                             setNewData({...newData, positions: newPositions});
-                          }} className={`px-2 py-1 rounded text-xs ${(newData.positions || teamStructure.map(p => p.number)).includes(pos.number) ? 'bg-indigo-600 text-white' : 'bg-gray-100'}`}>
+                          }} className={`px-2 py-1 rounded text-xs ${(newData.positions || teamStructure.map(p => p.number)).includes(pos.number) ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>
                             {pos.number}. {pos.name}
                           </button>
                         ))}
@@ -1583,11 +1746,11 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                   <button onClick={() => { setShowAdd(null); setNewData({}); }} className="flex-1 px-2 py-1 bg-gray-100 rounded text-xs">Cancel</button>
                 </div>
               </div>
-            ) : <div className="p-3"><button onClick={() => setShowAdd('drillType')} className="w-full px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium"><Plus className="w-4 h-4 inline mr-1" />Add Drill Type</button></div>}
+            ) : <div className="p-3"><button onClick={() => setShowAdd('drillType')} className="w-full px-4 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium"><Plus className="w-4 h-4 inline mr-1" />Add Drill Type</button></div>}
           </div>
         )}
       </div>
-      <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
         <button onClick={() => setExpanded(expanded === 'seasonDates' ? null : 'seasonDates')} className="w-full p-4 flex justify-between items-center hover:bg-gray-50">
           <div><h3 className="font-semibold text-sm text-left">Season Dates</h3><p className="text-xs text-gray-500">{seasonDates.length} periods</p></div>
           {expanded === 'seasonDates' ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
@@ -1605,8 +1768,8 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                   </div>
                 ) : (
                   <div className="flex justify-between items-center">
-                    <div><div className="flex items-center gap-2"><p className="text-sm font-medium">{sd.title}</p>{sd.isDefault && <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full">Default</span>}</div><p className="text-xs text-gray-500">{fmtDate(sd.fromDate)} - {fmtDate(sd.toDate)}</p></div>
-                    <div className="flex gap-1"><button onClick={() => setLocalSeasonDates(seasonDates.map(s => ({...s, isDefault: s.id === sd.id ? !s.isDefault : false})))} className={`p-1 rounded ${sd.isDefault ? 'bg-indigo-50 text-indigo-600' : 'hover:bg-gray-100 text-gray-500'}`}><Target className="w-4 h-4" /></button><button onClick={() => { setEditingId('sd-' + sd.id); setEditData({title: sd.title, fromDate: sd.fromDate, toDate: sd.toDate, isDefault: sd.isDefault}); }} className="p-1 hover:bg-gray-100 rounded"><Edit2 className="w-4 h-4 text-gray-500" /></button><button onClick={() => setLocalSeasonDates(seasonDates.filter(s => s.id !== sd.id))} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button></div>
+                    <div><div className="flex items-center gap-2"><p className="text-sm font-medium">{sd.title}</p>{sd.isDefault && <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full">Default</span>}</div><p className="text-xs text-gray-500">{fmtDate(sd.fromDate)} - {fmtDate(sd.toDate)}</p></div>
+                    <div className="flex gap-1"><button onClick={() => setLocalSeasonDates(seasonDates.map(s => ({...s, isDefault: s.id === sd.id ? !s.isDefault : false})))} className={`p-1 rounded ${sd.isDefault ? 'bg-blue-50 text-blue-600' : 'hover:bg-gray-100 text-gray-500'}`}><Target className="w-4 h-4" /></button><button onClick={() => { setEditingId('sd-' + sd.id); setEditData({title: sd.title, fromDate: sd.fromDate, toDate: sd.toDate, isDefault: sd.isDefault}); }} className="p-1 hover:bg-gray-100 rounded"><Edit2 className="w-4 h-4 text-gray-500" /></button><button onClick={() => setLocalSeasonDates(seasonDates.filter(s => s.id !== sd.id))} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button></div>
                   </div>
                 )}
               </div>
@@ -1618,7 +1781,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                 <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={newData.isDefault || false} onChange={e => setNewData({...newData, isDefault: e.target.checked})} />Default</label>
                 <div className="flex gap-2"><button onClick={() => { if (newData.title && newData.fromDate && newData.toDate) { let upd = seasonDates; if (newData.isDefault) upd = seasonDates.map(s => ({...s, isDefault: false})); const newSd = {id: String(Date.now()), ...newData}; onSaveSeasonDate(newSd); setLocalSeasonDates([...upd, newSd]); setNewData({}); setShowAdd(null); }}} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Add</button><button onClick={() => { setShowAdd(null); setNewData({}); }} className="flex-1 px-2 py-1 bg-gray-100 rounded text-xs">Cancel</button></div>
               </div>
-            ) : <div className="p-3"><button onClick={() => setShowAdd('seasonDate')} className="w-full px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium"><Plus className="w-4 h-4 inline mr-1" />Add Time Period</button></div>}
+            ) : <div className="p-3"><button onClick={() => setShowAdd('seasonDate')} className="w-full px-4 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium"><Plus className="w-4 h-4 inline mr-1" />Add Time Period</button></div>}
           </div>
         )}
       </div>
@@ -1638,7 +1801,7 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
   const [showAddInjury, setShowAddInjury] = useState(false);
   const [injuryData, setInjuryData] = useState({ bodyPart: 'Head', startDate: '', returnDate: '', notes: '' });
 
-  if (!athlete) return <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6"><div className="bg-white rounded-xl shadow-sm border p-6 text-center"><p>Athlete not found</p><button onClick={() => navigateTo('availability')} className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm">Back</button></div></div>;
+  if (!athlete) return <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6"><div className="bg-white rounded-lg border border-slate-200 p-6 text-center"><p>Athlete not found</p><button onClick={() => navigateTo('availability')} className="mt-4 px-4 py-2 bg-slate-800 text-white rounded-lg text-sm">Back</button></div></div>;
 
   const genAvatar = (n: string) => { if (!n) return ''; const p = n.trim().split(' '); return p.length >= 2 ? p[0][0].toUpperCase() + p[p.length-1][0].toUpperCase() : n.substring(0,2).toUpperCase(); };
   const isNew = athlete?.name === 'New Athlete' && !athlete?.positionNumbers?.length;
@@ -1668,11 +1831,11 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
     <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6">
       {showSaveSuccess && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-sm">✓ Saved!</div>}
       <div className="space-y-4 mb-20">
-        <div className="bg-white rounded-xl shadow-sm border p-4 space-y-4">
+        <div className="bg-white rounded-lg border border-slate-200 p-4 space-y-4">
           <div className="flex justify-center">
             <div className="relative">
               {photo ? <img src={photo} alt="" className="w-24 h-24 rounded-full object-cover border-4 border-gray-200" /> : <div className="w-24 h-24 bg-gray-200 rounded-full flex items-center justify-center font-bold text-2xl border-4 border-gray-200">{genAvatar(name) || <User className="w-10 h-10 text-gray-400" />}</div>}
-              <label className="absolute bottom-0 right-0 w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center cursor-pointer hover:bg-indigo-700">
+              <label className="absolute bottom-0 right-0 w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center cursor-pointer hover:bg-blue-700">
                 <Camera className="w-4 h-4 text-white" />
                 <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) { const r = new FileReader(); r.onloadend = () => setPhoto(r.result); r.readAsDataURL(f); }}} />
               </label>
@@ -1694,7 +1857,7 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
                       {uniqueNames.filter((pn: string) => teamStructure.find((p: any) => p.name === pn && p.group === group)).map((pn: string) => {
                         const nums = teamStructure.filter((p: any) => p.name === pn).map((p: any) => p.number);
                         const sel = nums.some((n: number) => positionNumbers.includes(n));
-                        return <button key={pn} onClick={() => { if (sel) setPositionNumbers(positionNumbers.filter((n: number) => !nums.includes(n))); else setPositionNumbers(Array.from(new Set([...positionNumbers, ...nums])).sort((a: number, b: number) => a - b)); }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${sel ? 'bg-indigo-600 text-white' : 'bg-white border hover:bg-gray-100'}`}>{pn}</button>;
+                        return <button key={pn} onClick={() => { if (sel) setPositionNumbers(positionNumbers.filter((n: number) => !nums.includes(n))); else setPositionNumbers(Array.from(new Set([...positionNumbers, ...nums])).sort((a: number, b: number) => a - b)); }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${sel ? 'bg-slate-800 text-white' : 'bg-white border hover:bg-gray-100'}`}>{pn}</button>;
                       })}
                     </div>
                   </div>
@@ -1705,10 +1868,10 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
           {positionNumbers.length > 0 && <p className="text-xs text-gray-500">Group: {getPositionGroup(positionNumbers, teamStructure)}</p>}
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border p-4">
+        <div className="bg-white rounded-lg border border-slate-200 p-4">
           <div className="flex justify-between items-center mb-3">
             <h3 className="font-semibold text-sm">Injuries</h3>
-            {!showAddInjury && <button onClick={() => { setShowAddInjury(true); setEditingInjuryId(null); setInjuryData({ bodyPart: 'Head', startDate: today, returnDate: '', notes: '' }); }} className="text-xs text-indigo-600 font-medium">+ Add</button>}
+            {!showAddInjury && <button onClick={() => { setShowAddInjury(true); setEditingInjuryId(null); setInjuryData({ bodyPart: 'Head', startDate: today, returnDate: '', notes: '' }); }} className="text-xs text-blue-600 font-medium">+ Add</button>}
           </div>
           {showAddInjury && (
             <div className="mb-4 p-3 bg-gray-50 rounded-lg space-y-3">
@@ -1718,7 +1881,7 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
                 <div><label className="block text-xs text-gray-500 mb-1">Est. Return</label><input type="date" value={injuryData.returnDate} onChange={e => setInjuryData({...injuryData, returnDate: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" /></div>
               </div>
               <div><label className="block text-xs text-gray-500 mb-1">Notes</label><textarea value={injuryData.notes} onChange={e => setInjuryData({...injuryData, notes: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" rows={2} /></div>
-              <div className="flex gap-2"><button onClick={saveInjury} className="flex-1 px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium">{editingInjuryId ? 'Update' : 'Add'}</button><button onClick={() => { setShowAddInjury(false); setEditingInjuryId(null); }} className="flex-1 px-3 py-2 bg-gray-100 rounded-lg text-sm">Cancel</button></div>
+              <div className="flex gap-2"><button onClick={saveInjury} className="flex-1 px-3 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium">{editingInjuryId ? 'Update' : 'Add'}</button><button onClick={() => { setShowAddInjury(false); setEditingInjuryId(null); }} className="flex-1 px-3 py-2 bg-gray-100 rounded-lg text-sm">Cancel</button></div>
             </div>
           )}
           {activeInjuries.length > 0 && (
@@ -1761,14 +1924,15 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
         </div>
         <AvailabilityChart athleteId={athleteId} availabilityRecords={availabilityRecords} seasonDates={seasonDates} />
       </div>
-      <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t p-4">
+      <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t border-slate-200 p-4">
         <div className="max-w-md md:max-w-lg mx-auto space-y-2">
           <div className="flex gap-2">
-            <button onClick={handleSave} className="flex-1 px-4 py-3 bg-gray-900 text-white rounded-lg font-medium text-sm">Save</button>
-            <button onClick={() => navigateTo('availability')} className="px-4 py-3 bg-gray-100 rounded-lg text-sm">Cancel</button>
+            <button onClick={handleSave} className="flex-1 h-10 bg-slate-900 text-white rounded-lg text-[13px] font-medium hover:bg-slate-700 transition-colors">Save</button>
+            <button onClick={() => navigateTo('availability')} className="h-10 px-5 bg-slate-100 text-slate-600 rounded-lg text-[13px] hover:bg-slate-200 transition-colors">Cancel</button>
           </div>
           {!isNew && (
-            <button onClick={async () => { if (window.confirm('Delete this athlete?')) { await onDelete(athleteId); navigateTo('availability'); }}} className="w-full px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-sm font-medium">Delete Athlete</button>
+            <button onClick={async () => { if (window.confirm('Delete this athlete?')) { await onDelete(athleteId); navigateTo('availability'); }}}
+              className="w-full h-9 bg-red-50 text-red-600 border border-red-200 rounded-lg text-[13px] font-medium hover:bg-red-100 transition-colors">Delete Athlete</button>
           )}
         </div>
       </div>
