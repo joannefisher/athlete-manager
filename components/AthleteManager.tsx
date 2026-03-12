@@ -9,9 +9,9 @@ const BODY_PARTS = ['Head', 'Neck', 'Shoulder', 'Arm', 'Elbow', 'Wrist', 'Hand',
 type Role = 'Admin' | 'S&C' | 'Physio' | 'Coach';
 
 const ROLE_ACCESS: Record<Role, string[]> = {
-  'Admin':  ['home', 'availability', 'athlete-profile', 'session-plan', 'add-drill', 'reporting', 'setup'],
-  'S&C':    ['availability', 'athlete-profile', 'reporting'],
-  'Physio': ['availability', 'athlete-profile', 'reporting'],
+  'Admin':  ['home', 'availability', 'athlete-profile', 'session-plan', 'add-drill', 'reporting', 'injury-report', 'setup'],
+  'S&C':    ['availability', 'athlete-profile', 'reporting', 'injury-report'],
+  'Physio': ['availability', 'athlete-profile', 'reporting', 'injury-report'],
   'Coach':  ['home', 'session-plan', 'add-drill', 'reporting'],
 };
 
@@ -29,6 +29,9 @@ interface Injury {
   startDate: string;
   returnDate: string | null;
   notes: string;
+  event?: string;
+  surface?: string;
+  contact?: string;
 }
 
 interface Athlete {
@@ -331,6 +334,61 @@ const AthleteManager = () => {
     }
   };
 
+
+  const saveEndOfDayReport = async (date: string, eodAthletes: Athlete[]) => {
+    // Save EOD snapshot — stored as availability_records with a distinct report_date_eod note prefix
+    // Does NOT overwrite existing records for the day
+    setSaving(true);
+    try {
+      // Write EOD snapshot to a dedicated key in Supabase (availability_records with note prefixed)
+      // We use a separate insert — not a delete/replace — so original records stay intact
+      // EOD records are identified by note starting with '__EOD__'
+      await supabase.from('availability_records').delete()
+        .eq('date', date)
+        .like('note', '__EOD__%');
+
+      const eodRecords = eodAthletes.map((a: Athlete) => ({
+        date,
+        athlete_id: a.id,
+        status: a.status,
+        note: `__EOD__${a.notes || ''}`
+      }));
+      await supabase.from('availability_records').insert(eodRecords);
+
+      // Forward-propagate changes to athletes table (base for future days)
+      for (const a of eodAthletes) {
+        await supabase.from('athletes').update({
+          status: a.status,
+          notes: a.notes,
+          is_public: a.isPublic,
+        }).eq('id', a.id);
+
+        // Update injuries
+        await supabase.from('athlete_injuries').delete().eq('athlete_id', a.id);
+        if (a.injuries?.length > 0) {
+          await supabase.from('athlete_injuries').insert(
+            a.injuries.map((i: Injury) => ({
+              athlete_id: a.id,
+              body_part: i.bodyPart,
+              start_date: i.startDate,
+              return_date: i.returnDate || null,
+              notes: i.notes,
+              event: i.event || null,
+              surface: i.surface || null,
+              contact: i.contact || null,
+            }))
+          );
+        }
+      }
+
+      await fetchAllData();
+    } catch (error) {
+      console.error('Error saving EOD report:', error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const saveAvailability = async (date: string) => {
     setSaving(true);
     try {
@@ -586,7 +644,7 @@ const AthleteManager = () => {
   }, [roleDropdownOpen]);
 
   const navigateTo = (page: string) => { setCurrentPage(page); setShowMenu(false); };
-  const getPageTitle = () => ({ home: 'Home', availability: 'Availability', 'session-plan': 'Session Plan', 'add-drill': 'Create Drill', 'athlete-profile': 'Athlete Profile', setup: 'Setup', reporting: 'Reporting' }[currentPage] || 'Team');
+  const getPageTitle = () => ({ home: 'Home', availability: 'Availability', 'session-plan': 'Session Plan', 'add-drill': 'Create Drill', 'athlete-profile': 'Athlete Profile', setup: 'Setup', reporting: 'Reporting', 'injury-report': 'Injury Report' }[currentPage] || 'Team');
 
   if (loading) {
     return (
@@ -604,6 +662,7 @@ const AthleteManager = () => {
     { page: 'availability', Icon: Calendar, label: 'Availability' },
     { page: 'session-plan', Icon: Zap, label: 'Session Plan' },
     { page: 'reporting', Icon: BarChart3, label: 'Reporting' },
+    { page: 'injury-report', Icon: AlertCircle, label: 'Injury Report' },
     { page: 'setup', Icon: Settings, label: 'Setup' },
   ];
   const navItems = allNavItems.filter(item => ROLE_ACCESS[role].includes(item.page));
@@ -725,11 +784,12 @@ const AthleteManager = () => {
         {/* Page content */}
         <div className="flex-1">
           {effectivePage === 'home' && <HomePage athletes={athletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} teamStructure={teamStructure} />}
-          {effectivePage === 'availability' && <AvailabilityPage athletes={athletes} setAthletes={setAthletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} selectedDate={selectedDate} setSelectedDate={setSelectedDate} availabilityRecords={availabilityRecords} teamStructure={teamStructure} onSave={saveAvailability} saving={saving} fetchAllData={fetchAllData} />}
+          {effectivePage === 'availability' && <AvailabilityPage athletes={athletes} setAthletes={setAthletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} selectedDate={selectedDate} setSelectedDate={setSelectedDate} availabilityRecords={availabilityRecords} teamStructure={teamStructure} onSave={saveAvailability} onSaveEOD={saveEndOfDayReport} saving={saving} fetchAllData={fetchAllData} />}
           {effectivePage === 'session-plan' && <SessionPlanPage drills={drills} setDrills={setDrills} navigateTo={navigateTo} athletes={athletes} drillTypes={drillTypes} teamStructure={teamStructure} defaultTeam={defaultTeam} onSaveDefaultTeam={saveDefaultTeam} selectedDate={selectedDate} onDateChange={handleDateChange} onSaveSessionPlan={saveSessionPlan} saving={saving} />}
           {effectivePage === 'add-drill' && <AddDrillPage drills={drills} setDrills={setDrills} navigateTo={navigateTo} drillTypes={drillTypes} defaultTeam={defaultTeam} athletes={athletes} teamStructure={teamStructure} />}
           {effectivePage === 'athlete-profile' && <AthleteProfilePage athletes={athletes} athleteId={selectedAthleteId} navigateTo={navigateTo} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} onSave={saveAthlete} onDelete={deleteAthlete} saving={saving} />}
           {effectivePage === 'reporting' && <ReportingPage athletes={athletes} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} />}
+          {effectivePage === 'injury-report' && <InjuryReportPage athletes={athletes} teamStructure={teamStructure} />}
           {effectivePage === 'setup' && <SetupPage drillTypes={drillTypes} seasonDates={seasonDates} teamStructure={teamStructure} onSaveDrillType={saveDrillType} onDeleteDrillType={deleteDrillType} onSaveSeasonDate={saveSeasonDate} onDeleteSeasonDate={deleteSeasonDate} onSaveTeamStructure={saveTeamStructure} onDeleteTeamStructure={deleteTeamStructurePosition} saving={saving} />}
         </div>
       </div>
@@ -933,7 +993,309 @@ const HomePage = ({ athletes, navigateTo, setSelectedAthleteId, teamStructure }:
   );
 };
 
-const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthleteId, selectedDate, setSelectedDate, availabilityRecords, teamStructure, onSave, saving, fetchAllData }: any) => {
+
+const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD, onBack, saving }: any) => {
+  const typedTeamStructure: TeamPosition[] = teamStructure;
+  const today = new Date().toISOString().split('T')[0];
+
+  // Local working copy of athletes for EOD edits — does NOT touch today's saved availability
+  const [eodAthletes, setEodAthletes] = useState<Athlete[]>(
+    athletes.map((a: Athlete) => ({ ...a, injuries: a.injuries ? [...a.injuries] : [] }))
+  );
+  const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+  const [showNoteModal, setShowNoteModal] = useState(false);
+  const [showInjuryModal, setShowInjuryModal] = useState(false);
+  const [activeAthleteId, setActiveAthleteId] = useState<string | null>(null);
+  const [tempNote, setTempNote] = useState('');
+  const [tempIsPublic, setTempIsPublic] = useState(false);
+  const [injuryData, setInjuryData] = useState<any>({ bodyPart: 'Head', startDate: today, returnDate: '', notes: '', event: 'Training', surface: '4G', contact: 'Contact' });
+  const [editingInjuryId, setEditingInjuryId] = useState<string | null>(null);
+
+  const updateAthlete = (id: string, patch: Partial<Athlete>) =>
+    setEodAthletes(prev => prev.map(a => a.id === id ? { ...a, ...patch } : a));
+
+  const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
+
+  const handleSave = async () => {
+    await onSaveEOD(date, eodAthletes);
+    // Also update parent athletes state so UI reflects changes immediately
+    setAthletes(eodAthletes);
+    setShowSaveSuccess(true);
+    setTimeout(() => { setShowSaveSuccess(false); onBack(); }, 1500);
+  };
+
+  const openNoteModal = (a: Athlete) => {
+    setActiveAthleteId(a.id);
+    setTempNote(a.notes || '');
+    setTempIsPublic(a.isPublic || false);
+    setShowNoteModal(true);
+  };
+
+  const saveNote = () => {
+    if (!activeAthleteId) return;
+    updateAthlete(activeAthleteId, { notes: tempNote, isPublic: tempIsPublic });
+    setShowNoteModal(false);
+  };
+
+  const openAddInjury = (athleteId: string) => {
+    setActiveAthleteId(athleteId);
+    setEditingInjuryId(null);
+    setInjuryData({ bodyPart: 'Head', startDate: today, returnDate: '', notes: '', event: 'Training', surface: '4G', contact: 'Contact' });
+    setShowInjuryModal(true);
+  };
+
+  const openEditInjury = (athleteId: string, inj: Injury) => {
+    setActiveAthleteId(athleteId);
+    setEditingInjuryId(inj.id);
+    setInjuryData({ bodyPart: inj.bodyPart, startDate: inj.startDate, returnDate: inj.returnDate || '', notes: inj.notes || '', event: (inj as any).event || 'Training', surface: (inj as any).surface || '4G', contact: (inj as any).contact || 'Contact' });
+    setShowInjuryModal(true);
+  };
+
+  const saveInjury = () => {
+    if (!activeAthleteId || !injuryData.bodyPart || !injuryData.startDate) return;
+    const athlete = eodAthletes.find(a => a.id === activeAthleteId);
+    if (!athlete) return;
+    const newInj: any = { ...injuryData, id: editingInjuryId || String(Date.now()) };
+    const updatedInjuries = editingInjuryId
+      ? (athlete.injuries || []).map((i: any) => i.id === editingInjuryId ? newInj : i)
+      : [...(athlete.injuries || []), newInj];
+    updateAthlete(activeAthleteId, { injuries: updatedInjuries });
+    setShowInjuryModal(false);
+  };
+
+  const removeInjury = (athleteId: string, injuryId: string) => {
+    const athlete = eodAthletes.find(a => a.id === athleteId);
+    if (!athlete) return;
+    updateAthlete(athleteId, { injuries: (athlete.injuries || []).filter((i: any) => i.id !== injuryId) });
+  };
+
+  // Group: Unavailable first, then Modified, then Available; within each group alphabetical
+  const statusOrder: Record<string, number> = { 'Unavailable': 0, 'Modified': 1, 'Available': 2 };
+  const sorted = [...eodAthletes].sort((a, b) => {
+    const so = (statusOrder[a.status] ?? 3) - (statusOrder[b.status] ?? 3);
+    return so !== 0 ? so : a.name.localeCompare(b.name);
+  });
+
+  const activeInjuries = (a: Athlete) => {
+    if (!a.injuries) return [];
+    return a.injuries.filter((i: any) => !i.returnDate || i.returnDate >= today);
+  };
+
+  const displayDate = new Date(date + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+  return (
+    <div className="max-w-md md:max-w-5xl mx-auto p-4 md:p-6">
+      {showSaveSuccess && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-green-700 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-[13px] font-medium">✓ End of Day Report saved — changes applied to future days</div>}
+
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-4">
+        <button onClick={onBack} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
+          <ArrowLeft className="w-4 h-4 text-slate-600" />
+        </button>
+        <div>
+          <h2 className="text-[15px] font-semibold text-slate-900">End of Day Report</h2>
+          <p className="text-[11px] text-slate-400 mt-0.5">{displayDate}</p>
+        </div>
+        <div className="ml-auto flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200 rounded text-[11px] text-amber-700 font-medium">
+          <AlertCircle className="w-3 h-3" />Changes apply to future days only
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden mb-24">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-100">
+                <th className="text-left px-3 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Athlete</th>
+                <th className="text-left px-3 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Position</th>
+                <th className="text-left px-3 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Status</th>
+                <th className="text-left px-3 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider hidden md:table-cell">Selection</th>
+                <th className="text-left px-3 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Notes / Injury</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {sorted.map((a, idx) => {
+                const prev = idx > 0 ? sorted[idx - 1] : null;
+                const showGroup = !prev || prev.status !== a.status;
+                const injuries = activeInjuries(a);
+                const isModifiedOrUnavailable = a.status === 'Modified' || a.status === 'Unavailable';
+                return (
+                  <React.Fragment key={a.id}>
+                    {showGroup && (
+                      <tr>
+                        <td colSpan={5} className={`px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${a.status === 'Available' ? 'bg-green-50 text-green-600' : a.status === 'Modified' ? 'bg-amber-50 text-amber-600' : 'bg-red-50 text-red-600'}`}>
+                          {a.status} ({sorted.filter(x => x.status === a.status).length})
+                        </td>
+                      </tr>
+                    )}
+                    <tr className={`hover:bg-slate-50 transition-colors ${a.status === 'Unavailable' ? 'opacity-80' : ''}`}>
+                      {/* Name */}
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${a.status === 'Available' ? 'bg-green-500' : a.status === 'Modified' ? 'bg-amber-500' : 'bg-red-500'}`} />
+                          <span className="text-[13px] font-medium text-slate-800 whitespace-nowrap">{a.name}</span>
+                        </div>
+                      </td>
+                      {/* Position */}
+                      <td className="px-3 py-2.5 text-[12px] text-slate-500 whitespace-nowrap">
+                        {getPositionDisplay(a.positionNumbers, typedTeamStructure)}
+                      </td>
+                      {/* Status dropdown */}
+                      <td className="px-3 py-2.5">
+                        <select value={a.status} onChange={e => updateAthlete(a.id, { status: e.target.value })}
+                          className={`h-7 px-2 text-[11px] rounded border font-medium focus:outline-none focus:ring-1 focus:ring-blue-500 ${a.status === 'Available' ? 'bg-green-50 text-green-700 border-green-200' : a.status === 'Modified' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                          <option value="Available">Available</option>
+                          <option value="Modified">Modified</option>
+                          <option value="Unavailable">Unavailable</option>
+                        </select>
+                      </td>
+                      {/* Selection — only for Modified/Unavailable */}
+                      <td className="px-3 py-2.5 hidden md:table-cell">
+                        {isModifiedOrUnavailable && (
+                          <select value={(a as any).selectionStatus || 'Available for Selection'}
+                            onChange={e => updateAthlete(a.id, { selectionStatus: e.target.value } as any)}
+                            className="h-7 px-2 text-[11px] rounded border border-slate-200 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white">
+                            <option>Available for Selection</option>
+                            <option>Unavailable for Selection</option>
+                          </select>
+                        )}
+                      </td>
+                      {/* Notes & Injuries */}
+                      <td className="px-3 py-2.5">
+                        <div className="space-y-1.5">
+                          {/* Active injuries */}
+                          {injuries.map((inj: any) => (
+                            <div key={inj.id} className="flex items-start gap-1.5 p-1.5 bg-red-50 border border-red-100 rounded text-[11px] text-red-700">
+                              <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0 text-red-400" />
+                              <span className="flex-1">{inj.bodyPart}{inj.notes ? ` — ${inj.notes}` : ''}{inj.returnDate ? <span className="text-slate-400 ml-1">ETR {fmtDate(inj.returnDate)}</span> : <span className="text-red-500 font-medium ml-1">Season</span>}</span>
+                              <button onClick={() => openEditInjury(a.id, inj)} className="p-0.5 hover:bg-red-100 rounded flex-shrink-0"><Edit2 className="w-2.5 h-2.5 text-red-500" /></button>
+                              <button onClick={() => removeInjury(a.id, inj.id)} className="p-0.5 hover:bg-red-100 rounded flex-shrink-0"><X className="w-2.5 h-2.5 text-red-400" /></button>
+                            </div>
+                          ))}
+                          {/* Public note */}
+                          {a.notes && a.isPublic && (
+                            <div className="flex items-start gap-1.5 p-1.5 bg-blue-50 border border-blue-100 rounded text-[11px] text-blue-700">
+                              <MessageSquare className="w-3 h-3 mt-0.5 flex-shrink-0 text-blue-400" />
+                              <span className="flex-1">{a.notes}</span>
+                            </div>
+                          )}
+                          {/* Action buttons */}
+                          <div className="flex gap-1 flex-wrap">
+                            <button onClick={() => openAddInjury(a.id)}
+                              className="flex items-center gap-1 px-2 h-6 bg-red-50 text-red-600 border border-red-100 rounded text-[10px] font-medium hover:bg-red-100 transition-colors">
+                              <Plus className="w-2.5 h-2.5" />Injury
+                            </button>
+                            <button onClick={() => openNoteModal(a)}
+                              className={`flex items-center gap-1 px-2 h-6 rounded text-[10px] font-medium transition-colors border ${a.notes ? 'bg-blue-50 text-blue-600 border-blue-100 hover:bg-blue-100' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}>
+                              <MessageSquare className="w-2.5 h-2.5" />{a.notes ? 'Edit Note' : 'Add Note'}
+                            </button>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Bottom bar */}
+      <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t border-slate-200 p-4">
+        <div className="max-w-md md:max-w-lg mx-auto flex gap-2">
+          <button onClick={handleSave} disabled={saving}
+            className="flex-1 h-10 bg-amber-600 text-white rounded-lg text-[13px] font-medium hover:bg-amber-700 transition-colors disabled:opacity-50">
+            {saving ? 'Saving…' : 'Save End of Day Report'}
+          </button>
+          <button onClick={onBack} className="h-10 px-5 bg-slate-100 text-slate-600 rounded-lg text-[13px] hover:bg-slate-200 transition-colors">Cancel</button>
+        </div>
+      </div>
+
+      {/* Note modal */}
+      {showNoteModal && activeAthleteId && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-30">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+              <h3 className="text-[14px] font-semibold text-slate-900">{eodAthletes.find(a => a.id === activeAthleteId)?.name} — Note</h3>
+              <button onClick={() => setShowNoteModal(false)} className="p-1 hover:bg-slate-100 rounded"><X className="w-4 h-4 text-slate-500" /></button>
+            </div>
+            <div className="p-4 space-y-3">
+              <textarea value={tempNote} onChange={e => setTempNote(e.target.value)} placeholder="Add a note…"
+                className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none" rows={4} />
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={tempIsPublic} onChange={e => setTempIsPublic(e.target.checked)} className="w-3.5 h-3.5 accent-blue-600" />
+                <span className="text-[12px] text-slate-600">Public note</span>
+              </label>
+            </div>
+            <div className="flex gap-2 px-4 pb-4">
+              <button onClick={saveNote} className="flex-1 h-9 bg-slate-900 text-white rounded-lg text-[13px] font-medium hover:bg-slate-700">Save</button>
+              <button onClick={() => setShowNoteModal(false)} className="flex-1 h-9 bg-slate-100 text-slate-700 rounded-lg text-[13px] hover:bg-slate-200">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Injury modal */}
+      {showInjuryModal && activeAthleteId && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-30">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+              <h3 className="text-[14px] font-semibold text-slate-900">{eodAthletes.find(a => a.id === activeAthleteId)?.name} — {editingInjuryId ? 'Edit Injury' : 'Add Injury'}</h3>
+              <button onClick={() => setShowInjuryModal(false)} className="p-1 hover:bg-slate-100 rounded"><X className="w-4 h-4 text-slate-500" /></button>
+            </div>
+            <div className="p-4 space-y-3">
+              <div><label className="block text-[11px] text-slate-500 mb-1">Body Part</label>
+                <select value={injuryData.bodyPart} onChange={e => setInjuryData({...injuryData, bodyPart: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg">
+                  {BODY_PARTS.map(bp => <option key={bp}>{bp}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div><label className="block text-[11px] text-slate-500 mb-1">Event</label>
+                  <select value={injuryData.event} onChange={e => setInjuryData({...injuryData, event: e.target.value})} className="w-full px-2 py-2 text-sm border rounded-lg">
+                    <option>Training</option><option>Match</option><option>Other</option>
+                  </select>
+                </div>
+                <div><label className="block text-[11px] text-slate-500 mb-1">Surface</label>
+                  <select value={injuryData.surface} onChange={e => setInjuryData({...injuryData, surface: e.target.value})} className="w-full px-2 py-2 text-sm border rounded-lg">
+                    <option value="4G">4G</option><option>Grass</option><option>Other</option>
+                  </select>
+                </div>
+                <div><label className="block text-[11px] text-slate-500 mb-1">Contact</label>
+                  <select value={injuryData.contact} onChange={e => setInjuryData({...injuryData, contact: e.target.value})} className="w-full px-2 py-2 text-sm border rounded-lg">
+                    <option>Contact</option><option>Non-Contact</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div><label className="block text-[11px] text-slate-500 mb-1">Start Date</label>
+                  <input type="date" value={injuryData.startDate} onChange={e => setInjuryData({...injuryData, startDate: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" />
+                </div>
+                <div><label className="block text-[11px] text-slate-500 mb-1">Est. Return</label>
+                  <input type="date" value={injuryData.returnDate} onChange={e => setInjuryData({...injuryData, returnDate: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" />
+                </div>
+              </div>
+              {injuryData.startDate && injuryData.returnDate && (() => {
+                const days = Math.round((new Date(injuryData.returnDate).getTime() - new Date(injuryData.startDate).getTime()) / 86400000);
+                return days >= 0 ? <div className="px-3 py-2 bg-blue-50 border border-blue-100 rounded text-[11px] text-blue-700 font-medium">⏱ Time Loss: {days} day{days !== 1 ? 's' : ''}</div> : null;
+              })()}
+              <div><label className="block text-[11px] text-slate-500 mb-1">Notes</label>
+                <textarea value={injuryData.notes} onChange={e => setInjuryData({...injuryData, notes: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" rows={2} />
+              </div>
+            </div>
+            <div className="flex gap-2 px-4 pb-4">
+              <button onClick={saveInjury} className="flex-1 h-9 bg-slate-800 text-white rounded-lg text-[13px] font-medium hover:bg-slate-700">{editingInjuryId ? 'Update' : 'Add'}</button>
+              <button onClick={() => setShowInjuryModal(false)} className="flex-1 h-9 bg-slate-100 text-slate-700 rounded-lg text-[13px] hover:bg-slate-200">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthleteId, selectedDate, setSelectedDate, availabilityRecords, teamStructure, onSave, onSaveEOD, saving, fetchAllData }: any) => {
   const typedAthletes: Athlete[] = athletes;
   const typedTeamStructure: TeamPosition[] = teamStructure;
   const [searchTerm, setSearchTerm] = useState('');
@@ -942,6 +1304,7 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
   const [tempNotes, setTempNotes] = useState('');
   const [tempIsPublic, setTempIsPublic] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+  const [showEOD, setShowEOD] = useState(false);
 
   const handleSave = async () => {
     await onSave(selectedDate);
@@ -950,6 +1313,20 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
   };
 
   const filteredAthletes = typedAthletes.filter(a => a.name.toLowerCase().includes(searchTerm.toLowerCase()));
+
+  if (showEOD) {
+    return (
+      <EndOfDayReport
+        athletes={typedAthletes}
+        setAthletes={setAthletes}
+        teamStructure={typedTeamStructure}
+        date={selectedDate}
+        onSaveEOD={onSaveEOD}
+        onBack={() => setShowEOD(false)}
+        saving={saving}
+      />
+    );
+  }
 
   return (
     <div className="max-w-md md:max-w-3xl mx-auto">
@@ -966,8 +1343,14 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
             <Plus className="w-3.5 h-3.5" />Add
           </button>
         </div>
-        <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
-          className="w-full h-8 px-3 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+        <div className="flex gap-2">
+          <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
+            className="flex-1 h-8 px-3 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          <button onClick={() => setShowEOD(true)}
+            className="h-8 px-3 bg-amber-600 text-white rounded text-[12px] font-medium flex items-center gap-1.5 hover:bg-amber-700 transition-colors whitespace-nowrap">
+            End of Day Report
+          </button>
+        </div>
       </div>
 
       {showSaveSuccess && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-[13px] font-medium">✓ Saved</div>}
@@ -1127,6 +1510,40 @@ const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, 
                 <div className="px-4 pb-4 border-t border-slate-100 bg-slate-50 pt-3 space-y-2 text-[13px]">
                   <p><span className="text-slate-400 text-[11px]">Intensity</span> <span className="text-slate-700 ml-1">{drill.intensity}</span></p>
                   {drill.notes && <p><span className="text-slate-400 text-[11px]">Notes</span> <span className="text-slate-700 ml-1">{drill.notes}</span></p>}
+                  {/* Read-only team grid */}
+                  {(() => {
+                    const hasTeam = Object.values({...drill.team1, ...drill.team2, ...drill.subs1, ...drill.subs2}).some(Boolean);
+                    if (!hasTeam) return null;
+                    const sorted = [...(typedTeamStructure.map(p => p.number))].sort((a,b) => a-b);
+                    const getName = (id: any) => typedAthletes.find(a => a.id === id)?.name || '';
+                    return (
+                      <div className="mt-2 overflow-x-auto">
+                        <div className="grid grid-cols-5 gap-1 min-w-[340px] text-[10px]">
+                          <div className="text-center text-slate-400 pb-1">Team 1</div>
+                          <div className="text-center text-slate-400 pb-1">Sub</div>
+                          <div className="text-center text-slate-400 pb-1"></div>
+                          <div className="text-center text-slate-400 pb-1">Sub</div>
+                          <div className="text-center text-slate-400 pb-1">Team 2</div>
+                          {sorted.map(pos => {
+                            const t1 = getName(drill.team1?.[pos]);
+                            const t2 = getName(drill.team2?.[pos]);
+                            const s1 = getName(drill.subs1?.[pos]);
+                            const s2 = getName(drill.subs2?.[pos]);
+                            if (!t1 && !t2 && !s1 && !s2) return null;
+                            return (
+                              <React.Fragment key={pos}>
+                                <div className={`p-1 rounded truncate ${t1 ? 'bg-slate-100 text-slate-700' : 'bg-slate-50 text-slate-300'}`}>{t1 || typedTeamStructure.find(p => p.number === pos)?.name || pos}</div>
+                                <div className={`p-1 rounded truncate ${s1 ? 'bg-slate-100 text-slate-500' : 'text-slate-200'}`}>{s1 || '-'}</div>
+                                <div className="flex items-center justify-center text-slate-300">{pos}</div>
+                                <div className={`p-1 rounded truncate ${s2 ? 'bg-slate-100 text-slate-500' : 'text-slate-200'}`}>{s2 || '-'}</div>
+                                <div className={`p-1 rounded truncate ${t2 ? 'bg-slate-100 text-slate-700' : 'bg-slate-50 text-slate-300'}`}>{t2 || typedTeamStructure.find(p => p.number === pos)?.name || pos}</div>
+                              </React.Fragment>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
                   <div className="flex gap-2 pt-1">
                     <button onClick={() => setEditingTeam(drill)}
                       className="flex-1 h-8 bg-slate-900 text-white rounded text-[12px] font-medium flex items-center justify-center gap-1.5 hover:bg-slate-700 transition-colors">
@@ -1429,7 +1846,10 @@ const TeamSelectionModal = ({ athletes, team1, setTeam1, team2, setTeam2, subs1,
             <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-amber-500"></div>Modified</div>
             <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-red-500"></div>Unavailable</div>
           </div>
-          <button onClick={onBack} className="w-full px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium">Done</button>
+          <div className="flex gap-2">
+            <button onClick={() => { setTeam1({}); setTeam2({}); setSubs1({}); setSubs2({}); }} className="flex-1 px-4 py-2 bg-red-50 text-red-600 border border-red-100 rounded-lg text-sm font-medium hover:bg-red-100 transition-colors">Clear All</button>
+            <button onClick={onBack} className="flex-1 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium">Done</button>
+          </div>
         </div>
       </div>
     </div>
@@ -1478,6 +1898,44 @@ const AvailabilityChart = ({ athleteId, availabilityRecords, seasonDates }: any)
 };
 
 const ReportingPage = ({ athletes, availabilityRecords, seasonDates, teamStructure }: any) => {
+  const [activeTab, setActiveTab] = useState<'availability' | 'eod'>('availability');
+
+  return (
+    <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6 space-y-4">
+      {/* Tab switcher */}
+      <div className="flex gap-1 p-1 bg-slate-100 rounded-lg w-fit">
+        <button onClick={() => setActiveTab('availability')}
+          className={`px-4 py-1.5 rounded text-[12px] font-medium transition-colors ${activeTab === 'availability' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+          Availability
+        </button>
+        <button onClick={() => setActiveTab('eod')}
+          className={`px-4 py-1.5 rounded text-[12px] font-medium transition-colors ${activeTab === 'eod' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+          End of Day Report
+        </button>
+      </div>
+
+      {activeTab === 'availability' && (
+        <AvailabilityReportTab
+          athletes={athletes}
+          availabilityRecords={availabilityRecords}
+          seasonDates={seasonDates}
+          teamStructure={teamStructure}
+        />
+      )}
+
+      {activeTab === 'eod' && (
+        <EODReportTab
+          athletes={athletes}
+          availabilityRecords={availabilityRecords}
+          teamStructure={teamStructure}
+        />
+      )}
+    </div>
+  );
+};
+
+// ── Availability trend report (existing content, extracted) ──────────────────
+const AvailabilityReportTab = ({ athletes, availabilityRecords, seasonDates, teamStructure }: any) => {
   const assignedPositions: number[] = useMemo(() => Array.from(new Set(athletes.flatMap((a: any) => a.positionNumbers || []) as number[])).sort((a, b) => a - b), [athletes]);
   const defaultPeriod = seasonDates.find((sd: any) => sd.isDefault);
   const [dateMode, setDateMode] = useState(defaultPeriod ? 'period' : 'all');
@@ -1492,38 +1950,27 @@ const ReportingPage = ({ athletes, availabilityRecords, seasonDates, teamStructu
   const [showModified, setShowModified] = useState(true);
   const [showUnavailable, setShowUnavailable] = useState(false);
 
-  // Get unique position names from assigned positions
   const uniquePositionNames = useMemo(() => {
     const names = new Map();
     assignedPositions.forEach((posNum: number) => {
       const pos = teamStructure.find((p: any) => p.number === posNum);
-      if (pos && !names.has(pos.name)) {
-        names.set(pos.name, { name: pos.name, numbers: [], group: pos.group });
-      }
-      if (pos) {
-        names.get(pos.name).numbers.push(posNum);
-      }
+      if (pos && !names.has(pos.name)) names.set(pos.name, { name: pos.name, numbers: [], group: pos.group });
+      if (pos) names.get(pos.name).numbers.push(posNum);
     });
     return Array.from(names.values());
   }, [assignedPositions, teamStructure]);
 
-  // Toggle all positions with a given name
   const togglePositionName = (posName) => {
     const posData = uniquePositionNames.find(p => p.name === posName);
     if (!posData) return;
     const allSelected = posData.numbers.every(n => selectedPositions.includes(n));
-    if (allSelected) {
-      setSelectedPositions(prev => prev.filter(p => !posData.numbers.includes(p)));
-    } else {
-      setSelectedPositions(prev => [...new Set([...prev, ...posData.numbers])]);
-    }
+    if (allSelected) setSelectedPositions(prev => prev.filter(p => !posData.numbers.includes(p)));
+    else setSelectedPositions(prev => [...new Set([...prev, ...posData.numbers])]);
   };
 
-  // Toggle all positions in a group
   const toggleGroup = (group) => {
     const groupPositions = teamStructure.filter(p => p.group === group).map(p => p.number);
     const assignedGroupPositions = groupPositions.filter(p => assignedPositions.includes(p));
-
     if (selectedGroups.includes(group)) {
       setSelectedGroups(prev => prev.filter(g => g !== group));
       setSelectedPositions(prev => prev.filter(p => !assignedGroupPositions.includes(p)));
@@ -1559,7 +2006,7 @@ const ReportingPage = ({ athletes, availabilityRecords, seasonDates, teamStructu
   const path = (data, key) => data.length < 2 ? '' : data.map((d, i) => `${i === 0 ? 'M' : 'L'} ${pad.left + (i / (data.length - 1)) * iW} ${pad.top + iH - (d[key] / 100) * iH}`).join(' ');
 
   return (
-    <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6 space-y-4">
+    <>
       <div className="bg-white rounded-lg border border-slate-200 p-4">
         <h3 className="font-semibold text-sm mb-3">Time Period</h3>
         <div className="flex flex-wrap gap-2 mb-3">
@@ -1585,11 +2032,7 @@ const ReportingPage = ({ athletes, availabilityRecords, seasonDates, teamStructu
               <div className="flex flex-wrap gap-1">
                 {uniquePositionNames.map(pos => {
                   const allSelected = pos.numbers.every(n => selectedPositions.includes(n));
-                  return (
-                    <button key={pos.name} onClick={() => togglePositionName(pos.name)} className={`px-2 py-1 rounded text-xs ${allSelected ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>
-                      {pos.name}
-                    </button>
-                  );
+                  return <button key={pos.name} onClick={() => togglePositionName(pos.name)} className={`px-2 py-1 rounded text-xs ${allSelected ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>{pos.name}</button>;
                 })}
               </div>
             </div>
@@ -1617,9 +2060,246 @@ const ReportingPage = ({ athletes, availabilityRecords, seasonDates, teamStructu
         )}
         <p className="text-xs text-gray-400 text-center mt-2">{chartData.length} days • {filteredAthleteIds.length} athletes</p>
       </div>
+    </>
+  );
+};
+
+// ── EOD Report Tab ───────────────────────────────────────────────────────────
+const EODReportTab = ({ athletes, availabilityRecords, teamStructure }: any) => {
+  // Find all dates that have EOD records
+  const eodDates = useMemo(() => {
+    const dates = [...new Set(
+      availabilityRecords
+        .filter((r: any) => r.note && r.note.startsWith('__EOD__'))
+        .map((r: any) => r.date)
+    )].sort().reverse() as string[];
+    return dates;
+  }, [availabilityRecords]);
+
+  const defaultDate = eodDates[0] || '';
+  const [selectedDate, setSelectedDate] = useState(defaultDate);
+
+  // Keep selectedDate in sync if eodDates loads after mount
+  useEffect(() => {
+    if (!selectedDate && eodDates.length > 0) setSelectedDate(eodDates[0]);
+  }, [eodDates]);
+
+  const today = new Date().toISOString().split('T')[0];
+  const fmtDate = (d: string) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+  const fmtShort = (d: string) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
+
+  // Build the snapshot for the selected date
+  const snapshot = useMemo(() => {
+    if (!selectedDate) return [];
+    const eodRecs = availabilityRecords.filter((r: any) =>
+      r.date === selectedDate && r.note && r.note.startsWith('__EOD__')
+    );
+    return athletes.map((a: Athlete) => {
+      const rec = eodRecs.find((r: any) => r.athleteId === a.id);
+      if (!rec) return null;
+      const noteText = rec.note.replace(/^__EOD__/, '');
+      return {
+        athlete: a,
+        status: rec.status,
+        note: noteText,
+        // injuries live on the athlete record (forward-propagated) — show active ones as of selected date
+        injuries: (a.injuries || []).filter((i: any) => i.startDate <= selectedDate && (!i.returnDate || i.returnDate >= selectedDate)),
+      };
+    }).filter(Boolean);
+  }, [selectedDate, availabilityRecords, athletes]);
+
+  // Group by status
+  const byStatus = useMemo(() => ({
+    Unavailable: snapshot.filter((r: any) => r.status === 'Unavailable').sort((a: any, b: any) => a.athlete.name.localeCompare(b.athlete.name)),
+    Modified:    snapshot.filter((r: any) => r.status === 'Modified').sort((a: any, b: any) => a.athlete.name.localeCompare(b.athlete.name)),
+    Available:   snapshot.filter((r: any) => r.status === 'Available').sort((a: any, b: any) => a.athlete.name.localeCompare(b.athlete.name)),
+  }), [snapshot]);
+
+  // For Available: group by position group then by position number
+  const availableByGroup = useMemo(() => {
+    const groups: Record<string, { posName: string; posNumber: number; athletes: any[] }[]> = {};
+    byStatus.Available.forEach((row: any) => {
+      const posNums = row.athlete.positionNumbers || [];
+      if (posNums.length === 0) {
+        if (!groups['Unassigned']) groups['Unassigned'] = [];
+        let pos = groups['Unassigned'].find(p => p.posName === 'Unassigned');
+        if (!pos) { pos = { posName: 'Unassigned', posNumber: 999, athletes: [] }; groups['Unassigned'].push(pos); }
+        pos.athletes.push(row);
+        return;
+      }
+      // Use the primary (lowest) position number
+      const primaryNum = Math.min(...posNums);
+      const posInfo = teamStructure.find((p: any) => p.number === primaryNum);
+      const group = posInfo?.group || 'Other';
+      const posName = posInfo?.name || `Pos ${primaryNum}`;
+      if (!groups[group]) groups[group] = [];
+      let posEntry = groups[group].find(p => p.posName === posName);
+      if (!posEntry) { posEntry = { posName, posNumber: primaryNum, athletes: [] }; groups[group].push(posEntry); }
+      posEntry.athletes.push(row);
+    });
+    // Sort positions within each group by position number
+    Object.values(groups).forEach(g => g.sort((a, b) => a.posNumber - b.posNumber));
+    // Return in Forward, Back, Other order
+    const ordered: { group: string; positions: { posName: string; posNumber: number; athletes: any[] }[] }[] = [];
+    ['Forward', 'Back', 'Other', 'Unassigned'].forEach(g => { if (groups[g]) ordered.push({ group: g, positions: groups[g] }); });
+    return ordered;
+  }, [byStatus.Available, teamStructure]);
+
+  const statusConfig: Record<string, { label: string; dot: string; bg: string; header: string; count: number }> = {
+    Unavailable: { label: 'Unavailable', dot: 'bg-red-500',   bg: 'bg-red-50',   header: 'text-red-700',   count: byStatus.Unavailable.length },
+    Modified:    { label: 'Modified',    dot: 'bg-amber-500', bg: 'bg-amber-50', header: 'text-amber-700', count: byStatus.Modified.length },
+    Available:   { label: 'Available',   dot: 'bg-green-500', bg: 'bg-green-50', header: 'text-green-700', count: byStatus.Available.length },
+  };
+
+  if (eodDates.length === 0) {
+    return (
+      <div className="bg-white rounded-lg border border-slate-200 p-10 text-center">
+        <p className="text-slate-400 text-[13px]">No End of Day reports saved yet</p>
+        <p className="text-slate-300 text-[11px] mt-1">Save an End of Day Report from the Availability page to see it here</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Date picker */}
+      <div className="bg-white rounded-lg border border-slate-200 p-4 flex items-center gap-4 flex-wrap">
+        <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+          <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">Report Date</label>
+          <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
+            className="flex-1 h-8 px-3 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+        </div>
+        {/* Quick-jump to available EOD dates */}
+        {eodDates.length > 0 && (
+          <div className="flex gap-1 flex-wrap">
+            {eodDates.slice(0, 5).map(d => (
+              <button key={d} onClick={() => setSelectedDate(d)}
+                className={`h-7 px-2.5 rounded text-[11px] font-medium border transition-colors ${selectedDate === d ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'}`}>
+                {fmtShort(d)}
+              </button>
+            ))}
+          </div>
+        )}
+        {selectedDate && <p className="text-[11px] text-slate-400 w-full">{fmtDate(selectedDate)} · {snapshot.length} athletes</p>}
+      </div>
+
+      {snapshot.length === 0 && selectedDate && (
+        <div className="bg-white rounded-lg border border-slate-200 p-8 text-center">
+          <p className="text-slate-400 text-[13px]">No End of Day report found for {fmtDate(selectedDate)}</p>
+        </div>
+      )}
+
+      {/* Unavailable section */}
+      {byStatus.Unavailable.length > 0 && (
+        <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 bg-red-50 border-b border-red-100">
+            <div className="w-2 h-2 rounded-full bg-red-500" />
+            <h3 className="text-[13px] font-semibold text-red-700">Unavailable</h3>
+            <span className="ml-auto text-[11px] text-red-400 font-medium">{byStatus.Unavailable.length} player{byStatus.Unavailable.length !== 1 ? 's' : ''}</span>
+          </div>
+          <div className="divide-y divide-slate-50">
+            {byStatus.Unavailable.map((row: any) => (
+              <EODAthleteRow key={row.athlete.id} row={row} showPosition={false} fmtShort={fmtShort} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Modified section */}
+      {byStatus.Modified.length > 0 && (
+        <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 bg-amber-50 border-b border-amber-100">
+            <div className="w-2 h-2 rounded-full bg-amber-500" />
+            <h3 className="text-[13px] font-semibold text-amber-700">Modified</h3>
+            <span className="ml-auto text-[11px] text-amber-400 font-medium">{byStatus.Modified.length} player{byStatus.Modified.length !== 1 ? 's' : ''}</span>
+          </div>
+          <div className="divide-y divide-slate-50">
+            {byStatus.Modified.map((row: any) => (
+              <EODAthleteRow key={row.athlete.id} row={row} showPosition={false} fmtShort={fmtShort} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Available section — grouped by position group + position */}
+      {byStatus.Available.length > 0 && (
+        <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 bg-green-50 border-b border-green-100">
+            <div className="w-2 h-2 rounded-full bg-green-500" />
+            <h3 className="text-[13px] font-semibold text-green-700">Available</h3>
+            <span className="ml-auto text-[11px] text-green-400 font-medium">{byStatus.Available.length} player{byStatus.Available.length !== 1 ? 's' : ''}</span>
+          </div>
+          {availableByGroup.map(({ group, positions }) => (
+            <div key={group}>
+              <div className="px-4 py-2 bg-slate-50 border-b border-t border-slate-100">
+                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{group}s</span>
+              </div>
+              {positions.map(({ posName, athletes: posAthletes }) => (
+                <div key={posName}>
+                  <div className="px-4 py-1.5 bg-white border-b border-slate-50 flex items-center gap-2">
+                    <span className="text-[11px] font-medium text-slate-600">{posName}</span>
+                    <span className="text-[10px] text-slate-300">{posAthletes.length}</span>
+                  </div>
+                  <div className="divide-y divide-slate-50">
+                    {posAthletes.map((row: any) => (
+                      <EODAthleteRow key={row.athlete.id} row={row} showPosition={true} fmtShort={fmtShort} />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
+
+// ── Single athlete row inside EOD report ────────────────────────────────────
+const EODAthleteRow = ({ row, showPosition, fmtShort }: { row: any; showPosition: boolean; fmtShort: (d: string) => string }) => {
+  const { athlete, status, note, injuries } = row;
+  const hasDetail = (note && note.trim()) || injuries.length > 0;
+  return (
+    <div className="px-4 py-2.5">
+      <div className="flex items-center gap-2.5">
+        {athlete.photo
+          ? <img src={athlete.photo} alt="" className="w-7 h-7 rounded flex-shrink-0 object-cover" />
+          : <div className="w-7 h-7 bg-slate-100 rounded flex items-center justify-center text-[9px] font-semibold text-slate-400 flex-shrink-0">{athlete.avatar}</div>}
+        <span className="text-[13px] font-medium text-slate-800 flex-1">{athlete.name}</span>
+        {showPosition && athlete.positionNumbers?.length > 0 && (
+          <span className="text-[10px] text-slate-400 bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5">
+            {athlete.positionNumbers.sort((a: number, b: number) => a - b).join(', ')}
+          </span>
+        )}
+      </div>
+      {hasDetail && (
+        <div className="mt-1.5 ml-9 space-y-1">
+          {injuries.map((inj: any) => (
+            <div key={inj.id} className="flex items-start gap-1.5 p-1.5 bg-red-50 border border-red-100 rounded-md text-[11px] text-red-700">
+              <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0 text-red-400" />
+              <div className="flex-1 flex flex-wrap gap-x-2 gap-y-0.5">
+                <span className="font-medium">{inj.bodyPart}</span>
+                {inj.event && <span className="text-red-500">{inj.event}</span>}
+                {inj.contact && <span className="text-red-400">{inj.contact}</span>}
+                {inj.surface && <span className="text-red-400">{inj.surface}</span>}
+                {inj.notes && <span className="text-red-600 w-full">{inj.notes}</span>}
+                {inj.returnDate && <span className="text-slate-400">ETR {fmtShort(inj.returnDate)}</span>}
+                {!inj.returnDate && <span className="text-red-600 font-medium">Season</span>}
+              </div>
+            </div>
+          ))}
+          {note && note.trim() && (
+            <div className="flex items-start gap-1.5 p-1.5 bg-blue-50 border border-blue-100 rounded-md text-[11px] text-blue-700">
+              <MessageSquare className="w-3 h-3 mt-0.5 flex-shrink-0 text-blue-400" />
+              <span>{note.trim()}</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 
 const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, onDeleteDrillType, onSaveSeasonDate, onDeleteSeasonDate, onSaveTeamStructure, onDeleteTeamStructure, saving }: any) => {
   const [expanded, setExpanded] = useState<string | null>('teamStructure');
@@ -1853,7 +2533,7 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
   const [showPositionPicker, setShowPositionPicker] = useState(false);
   const [editingInjuryId, setEditingInjuryId] = useState(null);
   const [showAddInjury, setShowAddInjury] = useState(false);
-  const [injuryData, setInjuryData] = useState({ bodyPart: 'Head', startDate: '', returnDate: '', notes: '' });
+  const [injuryData, setInjuryData] = useState({ bodyPart: 'Head', startDate: '', returnDate: '', notes: '', event: 'Training', surface: '4G', contact: 'Contact' });
 
   if (!athlete) return <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6"><div className="bg-white rounded-lg border border-slate-200 p-6 text-center"><p>Athlete not found</p><button onClick={() => navigateTo('availability')} className="mt-4 px-4 py-2 bg-slate-800 text-white rounded-lg text-sm">Back</button></div></div>;
 
@@ -1875,7 +2555,7 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
     if (injuryData.bodyPart && injuryData.startDate) {
       if (editingInjuryId) setInjuries(injuries.map((i: any) => i.id === editingInjuryId ? {...i, ...injuryData} : i));
       else setInjuries([...injuries, {id: Date.now(), ...injuryData}]);
-      setInjuryData({ bodyPart: 'Head', startDate: '', returnDate: '', notes: '' });
+      setInjuryData({ bodyPart: 'Head', startDate: '', returnDate: '', notes: '', event: 'Training', surface: '4G', contact: 'Contact' });
       setEditingInjuryId(null);
       setShowAddInjury(false);
     }
@@ -1925,15 +2605,24 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
         <div className="bg-white rounded-lg border border-slate-200 p-4">
           <div className="flex justify-between items-center mb-3">
             <h3 className="font-semibold text-sm">Injuries</h3>
-            {!showAddInjury && <button onClick={() => { setShowAddInjury(true); setEditingInjuryId(null); setInjuryData({ bodyPart: 'Head', startDate: today, returnDate: '', notes: '' }); }} className="text-xs text-blue-600 font-medium">+ Add</button>}
+            {!showAddInjury && <button onClick={() => { setShowAddInjury(true); setEditingInjuryId(null); setInjuryData({ bodyPart: 'Head', startDate: today, returnDate: '', notes: '', event: 'Training', surface: '4G', contact: 'Contact' }); }} className="text-xs text-blue-600 font-medium">+ Add</button>}
           </div>
           {showAddInjury && (
             <div className="mb-4 p-3 bg-gray-50 rounded-lg space-y-3">
               <div><label className="block text-xs text-gray-500 mb-1">Body Part</label><select value={injuryData.bodyPart} onChange={e => setInjuryData({...injuryData, bodyPart: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg">{BODY_PARTS.map(bp => <option key={bp}>{bp}</option>)}</select></div>
+              <div className="grid grid-cols-3 gap-2">
+                <div><label className="block text-xs text-gray-500 mb-1">Event</label><select value={injuryData.event || 'Training'} onChange={e => setInjuryData({...injuryData, event: e.target.value})} className="w-full px-2 py-2 text-sm border rounded-lg"><option>Training</option><option>Match</option><option>Other</option></select></div>
+                <div><label className="block text-xs text-gray-500 mb-1">Surface</label><select value={injuryData.surface || '4G'} onChange={e => setInjuryData({...injuryData, surface: e.target.value})} className="w-full px-2 py-2 text-sm border rounded-lg"><option value="4G">4G</option><option>Grass</option><option>Other</option></select></div>
+                <div><label className="block text-xs text-gray-500 mb-1">Contact</label><select value={injuryData.contact || 'Contact'} onChange={e => setInjuryData({...injuryData, contact: e.target.value})} className="w-full px-2 py-2 text-sm border rounded-lg"><option>Contact</option><option>Non-Contact</option></select></div>
+              </div>
               <div className="grid grid-cols-2 gap-2">
                 <div><label className="block text-xs text-gray-500 mb-1">Start Date</label><input type="date" value={injuryData.startDate} onChange={e => setInjuryData({...injuryData, startDate: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" /></div>
-                <div><label className="block text-xs text-gray-500 mb-1">Est. Return</label><input type="date" value={injuryData.returnDate} onChange={e => setInjuryData({...injuryData, returnDate: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" /></div>
+                <div><label className="block text-xs text-gray-500 mb-1">Est. Return (ETR)</label><input type="date" value={injuryData.returnDate} onChange={e => setInjuryData({...injuryData, returnDate: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" /></div>
               </div>
+              {injuryData.startDate && injuryData.returnDate && (() => {
+                const days = Math.round((new Date(injuryData.returnDate).getTime() - new Date(injuryData.startDate).getTime()) / 86400000);
+                return days >= 0 ? <div className="px-3 py-2 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-700 font-medium">⏱ Time Loss: {days} day{days !== 1 ? 's' : ''}</div> : null;
+              })()}
               <div><label className="block text-xs text-gray-500 mb-1">Notes</label><textarea value={injuryData.notes} onChange={e => setInjuryData({...injuryData, notes: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" rows={2} /></div>
               <div className="flex gap-2"><button onClick={saveInjury} className="flex-1 px-3 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium">{editingInjuryId ? 'Update' : 'Add'}</button><button onClick={() => { setShowAddInjury(false); setEditingInjuryId(null); }} className="flex-1 px-3 py-2 bg-gray-100 rounded-lg text-sm">Cancel</button></div>
             </div>
@@ -1949,7 +2638,7 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
                     {inj.notes && <p className="text-xs text-red-700 mt-1">{inj.notes}</p>}
                   </div>
                   <div className="flex gap-1">
-                    <button onClick={() => { setInjuryData({ bodyPart: inj.bodyPart, startDate: inj.startDate, returnDate: inj.returnDate || '', notes: inj.notes || '' }); setEditingInjuryId(inj.id); setShowAddInjury(true); }} className="p-1 hover:bg-red-100 rounded"><Edit2 className="w-3 h-3 text-red-600" /></button>
+                    <button onClick={() => { setInjuryData({ bodyPart: inj.bodyPart, startDate: inj.startDate, returnDate: inj.returnDate || '', notes: inj.notes || '', event: inj.event || 'Training', surface: inj.surface || '4G', contact: inj.contact || 'Contact' }); setEditingInjuryId(inj.id); setShowAddInjury(true); }} className="p-1 hover:bg-red-100 rounded"><Edit2 className="w-3 h-3 text-red-600" /></button>
                     <button onClick={() => setInjuries(injuries.filter(i => i.id !== inj.id))} className="p-1 hover:bg-red-100 rounded"><Trash2 className="w-3 h-3 text-red-600" /></button>
                   </div>
                 </div>
@@ -1967,7 +2656,7 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
                     {inj.notes && <p className="text-xs text-gray-600 mt-1">{inj.notes}</p>}
                   </div>
                   <div className="flex gap-1">
-                    <button onClick={() => { setInjuryData({ bodyPart: inj.bodyPart, startDate: inj.startDate, returnDate: inj.returnDate || '', notes: inj.notes || '' }); setEditingInjuryId(inj.id); setShowAddInjury(true); }} className="p-1 hover:bg-gray-100 rounded"><Edit2 className="w-3 h-3 text-gray-500" /></button>
+                    <button onClick={() => { setInjuryData({ bodyPart: inj.bodyPart, startDate: inj.startDate, returnDate: inj.returnDate || '', notes: inj.notes || '', event: inj.event || 'Training', surface: inj.surface || '4G', contact: inj.contact || 'Contact' }); setEditingInjuryId(inj.id); setShowAddInjury(true); }} className="p-1 hover:bg-gray-100 rounded"><Edit2 className="w-3 h-3 text-gray-500" /></button>
                     <button onClick={() => setInjuries(injuries.filter(i => i.id !== inj.id))} className="p-1 hover:bg-gray-100 rounded"><Trash2 className="w-3 h-3 text-gray-500" /></button>
                   </div>
                 </div>
@@ -1988,6 +2677,135 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
             <button onClick={async () => { if (window.confirm('Delete this athlete?')) { await onDelete(athleteId); navigateTo('availability'); }}}
               className="w-full h-9 bg-red-50 text-red-600 border border-red-200 rounded-lg text-[13px] font-medium hover:bg-red-100 transition-colors">Delete Athlete</button>
           )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
+const InjuryReportPage = ({ athletes, teamStructure }: any) => {
+  const [filterEvent, setFilterEvent] = useState<string[]>([]);
+  const [filterSurface, setFilterSurface] = useState<string[]>([]);
+  const [filterContact, setFilterContact] = useState<string[]>([]);
+  const [filterStatus, setFilterStatus] = useState<string[]>([]);
+
+  const today = new Date().toISOString().split('T')[0];
+
+  const EVENT_OPTS = ['Training', 'Match', 'Other'];
+  const SURFACE_OPTS = ['4G', 'Grass', 'Other'];
+  const CONTACT_OPTS = ['Contact', 'Non-Contact'];
+  const STATUS_OPTS = ['Active', 'Resolved'];
+
+  const toggleFilter = (arr: string[], val: string, set: (v: string[]) => void) => {
+    set(arr.includes(val) ? arr.filter(x => x !== val) : [...arr, val]);
+  };
+
+  const FilterChips = ({ label, opts, active, set }: { label: string; opts: string[]; active: string[]; set: (v: string[]) => void }) => (
+    <div className="mb-3">
+      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">{label}</p>
+      <div className="flex flex-wrap gap-1.5">
+        {opts.map(o => (
+          <button key={o} onClick={() => toggleFilter(active, o, set)}
+            className={`px-2.5 py-1 rounded text-[11px] font-medium border transition-colors ${active.includes(o) ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
+            {o}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  const allInjuries: { athlete: any; injury: any; position: string; status: string; timeLoss: number | null }[] = [];
+  athletes.forEach((a: any) => {
+    if (!a.injuries) return;
+    a.injuries.forEach((inj: any) => {
+      const isActive = !inj.returnDate || inj.returnDate >= today;
+      const status = isActive ? 'Active' : 'Resolved';
+      const timeLoss = inj.startDate && inj.returnDate
+        ? Math.round((new Date(inj.returnDate).getTime() - new Date(inj.startDate).getTime()) / 86400000)
+        : null;
+      const position = getPositionDisplay(a.positionNumbers || [], teamStructure);
+      allInjuries.push({ athlete: a, injury: inj, position, status, timeLoss });
+    });
+  });
+
+  const filtered = allInjuries.filter(row => {
+    if (filterEvent.length > 0 && !filterEvent.includes(row.injury.event || 'Training')) return false;
+    if (filterSurface.length > 0 && !filterSurface.includes(row.injury.surface || '4G')) return false;
+    if (filterContact.length > 0 && !filterContact.includes(row.injury.contact || 'Contact')) return false;
+    if (filterStatus.length > 0 && !filterStatus.includes(row.status)) return false;
+    return true;
+  });
+
+  const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }) : '—';
+  const nameParts = (name: string) => {
+    const parts = (name || '').trim().split(' ');
+    return { first: parts[0] || '', last: parts.slice(1).join(' ') || '' };
+  };
+
+  return (
+    <div className="max-w-md md:max-w-5xl mx-auto p-4 md:p-6">
+      {/* Filters */}
+      <div className="bg-white rounded-lg border border-slate-200 p-4 mb-4">
+        <h3 className="text-[13px] font-semibold text-slate-800 mb-3">Filters</h3>
+        <FilterChips label="Event" opts={EVENT_OPTS} active={filterEvent} set={setFilterEvent} />
+        <FilterChips label="Surface" opts={SURFACE_OPTS} active={filterSurface} set={setFilterSurface} />
+        <FilterChips label="Contact" opts={CONTACT_OPTS} active={filterContact} set={setFilterContact} />
+        <FilterChips label="Status" opts={STATUS_OPTS} active={filterStatus} set={setFilterStatus} />
+        {(filterEvent.length + filterSurface.length + filterContact.length + filterStatus.length) > 0 && (
+          <button onClick={() => { setFilterEvent([]); setFilterSurface([]); setFilterContact([]); setFilterStatus([]); }}
+            className="text-[11px] text-slate-400 hover:text-slate-600 mt-1">Clear all filters</button>
+        )}
+      </div>
+
+      {/* Table */}
+      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+          <h3 className="text-[13px] font-semibold text-slate-800">Injury Log</h3>
+          <span className="text-[11px] text-slate-400">{filtered.length} record{filtered.length !== 1 ? 's' : ''}</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-100">
+                <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">First</th>
+                <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Last</th>
+                <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Position</th>
+                <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Body Part</th>
+                <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Event</th>
+                <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Surface</th>
+                <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Contact</th>
+                <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Start</th>
+                <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">ETR</th>
+                <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Days Lost</th>
+                <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {filtered.length === 0 ? (
+                <tr><td colSpan={11} className="text-center py-10 text-slate-400">No injuries match the selected filters</td></tr>
+              ) : filtered.map((row, i) => {
+                const { first, last } = nameParts(row.athlete.name);
+                return (
+                  <tr key={i} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-3 py-2.5 font-medium text-slate-800">{first}</td>
+                    <td className="px-3 py-2.5 text-slate-700">{last}</td>
+                    <td className="px-3 py-2.5 text-slate-500">{row.position}</td>
+                    <td className="px-3 py-2.5 text-slate-700">{row.injury.bodyPart}</td>
+                    <td className="px-3 py-2.5"><span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px]">{row.injury.event || 'Training'}</span></td>
+                    <td className="px-3 py-2.5"><span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px]">{row.injury.surface || '4G'}</span></td>
+                    <td className="px-3 py-2.5"><span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px]">{row.injury.contact || 'Contact'}</span></td>
+                    <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">{fmtDate(row.injury.startDate)}</td>
+                    <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">{fmtDate(row.injury.returnDate)}</td>
+                    <td className="px-3 py-2.5 font-medium text-slate-700">{row.timeLoss !== null ? row.timeLoss : '—'}</td>
+                    <td className="px-3 py-2.5">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${row.status === 'Active' ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-green-50 text-green-600 border border-green-100'}`}>{row.status}</span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
