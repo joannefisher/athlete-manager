@@ -336,38 +336,52 @@ const AthleteManager = () => {
 
 
   const saveEndOfDayReport = async (date: string, eodAthletes: Athlete[]) => {
-    // Save EOD snapshot — stored as availability_records with a distinct report_date_eod note prefix
-    // Does NOT overwrite existing records for the day
     setSaving(true);
     try {
-      // Write EOD snapshot to a dedicated key in Supabase (availability_records with note prefixed)
-      // We use a separate insert — not a delete/replace — so original records stay intact
-      // EOD records are identified by note starting with '__EOD__'
-      await supabase.from('availability_records').delete()
-        .eq('date', date)
-        .like('note', '__EOD__%');
+      // Step 1: Find and delete existing EOD rows for this date.
+      // Cannot use .like('note','__EOD__%') because _ is a SQL wildcard — fetch first, filter in JS.
+      const { data: existingRows } = await supabase
+        .from('availability_records')
+        .select('id, note')
+        .eq('date', date);
 
+      const eodIds = (existingRows || [])
+        .filter((r: any) => typeof r.note === 'string' && r.note.startsWith('__EOD__'))
+        .map((r: any) => r.id);
+
+      if (eodIds.length > 0) {
+        const { error: delErr } = await supabase
+          .from('availability_records')
+          .delete()
+          .in('id', eodIds);
+        if (delErr) throw new Error('Delete EOD rows: ' + delErr.message);
+      }
+
+      // Step 2: Insert fresh EOD snapshot rows
       const eodRecords = eodAthletes.map((a: Athlete) => ({
         date,
         athlete_id: a.id,
         status: a.status,
-        note: `__EOD__${a.notes || ''}`
+        note: '__EOD__' + (a.notes || ''),
       }));
-      await supabase.from('availability_records').insert(eodRecords);
+      const { error: insErr } = await supabase.from('availability_records').insert(eodRecords);
+      if (insErr) throw new Error('Insert EOD records: ' + insErr.message);
 
-      // Forward-propagate changes to athletes table (base for future days)
+      // Step 3: Forward-propagate to athletes + injuries for future days
       for (const a of eodAthletes) {
-        await supabase.from('athletes').update({
+        const { error: athErr } = await supabase.from('athletes').update({
           status: a.status,
           notes: a.notes,
           is_public: a.isPublic,
         }).eq('id', a.id);
+        if (athErr) throw new Error('Update athlete ' + a.id + ': ' + athErr.message);
 
-        // Update injuries
-        await supabase.from('athlete_injuries').delete().eq('athlete_id', a.id);
-        if (a.injuries?.length > 0) {
-          await supabase.from('athlete_injuries').insert(
-            a.injuries.map((i: Injury) => ({
+        const { error: injDelErr } = await supabase.from('athlete_injuries').delete().eq('athlete_id', a.id);
+        if (injDelErr) throw new Error('Delete injuries: ' + injDelErr.message);
+
+        if (a.injuries && a.injuries.length > 0) {
+          const { error: injInsErr } = await supabase.from('athlete_injuries').insert(
+            a.injuries.map((i: any) => ({
               athlete_id: a.id,
               body_part: i.bodyPart,
               start_date: i.startDate,
@@ -378,15 +392,17 @@ const AthleteManager = () => {
               contact: i.contact || null,
             }))
           );
+          if (injInsErr) throw new Error('Insert injuries: ' + injInsErr.message);
         }
       }
 
       await fetchAllData();
     } catch (error) {
       console.error('Error saving EOD report:', error);
-    } finally {
       setSaving(false);
+      throw error; // surface to handleSave so the error toast shows
     }
+    setSaving(false);
   };
 
   const saveAvailability = async (date: string) => {
