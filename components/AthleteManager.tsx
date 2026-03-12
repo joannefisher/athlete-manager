@@ -6,6 +6,15 @@ import { supabase } from '@/lib/supabase';
 
 const BODY_PARTS = ['Head', 'Neck', 'Shoulder', 'Arm', 'Elbow', 'Wrist', 'Hand', 'Chest', 'Back', 'Hip', 'Groin', 'Thigh', 'Hamstring', 'Knee', 'Calf', 'Ankle', 'Foot', 'Other'];
 
+type Role = 'Admin' | 'S&C' | 'Physio' | 'Coach';
+
+const ROLE_ACCESS: Record<Role, string[]> = {
+  'Admin':  ['home', 'availability', 'session-plan', 'reporting', 'setup'],
+  'S&C':    ['availability', 'reporting'],
+  'Physio': ['availability', 'reporting'],
+  'Coach':  ['home', 'reporting'],
+};
+
 // Type definitions
 interface TeamPosition {
   id: string;
@@ -566,6 +575,8 @@ const AthleteManager = () => {
     await loadSessionPlan(newDate);
   };
 
+  const [role, setRole] = useState<Role>('Admin');
+
   const navigateTo = (page: string) => { setCurrentPage(page); setShowMenu(false); };
   const getPageTitle = () => ({ home: 'Home', availability: 'Availability', 'session-plan': 'Session Plan', 'add-drill': 'Create Drill', 'athlete-profile': 'Athlete Profile', setup: 'Setup', reporting: 'Reporting' }[currentPage] || 'Team');
 
@@ -580,42 +591,92 @@ const AthleteManager = () => {
     );
   }
 
+  const allNavItems = [
+    { page: 'home', Icon: Target, label: 'Home' },
+    { page: 'availability', Icon: Calendar, label: 'Availability' },
+    { page: 'session-plan', Icon: Zap, label: 'Session Plan' },
+    { page: 'reporting', Icon: BarChart3, label: 'Reporting' },
+    { page: 'setup', Icon: Settings, label: 'Setup' },
+  ];
+  const navItems = allNavItems.filter(item => ROLE_ACCESS[role].includes(item.page));
+
+  // If current page not accessible for role, redirect to first allowed page
+  const allowedPages = ROLE_ACCESS[role];
+  const effectivePage = allowedPages.includes(currentPage) ? currentPage : allowedPages[0];
+
+  const RoleDropdown = () => (
+    <select value={role} onChange={e => { const r = e.target.value as Role; setRole(r); setCurrentPage(ROLE_ACCESS[r][0]); }}
+      className="text-xs border border-gray-300 rounded-lg px-2 py-1.5 bg-white text-gray-700 font-medium focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+      {(['Admin', 'S&C', 'Physio', 'Coach'] as Role[]).map(r => <option key={r} value={r}>{r}</option>)}
+    </select>
+  );
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="bg-white shadow-sm sticky top-0 z-10 border-b px-4 py-3">
-        <div className="flex items-center justify-between max-w-md mx-auto">
-          <button onClick={() => setShowMenu(!showMenu)} className="p-2 hover:bg-gray-100 rounded-lg"><Menu className="w-5 h-5" /></button>
-          <h1 className="text-lg font-semibold">{getPageTitle()}</h1>
-          <div className="w-9"></div>
+    <div className="min-h-screen bg-gray-50 flex">
+
+      {/* Desktop sidebar — visible md+ */}
+      <aside className="hidden md:flex flex-col w-52 shrink-0 bg-white border-r border-gray-200 sticky top-0 h-screen z-10">
+        <div className="px-5 py-4 border-b border-gray-200">
+          <span className="text-sm font-bold text-gray-900 tracking-tight">Athlete Manager</span>
         </div>
-      </div>
-      {showMenu && (
-        <div className="fixed inset-0 bg-black/20 z-20" onClick={() => setShowMenu(false)}>
-          <div className="bg-white w-64 h-full shadow-xl" onClick={e => e.stopPropagation()}>
-            <div className="p-4 border-b"><h2 className="text-lg font-semibold">Menu</h2></div>
-            <div className="p-2">
-              {[
-                { page: 'home', Icon: Target, label: 'Home' },
-                { page: 'availability', Icon: Calendar, label: 'Availability' },
-                { page: 'session-plan', Icon: Zap, label: 'Session Plan' },
-                { page: 'reporting', Icon: BarChart3, label: 'Reporting' },
-                { page: 'setup', Icon: Settings, label: 'Setup' }
-              ].map(({ page, Icon, label }) => (
-                <button key={page} onClick={() => navigateTo(page)} className={`w-full text-left px-4 py-3 rounded-lg flex items-center gap-3 ${currentPage === page ? 'bg-indigo-50 text-indigo-700 font-medium' : 'hover:bg-gray-100'}`}>
-                  <Icon className="w-5 h-5" />{label}
-                </button>
-              ))}
+        <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto">
+          {navItems.map(({ page, Icon, label }) => (
+            <button key={page} onClick={() => navigateTo(page)}
+              className={`w-full text-left px-3 py-2.5 rounded-lg flex items-center gap-2.5 text-sm transition-colors ${effectivePage === page ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-100'}`}>
+              <Icon className="w-4 h-4 shrink-0" />{label}
+            </button>
+          ))}
+        </nav>
+        <div className="p-3 border-t border-gray-200">
+          <p className="text-xs text-gray-400 mb-1.5">Viewing as</p>
+          <RoleDropdown />
+        </div>
+      </aside>
+
+      {/* Main area */}
+      <div className="flex-1 flex flex-col min-w-0 min-h-screen">
+
+        {/* Mobile top bar — hidden md+ */}
+        <header className="md:hidden bg-white shadow-sm sticky top-0 z-10 border-b px-4 py-3">
+          <div className="flex items-center justify-between max-w-md mx-auto">
+            <button onClick={() => setShowMenu(!showMenu)} className="p-2 hover:bg-gray-100 rounded-lg"><Menu className="w-5 h-5" /></button>
+            <h1 className="text-lg font-semibold">{getPageTitle()}</h1>
+            <RoleDropdown />
+          </div>
+        </header>
+
+        {/* Desktop page header — visible md+ */}
+        <div className="hidden md:flex items-center justify-between bg-white border-b border-gray-200 px-8 py-4">
+          <h2 className="text-xl font-semibold text-gray-900">{getPageTitle()}</h2>
+        </div>
+
+        {/* Mobile slide-out menu */}
+        {showMenu && (
+          <div className="fixed inset-0 bg-black/20 z-20 md:hidden" onClick={() => setShowMenu(false)}>
+            <div className="bg-white w-64 h-full shadow-xl flex flex-col" onClick={e => e.stopPropagation()}>
+              <div className="p-4 border-b"><h2 className="text-lg font-semibold">Menu</h2></div>
+              <div className="p-2 flex-1">
+                {navItems.map(({ page, Icon, label }) => (
+                  <button key={page} onClick={() => navigateTo(page)} className={`w-full text-left px-4 py-3 rounded-lg flex items-center gap-3 ${effectivePage === page ? 'bg-indigo-50 text-indigo-700 font-medium' : 'hover:bg-gray-100'}`}>
+                    <Icon className="w-5 h-5" />{label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
+        )}
+
+        {/* Page content */}
+        <div className="flex-1">
+          {effectivePage === 'home' && <HomePage athletes={athletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} teamStructure={teamStructure} />}
+          {effectivePage === 'availability' && <AvailabilityPage athletes={athletes} setAthletes={setAthletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} selectedDate={selectedDate} setSelectedDate={setSelectedDate} availabilityRecords={availabilityRecords} teamStructure={teamStructure} onSave={saveAvailability} saving={saving} fetchAllData={fetchAllData} />}
+          {effectivePage === 'session-plan' && <SessionPlanPage drills={drills} setDrills={setDrills} navigateTo={navigateTo} athletes={athletes} drillTypes={drillTypes} teamStructure={teamStructure} defaultTeam={defaultTeam} onSaveDefaultTeam={saveDefaultTeam} selectedDate={selectedDate} onDateChange={handleDateChange} onSaveSessionPlan={saveSessionPlan} saving={saving} />}
+          {effectivePage === 'add-drill' && <AddDrillPage drills={drills} setDrills={setDrills} navigateTo={navigateTo} drillTypes={drillTypes} defaultTeam={defaultTeam} athletes={athletes} teamStructure={teamStructure} />}
+          {effectivePage === 'athlete-profile' && <AthleteProfilePage athletes={athletes} athleteId={selectedAthleteId} navigateTo={navigateTo} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} onSave={saveAthlete} onDelete={deleteAthlete} saving={saving} />}
+          {effectivePage === 'reporting' && <ReportingPage athletes={athletes} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} />}
+          {effectivePage === 'setup' && <SetupPage drillTypes={drillTypes} seasonDates={seasonDates} teamStructure={teamStructure} onSaveDrillType={saveDrillType} onDeleteDrillType={deleteDrillType} onSaveSeasonDate={saveSeasonDate} onDeleteSeasonDate={deleteSeasonDate} onSaveTeamStructure={saveTeamStructure} onDeleteTeamStructure={deleteTeamStructurePosition} saving={saving} />}
         </div>
-      )}
-      {currentPage === 'home' && <HomePage athletes={athletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} teamStructure={teamStructure} />}
-      {currentPage === 'availability' && <AvailabilityPage athletes={athletes} setAthletes={setAthletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} selectedDate={selectedDate} setSelectedDate={setSelectedDate} availabilityRecords={availabilityRecords} teamStructure={teamStructure} onSave={saveAvailability} saving={saving} fetchAllData={fetchAllData} />}
-      {currentPage === 'session-plan' && <SessionPlanPage drills={drills} setDrills={setDrills} navigateTo={navigateTo} athletes={athletes} drillTypes={drillTypes} teamStructure={teamStructure} defaultTeam={defaultTeam} onSaveDefaultTeam={saveDefaultTeam} selectedDate={selectedDate} onDateChange={handleDateChange} onSaveSessionPlan={saveSessionPlan} saving={saving} />}
-      {currentPage === 'add-drill' && <AddDrillPage drills={drills} setDrills={setDrills} navigateTo={navigateTo} drillTypes={drillTypes} defaultTeam={defaultTeam} athletes={athletes} teamStructure={teamStructure} />}
-      {currentPage === 'athlete-profile' && <AthleteProfilePage athletes={athletes} athleteId={selectedAthleteId} navigateTo={navigateTo} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} onSave={saveAthlete} onDelete={deleteAthlete} saving={saving} />}
-      {currentPage === 'reporting' && <ReportingPage athletes={athletes} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} />}
-      {currentPage === 'setup' && <SetupPage drillTypes={drillTypes} seasonDates={seasonDates} teamStructure={teamStructure} onSaveDrillType={saveDrillType} onDeleteDrillType={deleteDrillType} onSaveSeasonDate={saveSeasonDate} onDeleteSeasonDate={deleteSeasonDate} onSaveTeamStructure={saveTeamStructure} onDeleteTeamStructure={deleteTeamStructurePosition} saving={saving} />}
+      </div>
     </div>
   );
 };
@@ -702,7 +763,7 @@ const HomePage = ({ athletes, navigateTo, setSelectedAthleteId, teamStructure }:
   });
 
   return (
-    <div className="max-w-md mx-auto p-4">
+    <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6">
       <div className="bg-white rounded-xl shadow-sm border p-4 mb-4">
         <p className="text-sm text-gray-600 mb-3">{new Date().toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
         <div className="relative mb-3">
@@ -741,7 +802,7 @@ const HomePage = ({ athletes, navigateTo, setSelectedAthleteId, teamStructure }:
           </div>
         )}
       </div>
-      <div className="space-y-2">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-4">
         {filtered.map(a => (
           <div key={a.id} className="bg-white rounded-xl shadow-sm border p-3 cursor-pointer hover:shadow-md" onClick={() => { setSelectedAthleteId(a.id); navigateTo('athlete-profile'); }}>
             <div className="flex items-center gap-3">
@@ -750,8 +811,8 @@ const HomePage = ({ athletes, navigateTo, setSelectedAthleteId, teamStructure }:
               <div className="flex-1"><h3 className="text-sm font-semibold">{a.name}</h3><p className="text-xs text-gray-600">{getPositionDisplay(a.positionNumbers, teamStructure)}</p></div>
               <span className="text-xs text-gray-400">{getPositionGroup(a.positionNumbers, teamStructure)}</span>
             </div>
-            {a.notes && a.isPublic && <div className="mt-2 text-xs bg-gray-50 rounded-lg p-2">{a.notes}</div>}
-            {a.status === 'Unavailable' && <InjuryDisplay athlete={a} />}
+            {a.notes && a.isPublic && <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700 flex items-start gap-1"><MessageSquare className="w-3 h-3 mt-0.5 flex-shrink-0 text-blue-400" /><span>{a.notes}</span></div>}
+            <InjuryDisplay athlete={a} />
           </div>
         ))}
       </div>
@@ -778,7 +839,7 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
   const filteredAthletes = typedAthletes.filter(a => a.name.toLowerCase().includes(searchTerm.toLowerCase()));
 
   return (
-    <div className="max-w-md mx-auto">
+    <div className="max-w-md md:max-w-3xl mx-auto">
       <div className="bg-white shadow-sm border-b px-4 py-3 mb-4">
         <div className="flex gap-2 mb-3">
           <div className="flex-1 relative">
@@ -790,7 +851,8 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
         <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="w-full px-3 py-2 text-sm border rounded-lg" />
       </div>
       {showSaveSuccess && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-sm">✓ Saved!</div>}
-      <div className="px-4 space-y-2 pb-20">
+      <div className="px-4 md:px-6 pb-20">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
         {filteredAthletes.map(athlete => (
           <div key={athlete.id} className="bg-white rounded-xl shadow-sm border p-3">
             <div className="flex items-center gap-3 mb-2">
@@ -814,13 +876,16 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
             {athlete.notes && athlete.isPublic && <div className="mb-2 p-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700 flex items-start gap-1"><MessageSquare className="w-3 h-3 mt-0.5 flex-shrink-0 text-blue-400" /><span>{athlete.notes}</span></div>}
             {athlete.status === 'Unavailable' && <InjuryDisplay athlete={athlete} />}
             <button onClick={() => { setSelectedAthlete(athlete); setTempNotes(athlete.notes); setTempIsPublic(athlete.isPublic); setShowNotesModal(true); }} className={`w-full flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-xs mt-2 font-medium ${athlete.notes ? 'bg-blue-100 text-blue-700 border border-blue-200' : 'bg-gray-100 text-gray-600'}`}>
-              <MessageSquare className="w-3 h-3" />{athlete.notes ? (athlete.isPublic ? 'Edit Public Note' : 'Edit Private Note') : 'Add Note'}
+              <MessageSquare className="w-3 h-3" />{athlete.notes ? 'Edit Note' : 'Add Note'}
             </button>
           </div>
         ))}
+        </div>
       </div>
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4">
-        <button onClick={handleSave} className="w-full px-4 py-3 bg-gray-900 text-white rounded-lg font-medium text-sm">Save</button>
+      <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t p-4">
+        <div className="max-w-md md:max-w-lg mx-auto">
+          <button onClick={handleSave} className="w-full px-4 py-3 bg-gray-900 text-white rounded-lg font-medium text-sm">Save</button>
+        </div>
       </div>
       {showNotesModal && selectedAthlete && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-30">
@@ -877,7 +942,7 @@ const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, 
   }
 
   return (
-    <div className="max-w-md mx-auto p-4">
+    <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6">
       {showSaveSuccess && <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-sm">✓ Session Plan Saved!</div>}
 
       <div className="bg-white rounded-xl shadow-sm border p-3 mb-4">
@@ -919,8 +984,8 @@ const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, 
         )}
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4">
-        <div className="max-w-md mx-auto flex gap-2">
+      <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t p-4">
+        <div className="max-w-md md:max-w-lg mx-auto flex gap-2">
           <button onClick={() => navigateTo('add-drill')} className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-lg font-medium text-sm"><Plus className="w-4 h-4 inline mr-1" />Add Drill</button>
           <button onClick={handleSave} disabled={typedDrills.length === 0} className={`flex-1 px-4 py-3 rounded-lg font-medium text-sm ${typedDrills.length > 0 ? 'bg-gray-900 text-white' : 'bg-gray-200 text-gray-400'}`}>Save</button>
         </div>
@@ -978,7 +1043,7 @@ const AddDrillPage = ({ drills, setDrills, navigateTo, drillTypes, defaultTeam, 
   }
 
   return (
-    <div className="max-w-md mx-auto p-4">
+    <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6">
       <div className="bg-white rounded-xl shadow-sm border p-4 space-y-4 mb-20">
         <div><label className="block text-xs font-medium mb-1">Name</label><input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full px-3 py-2 text-sm border rounded-lg" /></div>
         <div><label className="block text-xs font-medium mb-1">Type</label><select value={type} onChange={e => setType(e.target.value)} className="w-full px-3 py-2 text-sm border rounded-lg">{drillTypes.map(dt => <option key={dt.id}>{dt.name}</option>)}</select></div>
@@ -992,10 +1057,10 @@ const AddDrillPage = ({ drills, setDrills, navigateTo, drillTypes, defaultTeam, 
           </button>
         </div>
       </div>
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4">
-        <div className="flex gap-2">
+      <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t p-4">
+        <div className="max-w-md md:max-w-lg mx-auto flex gap-2">
           <button onClick={() => { if (name) { setDrills([...drills, { id: Date.now(), name, type, notes, intensity, team1, team2, subs1, subs2 }]); navigateTo('session-plan'); }}} className="flex-1 px-4 py-3 bg-gray-900 text-white rounded-lg font-medium text-sm">Save</button>
-          <button onClick={() => navigateTo('session-plan')} className="flex-1 px-4 py-3 bg-gray-100 rounded-lg text-sm">Cancel</button>
+          <button onClick={() => navigateTo('session-plan')} className="px-4 py-3 bg-gray-100 rounded-lg text-sm">Cancel</button>
         </div>
       </div>
     </div>
@@ -1076,7 +1141,7 @@ const TeamSelectionModal = ({ athletes, team1, setTeam1, team2, setTeam2, subs1,
     );
 
     return (
-      <div className="max-w-md mx-auto p-4">
+      <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6">
         <div className="bg-white rounded-xl shadow-sm border">
           <div className="p-4 border-b flex items-center gap-3">
             <button onClick={() => setSelectedCell(null)} className="p-1 hover:bg-gray-100 rounded-lg"><ArrowLeft className="w-5 h-5" /></button>
@@ -1117,7 +1182,7 @@ const TeamSelectionModal = ({ athletes, team1, setTeam1, team2, setTeam2, subs1,
   }
 
   return (
-    <div className="max-w-md mx-auto p-4">
+    <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6">
       <div className="bg-white rounded-xl shadow-sm border">
         <div className="p-4 border-b flex items-center gap-3">
           <button onClick={onBack} className="p-1 hover:bg-gray-100 rounded-lg"><ArrowLeft className="w-5 h-5" /></button>
@@ -1277,7 +1342,7 @@ const ReportingPage = ({ athletes, availabilityRecords, seasonDates, teamStructu
   const path = (data, key) => data.length < 2 ? '' : data.map((d, i) => `${i === 0 ? 'M' : 'L'} ${pad.left + (i / (data.length - 1)) * iW} ${pad.top + iH - (d[key] / 100) * iH}`).join(' ');
 
   return (
-    <div className="max-w-md mx-auto p-4 space-y-4">
+    <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6 space-y-4">
       <div className="bg-white rounded-xl shadow-sm border p-4">
         <h3 className="font-semibold text-sm mb-3">Time Period</h3>
         <div className="flex flex-wrap gap-2 mb-3">
@@ -1356,7 +1421,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
   React.useEffect(() => { setLocalSeasonDates(seasonDates); }, [seasonDates]);
 
   return (
-    <div className="max-w-md mx-auto p-4 space-y-3">
+    <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6 space-y-3">
       <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
         <button onClick={() => setExpanded(expanded === 'teamStructure' ? null : 'teamStructure')} className="w-full p-4 flex justify-between items-center hover:bg-gray-50">
           <div><h3 className="font-semibold text-sm text-left">Team Structure</h3><p className="text-xs text-gray-500">{teamStructure.length} positions</p></div>
@@ -1573,7 +1638,7 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
   const [showAddInjury, setShowAddInjury] = useState(false);
   const [injuryData, setInjuryData] = useState({ bodyPart: 'Head', startDate: '', returnDate: '', notes: '' });
 
-  if (!athlete) return <div className="max-w-md mx-auto p-4"><div className="bg-white rounded-xl shadow-sm border p-6 text-center"><p>Athlete not found</p><button onClick={() => navigateTo('availability')} className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm">Back</button></div></div>;
+  if (!athlete) return <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6"><div className="bg-white rounded-xl shadow-sm border p-6 text-center"><p>Athlete not found</p><button onClick={() => navigateTo('availability')} className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm">Back</button></div></div>;
 
   const genAvatar = (n: string) => { if (!n) return ''; const p = n.trim().split(' '); return p.length >= 2 ? p[0][0].toUpperCase() + p[p.length-1][0].toUpperCase() : n.substring(0,2).toUpperCase(); };
   const isNew = athlete?.name === 'New Athlete' && !athlete?.positionNumbers?.length;
@@ -1600,7 +1665,7 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
   };
 
   return (
-    <div className="max-w-md mx-auto p-4">
+    <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6">
       {showSaveSuccess && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-sm">✓ Saved!</div>}
       <div className="space-y-4 mb-20">
         <div className="bg-white rounded-xl shadow-sm border p-4 space-y-4">
@@ -1696,8 +1761,8 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
         </div>
         <AvailabilityChart athleteId={athleteId} availabilityRecords={availabilityRecords} seasonDates={seasonDates} />
       </div>
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4">
-        <div className="max-w-md mx-auto space-y-2">
+      <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t p-4">
+        <div className="max-w-md md:max-w-lg mx-auto space-y-2">
           <div className="flex gap-2">
             <button onClick={handleSave} className="flex-1 px-4 py-3 bg-gray-900 text-white rounded-lg font-medium text-sm">Save</button>
             <button onClick={() => navigateTo('availability')} className="px-4 py-3 bg-gray-100 rounded-lg text-sm">Cancel</button>
