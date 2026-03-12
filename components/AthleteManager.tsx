@@ -1150,6 +1150,15 @@ const AddDrillPage = ({ drills, setDrills, navigateTo, drillTypes, defaultTeam, 
   const [showTeamSelection, setShowTeamSelection] = useState(false);
   const [nameError, setNameError] = useState(false);
 
+  // Sync whenever the saved default team changes (e.g. after Supabase load completes
+  // or after the user saves a new default team in the same session)
+  useEffect(() => {
+    setTeam1({...defaultTeam.team1});
+    setTeam2({...defaultTeam.team2});
+    setSubs1({...defaultTeam.subs1});
+    setSubs2({...defaultTeam.subs2});
+  }, [defaultTeam]);
+
   const handleSave = () => {
     if (!name.trim()) { setNameError(true); return; }
     const resolvedType = type || typedDrillTypes[0]?.name || 'General';
