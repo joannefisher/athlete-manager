@@ -576,6 +576,14 @@ const AthleteManager = () => {
   };
 
   const [role, setRole] = useState<Role>('Admin');
+  const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
+
+  useEffect(() => {
+    if (!roleDropdownOpen) return;
+    const close = () => setRoleDropdownOpen(false);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [roleDropdownOpen]);
 
   const navigateTo = (page: string) => { setCurrentPage(page); setShowMenu(false); };
   const getPageTitle = () => ({ home: 'Home', availability: 'Availability', 'session-plan': 'Session Plan', 'add-drill': 'Create Drill', 'athlete-profile': 'Athlete Profile', setup: 'Setup', reporting: 'Reporting' }[currentPage] || 'Team');
@@ -604,17 +612,35 @@ const AthleteManager = () => {
   const allowedPages = ROLE_ACCESS[role];
   const effectivePage = allowedPages.includes(currentPage) ? currentPage : allowedPages[0];
 
-  const RoleDropdown = ({ dark = false }: { dark?: boolean }) => (
-    <div className="relative">
-      <select value={role} onChange={e => { const r = e.target.value as Role; setRole(r); setCurrentPage(ROLE_ACCESS[r][0]); }}
-        className={dark
-          ? "text-xs rounded px-2 py-1.5 pr-6 appearance-none cursor-pointer outline-none w-full bg-white/[0.07] border border-white/10 text-white/65"
-          : "text-xs border border-slate-200 rounded px-2 py-1.5 bg-white text-slate-700 font-medium focus:ring-2 focus:ring-blue-500"}>
-        {(['Admin', 'S&C', 'Physio', 'Coach'] as Role[]).map(r => <option key={r} value={r} className="bg-slate-800 text-white">{r}</option>)}
-      </select>
-      {dark && <ChevronDown className="w-3 h-3 text-white/30 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />}
-    </div>
-  );
+  const RoleDropdown = ({ dark = false }: { dark?: boolean }) => {
+    if (!dark) {
+      return (
+        <select value={role} onChange={e => { const r = e.target.value as Role; setRole(r); setCurrentPage(ROLE_ACCESS[r][0]); }}
+          className="text-xs border border-slate-200 rounded px-2 py-1.5 bg-white text-slate-700 font-medium focus:ring-2 focus:ring-blue-500">
+          {(['Admin', 'S&C', 'Physio', 'Coach'] as Role[]).map(r => <option key={r} value={r}>{r}</option>)}
+        </select>
+      );
+    }
+    return (
+      <div className="relative">
+        <button onClick={() => setRoleDropdownOpen(o => !o)}
+          className="w-full flex items-center justify-between px-2.5 py-1.5 bg-white/[0.07] border border-white/10 rounded text-[12px] text-white/65 cursor-pointer">
+          {role}
+          <ChevronDown className={`w-3 h-3 text-white/30 transition-transform ${roleDropdownOpen ? 'rotate-180' : ''}`} />
+        </button>
+        {roleDropdownOpen && (
+          <div className="absolute bottom-full left-0 right-0 mb-1 bg-slate-800 border border-white/10 rounded shadow-xl overflow-hidden z-50">
+            {(['Admin', 'S&C', 'Physio', 'Coach'] as Role[]).map(r => (
+              <button key={r} onClick={() => { setRole(r); setCurrentPage(ROLE_ACCESS[r][0]); setRoleDropdownOpen(false); }}
+                className={`w-full text-left px-3 py-2 text-[12px] transition-colors ${role === r ? 'bg-white/10 text-white' : 'text-white/55 hover:bg-white/[0.06] hover:text-white/80'}`}>
+                {r}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
