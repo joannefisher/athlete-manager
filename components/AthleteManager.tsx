@@ -9,10 +9,10 @@ const BODY_PARTS = ['Head', 'Neck', 'Shoulder', 'Arm', 'Elbow', 'Wrist', 'Hand',
 type Role = 'Admin' | 'S&C' | 'Physio' | 'Coach';
 
 const ROLE_ACCESS: Record<Role, string[]> = {
-  'Admin':  ['home', 'availability', 'session-plan', 'reporting', 'setup'],
-  'S&C':    ['availability', 'reporting'],
-  'Physio': ['availability', 'reporting'],
-  'Coach':  ['home', 'reporting'],
+  'Admin':  ['home', 'availability', 'athlete-profile', 'session-plan', 'add-drill', 'reporting', 'setup'],
+  'S&C':    ['availability', 'athlete-profile', 'reporting'],
+  'Physio': ['availability', 'athlete-profile', 'reporting'],
+  'Coach':  ['home', 'session-plan', 'add-drill', 'reporting'],
 };
 
 // Type definitions
@@ -1148,6 +1148,24 @@ const AddDrillPage = ({ drills, setDrills, navigateTo, drillTypes, defaultTeam, 
   const [subs1, setSubs1] = useState({...defaultTeam.subs1});
   const [subs2, setSubs2] = useState({...defaultTeam.subs2});
   const [showTeamSelection, setShowTeamSelection] = useState(false);
+  const [nameError, setNameError] = useState(false);
+
+  const handleSave = () => {
+    if (!name.trim()) { setNameError(true); return; }
+    const resolvedType = type || typedDrillTypes[0]?.name || 'General';
+    setDrills([...drills, {
+      id: String(Date.now()),
+      name: name.trim(),
+      type: resolvedType,
+      notes,
+      intensity,
+      team1,
+      team2,
+      subs1,
+      subs2,
+    }]);
+    navigateTo('session-plan');
+  };
 
   const getPositionsForDrillType = () => {
     const drillType = drillTypes.find(dt => dt.name === type);
@@ -1187,8 +1205,9 @@ const AddDrillPage = ({ drills, setDrills, navigateTo, drillTypes, defaultTeam, 
       <div className="bg-white rounded-lg border border-slate-200 p-4 space-y-4 mb-24">
         <div>
           <label className="block text-[11px] font-medium text-slate-500 mb-1.5">Name</label>
-          <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Drill name"
-            className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-900 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          <input type="text" value={name} onChange={e => { setName(e.target.value); setNameError(false); }} placeholder="Drill name"
+            className={`w-full h-9 px-3 text-[13px] border rounded bg-slate-50 text-slate-900 focus:outline-none focus:ring-1 ${nameError ? 'border-red-400 focus:ring-red-400' : 'border-slate-200 focus:ring-blue-500'}`} />
+          {nameError && <p className="text-[11px] text-red-500 mt-1">Please enter a drill name</p>}
         </div>
         <div>
           <label className="block text-[11px] font-medium text-slate-500 mb-1.5">Type</label>
@@ -1220,7 +1239,7 @@ const AddDrillPage = ({ drills, setDrills, navigateTo, drillTypes, defaultTeam, 
       </div>
       <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t border-slate-200 p-4">
         <div className="max-w-md md:max-w-lg mx-auto flex gap-2">
-          <button onClick={() => { if (name) { setDrills([...drills, { id: Date.now(), name, type, notes, intensity, team1, team2, subs1, subs2 }]); navigateTo('session-plan'); }}}
+          <button onClick={handleSave}
             className="flex-1 h-10 bg-slate-900 text-white rounded-lg text-[13px] font-medium hover:bg-slate-700 transition-colors">Save</button>
           <button onClick={() => navigateTo('session-plan')}
             className="h-10 px-5 bg-slate-100 text-slate-600 rounded-lg text-[13px] hover:bg-slate-200 transition-colors">Cancel</button>
