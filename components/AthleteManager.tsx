@@ -338,31 +338,22 @@ const AthleteManager = () => {
   const saveEndOfDayReport = async (date: string, eodAthletes: Athlete[]) => {
     setSaving(true);
     try {
-      // Step 1: Find and delete existing EOD rows for this date.
-      // Cannot use .like('note','__EOD__%') because _ is a SQL wildcard — fetch first, filter in JS.
-      const { data: existingRows } = await supabase
+      // Step 1: Delete existing EOD rows for this date.
+      // EOD rows use a synthetic date key: '<date>__EOD__' to avoid the unique(date,athlete_id)
+      // constraint that regular availability rows share.
+      const eodDate = date + '__EOD__';
+      const { error: delErr } = await supabase
         .from('availability_records')
-        .select('id, note')
-        .eq('date', date);
+        .delete()
+        .eq('date', eodDate);
+      if (delErr) throw new Error('Delete EOD rows: ' + delErr.message);
 
-      const eodIds = (existingRows || [])
-        .filter((r: any) => typeof r.note === 'string' && r.note.startsWith('__EOD__'))
-        .map((r: any) => r.id);
-
-      if (eodIds.length > 0) {
-        const { error: delErr } = await supabase
-          .from('availability_records')
-          .delete()
-          .in('id', eodIds);
-        if (delErr) throw new Error('Delete EOD rows: ' + delErr.message);
-      }
-
-      // Step 2: Insert fresh EOD snapshot rows
+      // Step 2: Insert fresh EOD snapshot rows under the synthetic date key
       const eodRecords = eodAthletes.map((a: Athlete) => ({
-        date,
+        date: eodDate,
         athlete_id: a.id,
         status: a.status,
-        note: '__EOD__' + (a.notes || ''),
+        note: a.notes || '',
       }));
       const { error: insErr } = await supabase.from('availability_records').insert(eodRecords);
       if (insErr) throw new Error('Insert EOD records: ' + insErr.message);
@@ -2082,10 +2073,11 @@ const AvailabilityReportTab = ({ athletes, availabilityRecords, seasonDates, tea
 // ── EOD Report Tab ───────────────────────────────────────────────────────────
 const EODReportTab = ({ athletes, availabilityRecords, teamStructure }: any) => {
   const eodDates = useMemo(() => {
+    // EOD rows are stored with date key '<YYYY-MM-DD>__EOD__'
     const dates = [...new Set(
       availabilityRecords
-        .filter((r: any) => r.note && r.note.startsWith('__EOD__'))
-        .map((r: any) => r.date)
+        .filter((r: any) => typeof r.date === 'string' && r.date.endsWith('__EOD__'))
+        .map((r: any) => r.date.replace('__EOD__', ''))
     )].sort().reverse() as string[];
     return dates;
   }, [availabilityRecords]);
@@ -2102,13 +2094,12 @@ const EODReportTab = ({ athletes, availabilityRecords, teamStructure }: any) => 
 
   const snapshot = useMemo(() => {
     if (!selectedDate) return [];
-    const eodRecs = availabilityRecords.filter((r: any) =>
-      r.date === selectedDate && r.note && r.note.startsWith('__EOD__')
-    );
+    const eodDate = selectedDate + '__EOD__';
+    const eodRecs = availabilityRecords.filter((r: any) => r.date === eodDate);
     return athletes.map((a: Athlete) => {
       const rec = eodRecs.find((r: any) => r.athleteId === a.id);
       if (!rec) return null;
-      const noteText = rec.note.replace(/^__EOD__/, '');
+      const noteText = rec.note || '';
       return {
         athlete: a,
         status: rec.status,
