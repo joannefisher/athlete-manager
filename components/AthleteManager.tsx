@@ -177,13 +177,32 @@ const AthleteManager = () => {
       const { data: availData } = await supabase
         .from('availability_records')
         .select('*');
-      if (availData) setAvailabilityRecords(availData.map((r: any) => ({
-        id: r.id,
-        date: r.date,
+
+      // Fetch EOD reports and merge in as synthetic availability records
+      // EOD records are tagged with a note prefix so EODReportTab can identify them
+      const { data: eodData } = await supabase
+        .from('eod_reports')
+        .select('*');
+
+      const eodAsRecords = (eodData || []).map((r: any) => ({
+        id: 'eod_' + r.id,
+        date: r.date + '__EOD__',   // tag so EODReportTab can filter by endsWith('__EOD__')
         athleteId: r.athlete_id,
         status: r.status,
-        note: r.note
-      })));
+        note: r.note,
+        isPublic: r.is_public,
+      }));
+
+      if (availData) setAvailabilityRecords([
+        ...availData.map((r: any) => ({
+          id: r.id,
+          date: r.date,
+          athleteId: r.athlete_id,
+          status: r.status,
+          note: r.note
+        })),
+        ...eodAsRecords,
+      ]);
 
       // Fetch default team
       const { data: defaultTeamData } = await supabase
@@ -338,27 +357,21 @@ const AthleteManager = () => {
   const saveEndOfDayReport = async (date: string, eodAthletes: Athlete[]) => {
     setSaving(true);
     try {
-      // Step 1: Delete existing EOD rows for this date.
-      // EOD rows use a synthetic date key: '<date>__EOD__' to avoid the unique(date,athlete_id)
-      // constraint that regular availability rows share.
-      const eodDate = date + '__EOD__';
-      const { error: delErr } = await supabase
-        .from('availability_records')
-        .delete()
-        .eq('date', eodDate);
-      if (delErr) throw new Error('Delete EOD rows: ' + delErr.message);
-
-      // Step 2: Insert fresh EOD snapshot rows under the synthetic date key
-      const eodRecords = eodAthletes.map((a: Athlete) => ({
-        date: eodDate,
+      // Step 1: Upsert EOD snapshot into eod_reports table (one row per athlete per date)
+      // Uses eod_reports(date, athlete_id) unique key — upsert replaces on conflict.
+      const eodRows = eodAthletes.map((a: Athlete) => ({
+        date,
         athlete_id: a.id,
         status: a.status,
         note: a.notes || '',
+        is_public: a.isPublic,
       }));
-      const { error: insErr } = await supabase.from('availability_records').insert(eodRecords);
-      if (insErr) throw new Error('Insert EOD records: ' + insErr.message);
+      const { error: upsertErr } = await supabase
+        .from('eod_reports')
+        .upsert(eodRows, { onConflict: 'date,athlete_id' });
+      if (upsertErr) throw new Error('Save EOD snapshot: ' + upsertErr.message);
 
-      // Step 3: Forward-propagate to athletes + injuries for future days
+      // Step 2: Forward-propagate to athletes + injuries for future days
       for (const a of eodAthletes) {
         const { error: athErr } = await supabase.from('athletes').update({
           status: a.status,
@@ -391,7 +404,7 @@ const AthleteManager = () => {
     } catch (error) {
       console.error('Error saving EOD report:', error);
       setSaving(false);
-      throw error; // surface to handleSave so the error toast shows
+      throw error;
     }
     setSaving(false);
   };
