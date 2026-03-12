@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Search, Plus, User, Menu, MessageSquare, X, ChevronDown, ChevronUp, Users, Calendar, Zap, Target, ArrowLeft, Camera, Settings, Trash2, Edit2, Check, BarChart3, AlertCircle, Loader2, SlidersHorizontal } from 'lucide-react';
+import { Search, Plus, User, Menu, MessageSquare, X, ChevronDown, ChevronUp, Users, Calendar, Zap, Target, ArrowLeft, Camera, Settings, Trash2, Edit2, Check, BarChart3, AlertCircle, Loader2, SlidersHorizontal, Lock } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 const BODY_PARTS = ['Head', 'Neck', 'Shoulder', 'Arm', 'Elbow', 'Wrist', 'Hand', 'Chest', 'Back', 'Hip', 'Groin', 'Thigh', 'Hamstring', 'Knee', 'Calf', 'Ankle', 'Foot', 'Other'];
@@ -9,9 +9,9 @@ const BODY_PARTS = ['Head', 'Neck', 'Shoulder', 'Arm', 'Elbow', 'Wrist', 'Hand',
 type Role = 'Admin' | 'S&C' | 'Physio' | 'Coach';
 
 const ROLE_ACCESS: Record<Role, string[]> = {
-  'Admin':  ['home', 'availability', 'athlete-profile', 'session-plan', 'add-drill', 'reporting', 'injury-report', 'setup'],
-  'S&C':    ['availability', 'athlete-profile', 'reporting', 'injury-report'],
-  'Physio': ['availability', 'athlete-profile', 'reporting', 'injury-report'],
+  'Admin':  ['home', 'availability', 'athlete-profile', 'session-plan', 'add-drill', 'reporting', 'setup'],
+  'S&C':    ['availability', 'athlete-profile', 'reporting'],
+  'Physio': ['availability', 'athlete-profile', 'reporting'],
   'Coach':  ['home', 'session-plan', 'add-drill', 'reporting'],
 };
 
@@ -644,7 +644,7 @@ const AthleteManager = () => {
   }, [roleDropdownOpen]);
 
   const navigateTo = (page: string) => { setCurrentPage(page); setShowMenu(false); };
-  const getPageTitle = () => ({ home: 'Home', availability: 'Availability', 'session-plan': 'Session Plan', 'add-drill': 'Create Drill', 'athlete-profile': 'Athlete Profile', setup: 'Setup', reporting: 'Reporting', 'injury-report': 'Injury Report' }[currentPage] || 'Team');
+  const getPageTitle = () => ({ home: 'Home', availability: 'Availability', 'session-plan': 'Session Plan', 'add-drill': 'Create Drill', 'athlete-profile': 'Athlete Profile', setup: 'Setup', reporting: 'Reporting' }[currentPage] || 'Team');
 
   if (loading) {
     return (
@@ -662,7 +662,7 @@ const AthleteManager = () => {
     { page: 'availability', Icon: Calendar, label: 'Availability' },
     { page: 'session-plan', Icon: Zap, label: 'Session Plan' },
     { page: 'reporting', Icon: BarChart3, label: 'Reporting' },
-    { page: 'injury-report', Icon: AlertCircle, label: 'Injury Report' },
+
     { page: 'setup', Icon: Settings, label: 'Setup' },
   ];
   const navItems = allNavItems.filter(item => ROLE_ACCESS[role].includes(item.page));
@@ -789,7 +789,7 @@ const AthleteManager = () => {
           {effectivePage === 'add-drill' && <AddDrillPage drills={drills} setDrills={setDrills} navigateTo={navigateTo} drillTypes={drillTypes} defaultTeam={defaultTeam} athletes={athletes} teamStructure={teamStructure} />}
           {effectivePage === 'athlete-profile' && <AthleteProfilePage athletes={athletes} athleteId={selectedAthleteId} navigateTo={navigateTo} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} onSave={saveAthlete} onDelete={deleteAthlete} saving={saving} />}
           {effectivePage === 'reporting' && <ReportingPage athletes={athletes} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} />}
-          {effectivePage === 'injury-report' && <InjuryReportPage athletes={athletes} teamStructure={teamStructure} />}
+
           {effectivePage === 'setup' && <SetupPage drillTypes={drillTypes} seasonDates={seasonDates} teamStructure={teamStructure} onSaveDrillType={saveDrillType} onDeleteDrillType={deleteDrillType} onSaveSeasonDate={saveSeasonDate} onDeleteSeasonDate={deleteSeasonDate} onSaveTeamStructure={saveTeamStructure} onDeleteTeamStructure={deleteTeamStructurePosition} saving={saving} />}
         </div>
       </div>
@@ -1016,12 +1016,17 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
 
   const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
 
+  const [saveError, setSaveError] = useState<string | null>(null);
   const handleSave = async () => {
-    await onSaveEOD(date, eodAthletes);
-    // Also update parent athletes state so UI reflects changes immediately
-    setAthletes(eodAthletes);
-    setShowSaveSuccess(true);
-    setTimeout(() => { setShowSaveSuccess(false); onBack(); }, 1500);
+    setSaveError(null);
+    try {
+      await onSaveEOD(date, eodAthletes);
+      setAthletes(eodAthletes);
+      setShowSaveSuccess(true);
+      setTimeout(() => { setShowSaveSuccess(false); onBack(); }, 1500);
+    } catch (err: any) {
+      setSaveError(err?.message || 'Save failed — please try again');
+    }
   };
 
   const openNoteModal = (a: Athlete) => {
@@ -1069,8 +1074,8 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
     updateAthlete(athleteId, { injuries: (athlete.injuries || []).filter((i: any) => i.id !== injuryId) });
   };
 
-  // Group: Unavailable first, then Modified, then Available; within each group alphabetical
-  const statusOrder: Record<string, number> = { 'Unavailable': 0, 'Modified': 1, 'Available': 2 };
+  // Group: Available first, then Modified, then Unavailable; within each group alphabetical
+  const statusOrder: Record<string, number> = { 'Available': 0, 'Modified': 1, 'Unavailable': 2 };
   const sorted = [...eodAthletes].sort((a, b) => {
     const so = (statusOrder[a.status] ?? 3) - (statusOrder[b.status] ?? 3);
     return so !== 0 ? so : a.name.localeCompare(b.name);
@@ -1086,6 +1091,7 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
   return (
     <div className="max-w-md md:max-w-5xl mx-auto p-4 md:p-6">
       {showSaveSuccess && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-green-700 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-[13px] font-medium">✓ End of Day Report saved — changes applied to future days</div>}
+      {saveError && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-red-600 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-[13px] font-medium">⚠ {saveError}</div>}
 
       {/* Header */}
       <div className="flex items-center gap-3 mb-4">
@@ -1173,11 +1179,17 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
                               <button onClick={() => removeInjury(a.id, inj.id)} className="p-0.5 hover:bg-red-100 rounded flex-shrink-0"><X className="w-2.5 h-2.5 text-red-400" /></button>
                             </div>
                           ))}
-                          {/* Public note */}
+                          {/* Public note — always visible on table */}
                           {a.notes && a.isPublic && (
                             <div className="flex items-start gap-1.5 p-1.5 bg-blue-50 border border-blue-100 rounded text-[11px] text-blue-700">
                               <MessageSquare className="w-3 h-3 mt-0.5 flex-shrink-0 text-blue-400" />
                               <span className="flex-1">{a.notes}</span>
+                            </div>
+                          )}
+                          {/* Private note — exists but content hidden; owner can see/edit */}
+                          {a.notes && !a.isPublic && (
+                            <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-[10px] text-slate-400 italic">
+                              <Lock className="w-2.5 h-2.5 flex-shrink-0" />Private note
                             </div>
                           )}
                           {/* Action buttons */}
@@ -1188,7 +1200,8 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
                             </button>
                             <button onClick={() => openNoteModal(a)}
                               className={`flex items-center gap-1 px-2 h-6 rounded text-[10px] font-medium transition-colors border ${a.notes ? 'bg-blue-50 text-blue-600 border-blue-100 hover:bg-blue-100' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}>
-                              <MessageSquare className="w-2.5 h-2.5" />{a.notes ? 'Edit Note' : 'Add Note'}
+                              <MessageSquare className="w-2.5 h-2.5" />
+                              {a.notes ? (a.isPublic ? 'Edit Note' : 'Edit Private Note') : 'Add Note'}
                             </button>
                           </div>
                         </div>
@@ -1465,11 +1478,11 @@ const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, 
   const isToday = selectedDate === today;
 
   if (editingDefaultTeam) {
-    return <TeamSelectionModal athletes={typedAthletes} team1={tempDefaultTeam.team1} setTeam1={(t: any) => setTempDefaultTeam({...tempDefaultTeam, team1: t})} team2={tempDefaultTeam.team2} setTeam2={(t: any) => setTempDefaultTeam({...tempDefaultTeam, team2: t})} subs1={tempDefaultTeam.subs1} setSubs1={(t: any) => setTempDefaultTeam({...tempDefaultTeam, subs1: t})} subs2={tempDefaultTeam.subs2} setSubs2={(t: any) => setTempDefaultTeam({...tempDefaultTeam, subs2: t})} onBack={handleSaveDefaultTeam} positions={typedTeamStructure.map(p => p.number)} teamStructure={typedTeamStructure} title="Edit Default Team" />;
+    return <TeamSelectionModal athletes={typedAthletes} team1={tempDefaultTeam.team1} setTeam1={(t: any) => setTempDefaultTeam((prev: any) => ({...prev, team1: t}))} team2={tempDefaultTeam.team2} setTeam2={(t: any) => setTempDefaultTeam((prev: any) => ({...prev, team2: t}))} subs1={tempDefaultTeam.subs1} setSubs1={(t: any) => setTempDefaultTeam((prev: any) => ({...prev, subs1: t}))} subs2={tempDefaultTeam.subs2} setSubs2={(t: any) => setTempDefaultTeam((prev: any) => ({...prev, subs2: t}))} onClearAll={() => setTempDefaultTeam({ team1: {}, team2: {}, subs1: {}, subs2: {} })} onBack={handleSaveDefaultTeam} positions={typedTeamStructure.map(p => p.number)} teamStructure={typedTeamStructure} title="Edit Default Team" />;
   }
 
   if (editingTeam) {
-    return <TeamSelectionModal athletes={typedAthletes} team1={editingTeam.team1 || {}} setTeam1={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, team1: t} : d)); setEditingTeam({...editingTeam, team1: t}); }} team2={editingTeam.team2 || {}} setTeam2={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, team2: t} : d)); setEditingTeam({...editingTeam, team2: t}); }} subs1={editingTeam.subs1 || {}} setSubs1={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, subs1: t} : d)); setEditingTeam({...editingTeam, subs1: t}); }} subs2={editingTeam.subs2 || {}} setSubs2={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, subs2: t} : d)); setEditingTeam({...editingTeam, subs2: t}); }} onBack={() => setEditingTeam(null)} positions={getPositionsForDrill(editingTeam)} teamStructure={typedTeamStructure} title="Edit Team" />;
+    return <TeamSelectionModal athletes={typedAthletes} team1={editingTeam.team1 || {}} setTeam1={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, team1: t} : d)); setEditingTeam((prev: any) => ({...prev, team1: t})); }} team2={editingTeam.team2 || {}} setTeam2={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, team2: t} : d)); setEditingTeam((prev: any) => ({...prev, team2: t})); }} subs1={editingTeam.subs1 || {}} setSubs1={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, subs1: t} : d)); setEditingTeam((prev: any) => ({...prev, subs1: t})); }} subs2={editingTeam.subs2 || {}} setSubs2={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, subs2: t} : d)); setEditingTeam((prev: any) => ({...prev, subs2: t})); }} onClearAll={() => { const empty = {team1:{},team2:{},subs1:{},subs2:{}}; setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, ...empty} : d)); setEditingTeam((prev: any) => ({...prev, ...empty})); }} onBack={() => setEditingTeam(null)} positions={getPositionsForDrill(editingTeam)} teamStructure={typedTeamStructure} title="Edit Team" />;
   }
 
   return (
@@ -1644,6 +1657,7 @@ const AddDrillPage = ({ drills, setDrills, navigateTo, drillTypes, defaultTeam, 
         setSubs1={setSubs1}
         subs2={subs2}
         setSubs2={setSubs2}
+        onClearAll={() => { setTeam1({}); setTeam2({}); setSubs1({}); setSubs2({}); }}
         onBack={() => setShowTeamSelection(false)}
         positions={getPositionsForDrillType()}
         teamStructure={teamStructure}
@@ -1701,7 +1715,7 @@ const AddDrillPage = ({ drills, setDrills, navigateTo, drillTypes, defaultTeam, 
   );
 };
 
-const TeamSelectionModal = ({ athletes, team1, setTeam1, team2, setTeam2, subs1, setSubs1, subs2, setSubs2, onBack, positions, teamStructure, title = "Team Selection" }: any) => {
+const TeamSelectionModal = ({ athletes, team1, setTeam1, team2, setTeam2, subs1, setSubs1, subs2, setSubs2, onBack, onClearAll, positions, teamStructure, title = "Team Selection" }: any) => {
   const [selectedCell, setSelectedCell] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -1847,7 +1861,7 @@ const TeamSelectionModal = ({ athletes, team1, setTeam1, team2, setTeam2, subs1,
             <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-red-500"></div>Unavailable</div>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => { setTeam1({}); setTeam2({}); setSubs1({}); setSubs2({}); }} className="flex-1 px-4 py-2 bg-red-50 text-red-600 border border-red-100 rounded-lg text-sm font-medium hover:bg-red-100 transition-colors">Clear All</button>
+            <button onClick={() => { setTeam1({}); setTeam2({}); setSubs1({}); setSubs2({}); onClearAll && onClearAll(); }} className="flex-1 px-4 py-2 bg-red-50 text-red-600 border border-red-100 rounded-lg text-sm font-medium hover:bg-red-100 transition-colors">Clear All</button>
             <button onClick={onBack} className="flex-1 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium">Done</button>
           </div>
         </div>
@@ -1898,43 +1912,34 @@ const AvailabilityChart = ({ athleteId, availabilityRecords, seasonDates }: any)
 };
 
 const ReportingPage = ({ athletes, availabilityRecords, seasonDates, teamStructure }: any) => {
-  const [activeTab, setActiveTab] = useState<'availability' | 'eod'>('availability');
+  const [activeTab, setActiveTab] = useState<'availability' | 'eod' | 'injury'>('availability');
 
   return (
     <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6 space-y-4">
-      {/* Tab switcher */}
+      {/* Tab bar */}
       <div className="flex gap-1 p-1 bg-slate-100 rounded-lg w-fit">
-        <button onClick={() => setActiveTab('availability')}
-          className={`px-4 py-1.5 rounded text-[12px] font-medium transition-colors ${activeTab === 'availability' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-          Availability
-        </button>
-        <button onClick={() => setActiveTab('eod')}
-          className={`px-4 py-1.5 rounded text-[12px] font-medium transition-colors ${activeTab === 'eod' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-          End of Day Report
-        </button>
+        {([['availability','Availability'],['eod','End of Day'],['injury','Injury Report']] as const).map(([tab, label]) => (
+          <button key={tab} onClick={() => setActiveTab(tab)}
+            className={`px-4 py-1.5 rounded text-[12px] font-medium transition-colors whitespace-nowrap ${activeTab === tab ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+            {label}
+          </button>
+        ))}
       </div>
 
       {activeTab === 'availability' && (
-        <AvailabilityReportTab
-          athletes={athletes}
-          availabilityRecords={availabilityRecords}
-          seasonDates={seasonDates}
-          teamStructure={teamStructure}
-        />
+        <AvailabilityReportTab athletes={athletes} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} />
       )}
-
       {activeTab === 'eod' && (
-        <EODReportTab
-          athletes={athletes}
-          availabilityRecords={availabilityRecords}
-          teamStructure={teamStructure}
-        />
+        <EODReportTab athletes={athletes} availabilityRecords={availabilityRecords} teamStructure={teamStructure} />
+      )}
+      {activeTab === 'injury' && (
+        <InjuryReportTab athletes={athletes} teamStructure={teamStructure} seasonDates={seasonDates} availabilityRecords={availabilityRecords} />
       )}
     </div>
   );
 };
 
-// ── Availability trend report (existing content, extracted) ──────────────────
+// ── Availability trend report ────────────────────────────────────────────────
 const AvailabilityReportTab = ({ athletes, availabilityRecords, seasonDates, teamStructure }: any) => {
   const assignedPositions: number[] = useMemo(() => Array.from(new Set(athletes.flatMap((a: any) => a.positionNumbers || []) as number[])).sort((a, b) => a - b), [athletes]);
   const defaultPeriod = seasonDates.find((sd: any) => sd.isDefault);
@@ -1960,20 +1965,20 @@ const AvailabilityReportTab = ({ athletes, availabilityRecords, seasonDates, tea
     return Array.from(names.values());
   }, [assignedPositions, teamStructure]);
 
-  const togglePositionName = (posName) => {
-    const posData = uniquePositionNames.find(p => p.name === posName);
+  const togglePositionName = (posName: any) => {
+    const posData = uniquePositionNames.find((p: any) => p.name === posName);
     if (!posData) return;
-    const allSelected = posData.numbers.every(n => selectedPositions.includes(n));
-    if (allSelected) setSelectedPositions(prev => prev.filter(p => !posData.numbers.includes(p)));
-    else setSelectedPositions(prev => [...new Set([...prev, ...posData.numbers])]);
+    const allSelected = (posData as any).numbers.every((n: any) => selectedPositions.includes(n));
+    if (allSelected) setSelectedPositions(prev => prev.filter((p: any) => !(posData as any).numbers.includes(p)));
+    else setSelectedPositions(prev => [...new Set([...prev, ...(posData as any).numbers])]);
   };
 
-  const toggleGroup = (group) => {
-    const groupPositions = teamStructure.filter(p => p.group === group).map(p => p.number);
-    const assignedGroupPositions = groupPositions.filter(p => assignedPositions.includes(p));
+  const toggleGroup = (group: string) => {
+    const groupPositions = (teamStructure as any[]).filter((p: any) => p.group === group).map((p: any) => p.number);
+    const assignedGroupPositions = groupPositions.filter((p: any) => assignedPositions.includes(p));
     if (selectedGroups.includes(group)) {
       setSelectedGroups(prev => prev.filter(g => g !== group));
-      setSelectedPositions(prev => prev.filter(p => !assignedGroupPositions.includes(p)));
+      setSelectedPositions(prev => prev.filter((p: any) => !assignedGroupPositions.includes(p)));
     } else {
       setSelectedGroups(prev => [...prev, group]);
       setSelectedPositions(prev => [...new Set([...prev, ...assignedGroupPositions])]);
@@ -1982,28 +1987,28 @@ const AvailabilityReportTab = ({ athletes, availabilityRecords, seasonDates, tea
 
   const dateRange = useMemo(() => {
     if (dateMode === 'custom' && customFrom && customTo) return { from: customFrom, to: customTo };
-    if (dateMode === 'period' && selectedPeriodId) { const p = seasonDates.find(sd => sd.id.toString() === selectedPeriodId); if (p) return { from: p.fromDate, to: p.toDate }; }
-    if (availabilityRecords.length > 0) { const dates = availabilityRecords.map(r => r.date).sort(); return { from: dates[0], to: dates[dates.length - 1] }; }
+    if (dateMode === 'period' && selectedPeriodId) { const p = seasonDates.find((sd: any) => sd.id.toString() === selectedPeriodId); if (p) return { from: p.fromDate, to: p.toDate }; }
+    if (availabilityRecords.length > 0) { const dates = availabilityRecords.map((r: any) => r.date).sort(); return { from: dates[0], to: dates[dates.length - 1] }; }
     return null;
   }, [dateMode, selectedPeriodId, customFrom, customTo, seasonDates, availabilityRecords]);
 
-  const filteredAthleteIds = useMemo(() => selectedAthleteIds.filter(id => { const a = athletes.find(x => x.id === id); return a?.positionNumbers && (selectedPositions.length === 0 || a.positionNumbers.some(p => selectedPositions.includes(p))); }), [selectedAthleteIds, selectedPositions, athletes]);
+  const filteredAthleteIds = useMemo(() => selectedAthleteIds.filter((id: any) => { const a = athletes.find((x: any) => x.id === id); return a?.positionNumbers && (selectedPositions.length === 0 || a.positionNumbers.some((p: any) => selectedPositions.includes(p))); }), [selectedAthleteIds, selectedPositions, athletes]);
 
   const chartData = useMemo(() => {
     if (!dateRange || filteredAthleteIds.length === 0) return [];
-    const dates = [];
+    const dates: string[] = [];
     for (let d = new Date(dateRange.from); d <= new Date(dateRange.to); d.setDate(d.getDate() + 1)) dates.push(new Date(d).toISOString().split('T')[0]);
     return dates.map(date => {
-      const recs = availabilityRecords.filter(r => r.date === date && filteredAthleteIds.includes(r.athleteId));
+      const recs = availabilityRecords.filter((r: any) => r.date === date && filteredAthleteIds.includes(r.athleteId));
       if (recs.length === 0) return null;
       const t = filteredAthleteIds.length;
-      return { date, available: Math.round((recs.filter(r => r.status === 'Available').length / t) * 100), modified: Math.round((recs.filter(r => r.status === 'Modified').length / t) * 100), unavailable: Math.round((recs.filter(r => r.status === 'Unavailable').length / t) * 100) };
+      return { date, available: Math.round((recs.filter((r: any) => r.status === 'Available').length / t) * 100), modified: Math.round((recs.filter((r: any) => r.status === 'Modified').length / t) * 100), unavailable: Math.round((recs.filter((r: any) => r.status === 'Unavailable').length / t) * 100) };
     }).filter(Boolean);
   }, [dateRange, filteredAthleteIds, availabilityRecords]);
 
   const W = 300, H = 160, pad = { top: 20, right: 20, bottom: 30, left: 35 };
   const iW = W - pad.left - pad.right, iH = H - pad.top - pad.bottom;
-  const path = (data, key) => data.length < 2 ? '' : data.map((d, i) => `${i === 0 ? 'M' : 'L'} ${pad.left + (i / (data.length - 1)) * iW} ${pad.top + iH - (d[key] / 100) * iH}`).join(' ');
+  const path = (data: any[], key: string) => data.length < 2 ? '' : data.map((d, i) => `${i === 0 ? 'M' : 'L'} ${pad.left + (i / (data.length - 1)) * iW} ${pad.top + iH - (d[key] / 100) * iH}`).join(' ');
 
   return (
     <>
@@ -2011,7 +2016,7 @@ const AvailabilityReportTab = ({ athletes, availabilityRecords, seasonDates, tea
         <h3 className="font-semibold text-sm mb-3">Time Period</h3>
         <div className="flex flex-wrap gap-2 mb-3">
           <button onClick={() => setDateMode('all')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${dateMode === 'all' ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>All Time</button>
-          {seasonDates.map(p => <button key={p.id} onClick={() => { setDateMode('period'); setSelectedPeriodId(p.id.toString()); }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${dateMode === 'period' && selectedPeriodId === p.id.toString() ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>{p.title}</button>)}
+          {seasonDates.map((p: any) => <button key={p.id} onClick={() => { setDateMode('period'); setSelectedPeriodId(p.id.toString()); }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${dateMode === 'period' && selectedPeriodId === p.id.toString() ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>{p.title}</button>)}
           <button onClick={() => setDateMode('custom')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${dateMode === 'custom' ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>Custom</button>
         </div>
         {dateMode === 'custom' && <div className="grid grid-cols-2 gap-2"><input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} className="px-3 py-2 text-sm border rounded-lg" /><input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} className="px-3 py-2 text-sm border rounded-lg" /></div>}
@@ -2020,23 +2025,17 @@ const AvailabilityReportTab = ({ athletes, availabilityRecords, seasonDates, tea
         <button onClick={() => setShowFilters(!showFilters)} className="w-full flex justify-between items-center"><h3 className="font-semibold text-sm">Filters</h3>{showFilters ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</button>
         {showFilters && (
           <div className="mt-3 space-y-3">
-            <div>
-              <p className="text-xs text-gray-500 mb-2">Position Group</p>
-              <div className="flex gap-2">
-                <button onClick={() => toggleGroup('Forward')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedGroups.includes('Forward') ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>Forwards</button>
-                <button onClick={() => toggleGroup('Back')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedGroups.includes('Back') ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>Backs</button>
-              </div>
-            </div>
-            <div>
-              <p className="text-xs text-gray-500 mb-2">Positions</p>
-              <div className="flex flex-wrap gap-1">
-                {uniquePositionNames.map(pos => {
-                  const allSelected = pos.numbers.every(n => selectedPositions.includes(n));
-                  return <button key={pos.name} onClick={() => togglePositionName(pos.name)} className={`px-2 py-1 rounded text-xs ${allSelected ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>{pos.name}</button>;
-                })}
-              </div>
-            </div>
-            <div><p className="text-xs text-gray-500 mb-2">Athletes ({selectedAthleteIds.length}/{athletes.length})</p><div className="space-y-1 max-h-32 overflow-y-auto">{athletes.map(a => <label key={a.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={selectedAthleteIds.includes(a.id)} onChange={() => setSelectedAthleteIds(p => p.includes(a.id) ? p.filter(x => x !== a.id) : [...p, a.id])} className="w-4 h-4" />{a.name}</label>)}</div></div>
+            <div><p className="text-xs text-gray-500 mb-2">Position Group</p><div className="flex gap-2">
+              <button onClick={() => toggleGroup('Forward')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedGroups.includes('Forward') ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>Forwards</button>
+              <button onClick={() => toggleGroup('Back')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedGroups.includes('Back') ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>Backs</button>
+            </div></div>
+            <div><p className="text-xs text-gray-500 mb-2">Positions</p><div className="flex flex-wrap gap-1">
+              {(uniquePositionNames as any[]).map((pos: any) => {
+                const allSelected = pos.numbers.every((n: any) => selectedPositions.includes(n));
+                return <button key={pos.name} onClick={() => togglePositionName(pos.name)} className={`px-2 py-1 rounded text-xs ${allSelected ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>{pos.name}</button>;
+              })}
+            </div></div>
+            <div><p className="text-xs text-gray-500 mb-2">Athletes ({selectedAthleteIds.length}/{athletes.length})</p><div className="space-y-1 max-h-32 overflow-y-auto">{athletes.map((a: any) => <label key={a.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={selectedAthleteIds.includes(a.id)} onChange={() => setSelectedAthleteIds((p: any) => p.includes(a.id) ? p.filter((x: any) => x !== a.id) : [...p, a.id])} className="w-4 h-4" />{a.name}</label>)}</div></div>
           </div>
         )}
       </div>
@@ -2050,12 +2049,12 @@ const AvailabilityReportTab = ({ athletes, availabilityRecords, seasonDates, tea
         {chartData.length === 0 ? <p className="text-center py-8 text-gray-500 text-sm">No data.</p> : (
           <svg width={W} height={H} className="w-full h-auto">
             {[0, 50, 100].map(v => <g key={v}><line x1={pad.left} y1={pad.top + iH - (v / 100) * iH} x2={W - pad.right} y2={pad.top + iH - (v / 100) * iH} stroke="#e5e7eb" strokeDasharray="4,4" /><text x={pad.left - 5} y={pad.top + iH - (v / 100) * iH + 4} textAnchor="end" className="text-xs fill-gray-400">{v}%</text></g>)}
-            {showAvailable && <path d={path(chartData, 'available')} fill="none" stroke="#22c55e" strokeWidth="2" />}
-            {showModified && <path d={path(chartData, 'modified')} fill="none" stroke="#f59e0b" strokeWidth="2" />}
-            {showUnavailable && <path d={path(chartData, 'unavailable')} fill="none" stroke="#ef4444" strokeWidth="2" />}
-            {showAvailable && chartData.map((d, i) => <circle key={'a'+i} cx={pad.left + (i / Math.max(chartData.length - 1, 1)) * iW} cy={pad.top + iH - (d.available / 100) * iH} r="3" fill="#22c55e" />)}
-            {showModified && chartData.map((d, i) => <circle key={'m'+i} cx={pad.left + (i / Math.max(chartData.length - 1, 1)) * iW} cy={pad.top + iH - (d.modified / 100) * iH} r="3" fill="#f59e0b" />)}
-            {showUnavailable && chartData.map((d, i) => <circle key={'u'+i} cx={pad.left + (i / Math.max(chartData.length - 1, 1)) * iW} cy={pad.top + iH - (d.unavailable / 100) * iH} r="3" fill="#ef4444" />)}
+            {showAvailable && <path d={path(chartData as any[], 'available')} fill="none" stroke="#22c55e" strokeWidth="2" />}
+            {showModified && <path d={path(chartData as any[], 'modified')} fill="none" stroke="#f59e0b" strokeWidth="2" />}
+            {showUnavailable && <path d={path(chartData as any[], 'unavailable')} fill="none" stroke="#ef4444" strokeWidth="2" />}
+            {showAvailable && (chartData as any[]).map((d: any, i) => <circle key={'a'+i} cx={pad.left + (i / Math.max(chartData.length - 1, 1)) * iW} cy={pad.top + iH - (d.available / 100) * iH} r="3" fill="#22c55e" />)}
+            {showModified && (chartData as any[]).map((d: any, i) => <circle key={'m'+i} cx={pad.left + (i / Math.max(chartData.length - 1, 1)) * iW} cy={pad.top + iH - (d.modified / 100) * iH} r="3" fill="#f59e0b" />)}
+            {showUnavailable && (chartData as any[]).map((d: any, i) => <circle key={'u'+i} cx={pad.left + (i / Math.max(chartData.length - 1, 1)) * iW} cy={pad.top + iH - (d.unavailable / 100) * iH} r="3" fill="#ef4444" />)}
           </svg>
         )}
         <p className="text-xs text-gray-400 text-center mt-2">{chartData.length} days • {filteredAthleteIds.length} athletes</p>
@@ -2066,7 +2065,6 @@ const AvailabilityReportTab = ({ athletes, availabilityRecords, seasonDates, tea
 
 // ── EOD Report Tab ───────────────────────────────────────────────────────────
 const EODReportTab = ({ athletes, availabilityRecords, teamStructure }: any) => {
-  // Find all dates that have EOD records
   const eodDates = useMemo(() => {
     const dates = [...new Set(
       availabilityRecords
@@ -2079,16 +2077,13 @@ const EODReportTab = ({ athletes, availabilityRecords, teamStructure }: any) => 
   const defaultDate = eodDates[0] || '';
   const [selectedDate, setSelectedDate] = useState(defaultDate);
 
-  // Keep selectedDate in sync if eodDates loads after mount
   useEffect(() => {
     if (!selectedDate && eodDates.length > 0) setSelectedDate(eodDates[0]);
   }, [eodDates]);
 
-  const today = new Date().toISOString().split('T')[0];
   const fmtDate = (d: string) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
   const fmtShort = (d: string) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
 
-  // Build the snapshot for the selected date
   const snapshot = useMemo(() => {
     if (!selectedDate) return [];
     const eodRecs = availabilityRecords.filter((r: any) =>
@@ -2102,84 +2097,68 @@ const EODReportTab = ({ athletes, availabilityRecords, teamStructure }: any) => 
         athlete: a,
         status: rec.status,
         note: noteText,
-        // injuries live on the athlete record (forward-propagated) — show active ones as of selected date
         injuries: (a.injuries || []).filter((i: any) => i.startDate <= selectedDate && (!i.returnDate || i.returnDate >= selectedDate)),
       };
     }).filter(Boolean);
   }, [selectedDate, availabilityRecords, athletes]);
 
-  // Group by status
+  // Available first, then Modified, then Unavailable
   const byStatus = useMemo(() => ({
-    Unavailable: snapshot.filter((r: any) => r.status === 'Unavailable').sort((a: any, b: any) => a.athlete.name.localeCompare(b.athlete.name)),
-    Modified:    snapshot.filter((r: any) => r.status === 'Modified').sort((a: any, b: any) => a.athlete.name.localeCompare(b.athlete.name)),
     Available:   snapshot.filter((r: any) => r.status === 'Available').sort((a: any, b: any) => a.athlete.name.localeCompare(b.athlete.name)),
+    Modified:    snapshot.filter((r: any) => r.status === 'Modified').sort((a: any, b: any) => a.athlete.name.localeCompare(b.athlete.name)),
+    Unavailable: snapshot.filter((r: any) => r.status === 'Unavailable').sort((a: any, b: any) => a.athlete.name.localeCompare(b.athlete.name)),
   }), [snapshot]);
 
-  // For Available: group by position group then by position number
   const availableByGroup = useMemo(() => {
     const groups: Record<string, { posName: string; posNumber: number; athletes: any[] }[]> = {};
     byStatus.Available.forEach((row: any) => {
       const posNums = row.athlete.positionNumbers || [];
       if (posNums.length === 0) {
         if (!groups['Unassigned']) groups['Unassigned'] = [];
-        let pos = groups['Unassigned'].find(p => p.posName === 'Unassigned');
+        let pos = groups['Unassigned'].find((p: any) => p.posName === 'Unassigned');
         if (!pos) { pos = { posName: 'Unassigned', posNumber: 999, athletes: [] }; groups['Unassigned'].push(pos); }
-        pos.athletes.push(row);
-        return;
+        pos.athletes.push(row); return;
       }
-      // Use the primary (lowest) position number
       const primaryNum = Math.min(...posNums);
       const posInfo = teamStructure.find((p: any) => p.number === primaryNum);
       const group = posInfo?.group || 'Other';
       const posName = posInfo?.name || `Pos ${primaryNum}`;
       if (!groups[group]) groups[group] = [];
-      let posEntry = groups[group].find(p => p.posName === posName);
+      let posEntry = groups[group].find((p: any) => p.posName === posName);
       if (!posEntry) { posEntry = { posName, posNumber: primaryNum, athletes: [] }; groups[group].push(posEntry); }
       posEntry.athletes.push(row);
     });
-    // Sort positions within each group by position number
-    Object.values(groups).forEach(g => g.sort((a, b) => a.posNumber - b.posNumber));
-    // Return in Forward, Back, Other order
+    Object.values(groups).forEach(g => g.sort((a: any, b: any) => a.posNumber - b.posNumber));
     const ordered: { group: string; positions: { posName: string; posNumber: number; athletes: any[] }[] }[] = [];
     ['Forward', 'Back', 'Other', 'Unassigned'].forEach(g => { if (groups[g]) ordered.push({ group: g, positions: groups[g] }); });
     return ordered;
   }, [byStatus.Available, teamStructure]);
 
-  const statusConfig: Record<string, { label: string; dot: string; bg: string; header: string; count: number }> = {
-    Unavailable: { label: 'Unavailable', dot: 'bg-red-500',   bg: 'bg-red-50',   header: 'text-red-700',   count: byStatus.Unavailable.length },
-    Modified:    { label: 'Modified',    dot: 'bg-amber-500', bg: 'bg-amber-50', header: 'text-amber-700', count: byStatus.Modified.length },
-    Available:   { label: 'Available',   dot: 'bg-green-500', bg: 'bg-green-50', header: 'text-green-700', count: byStatus.Available.length },
-  };
-
   if (eodDates.length === 0) {
     return (
       <div className="bg-white rounded-lg border border-slate-200 p-10 text-center">
         <p className="text-slate-400 text-[13px]">No End of Day reports saved yet</p>
-        <p className="text-slate-300 text-[11px] mt-1">Save an End of Day Report from the Availability page to see it here</p>
+        <p className="text-slate-300 text-[11px] mt-1">Save an End of Day Report from the Availability page</p>
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
-      {/* Date picker */}
       <div className="bg-white rounded-lg border border-slate-200 p-4 flex items-center gap-4 flex-wrap">
         <div className="flex items-center gap-2 flex-1 min-w-[200px]">
           <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">Report Date</label>
           <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
             className="flex-1 h-8 px-3 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500" />
         </div>
-        {/* Quick-jump to available EOD dates */}
-        {eodDates.length > 0 && (
-          <div className="flex gap-1 flex-wrap">
-            {eodDates.slice(0, 5).map(d => (
-              <button key={d} onClick={() => setSelectedDate(d)}
-                className={`h-7 px-2.5 rounded text-[11px] font-medium border transition-colors ${selectedDate === d ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'}`}>
-                {fmtShort(d)}
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="flex gap-1 flex-wrap">
+          {eodDates.slice(0, 5).map((d: string) => (
+            <button key={d} onClick={() => setSelectedDate(d)}
+              className={`h-7 px-2.5 rounded text-[11px] font-medium border transition-colors ${selectedDate === d ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'}`}>
+              {fmtShort(d)}
+            </button>
+          ))}
+        </div>
         {selectedDate && <p className="text-[11px] text-slate-400 w-full">{fmtDate(selectedDate)} · {snapshot.length} athletes</p>}
       </div>
 
@@ -2189,23 +2168,36 @@ const EODReportTab = ({ athletes, availabilityRecords, teamStructure }: any) => 
         </div>
       )}
 
-      {/* Unavailable section */}
-      {byStatus.Unavailable.length > 0 && (
+      {/* Available — with position grouping */}
+      {byStatus.Available.length > 0 && (
         <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-3 bg-red-50 border-b border-red-100">
-            <div className="w-2 h-2 rounded-full bg-red-500" />
-            <h3 className="text-[13px] font-semibold text-red-700">Unavailable</h3>
-            <span className="ml-auto text-[11px] text-red-400 font-medium">{byStatus.Unavailable.length} player{byStatus.Unavailable.length !== 1 ? 's' : ''}</span>
+          <div className="flex items-center gap-2 px-4 py-3 bg-green-50 border-b border-green-100">
+            <div className="w-2 h-2 rounded-full bg-green-500" />
+            <h3 className="text-[13px] font-semibold text-green-700">Available</h3>
+            <span className="ml-auto text-[11px] text-green-400 font-medium">{byStatus.Available.length} player{byStatus.Available.length !== 1 ? 's' : ''}</span>
           </div>
-          <div className="divide-y divide-slate-50">
-            {byStatus.Unavailable.map((row: any) => (
-              <EODAthleteRow key={row.athlete.id} row={row} showPosition={false} fmtShort={fmtShort} />
-            ))}
-          </div>
+          {availableByGroup.map(({ group, positions }: any) => (
+            <div key={group}>
+              <div className="px-4 py-2 bg-slate-50 border-b border-t border-slate-100">
+                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{group}s</span>
+              </div>
+              {positions.map(({ posName, athletes: posAthletes }: any) => (
+                <div key={posName}>
+                  <div className="px-4 py-1.5 bg-white border-b border-slate-50 flex items-center gap-2">
+                    <span className="text-[11px] font-medium text-slate-600">{posName}</span>
+                    <span className="text-[10px] text-slate-300">{posAthletes.length}</span>
+                  </div>
+                  <div className="divide-y divide-slate-50">
+                    {posAthletes.map((row: any) => <EODAthleteRow key={row.athlete.id} row={row} showPosition={true} fmtShort={fmtShort} />)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
         </div>
       )}
 
-      {/* Modified section */}
+      {/* Modified */}
       {byStatus.Modified.length > 0 && (
         <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
           <div className="flex items-center gap-2 px-4 py-3 bg-amber-50 border-b border-amber-100">
@@ -2214,48 +2206,29 @@ const EODReportTab = ({ athletes, availabilityRecords, teamStructure }: any) => 
             <span className="ml-auto text-[11px] text-amber-400 font-medium">{byStatus.Modified.length} player{byStatus.Modified.length !== 1 ? 's' : ''}</span>
           </div>
           <div className="divide-y divide-slate-50">
-            {byStatus.Modified.map((row: any) => (
-              <EODAthleteRow key={row.athlete.id} row={row} showPosition={false} fmtShort={fmtShort} />
-            ))}
+            {byStatus.Modified.map((row: any) => <EODAthleteRow key={row.athlete.id} row={row} showPosition={false} fmtShort={fmtShort} />)}
           </div>
         </div>
       )}
 
-      {/* Available section — grouped by position group + position */}
-      {byStatus.Available.length > 0 && (
+      {/* Unavailable */}
+      {byStatus.Unavailable.length > 0 && (
         <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-3 bg-green-50 border-b border-green-100">
-            <div className="w-2 h-2 rounded-full bg-green-500" />
-            <h3 className="text-[13px] font-semibold text-green-700">Available</h3>
-            <span className="ml-auto text-[11px] text-green-400 font-medium">{byStatus.Available.length} player{byStatus.Available.length !== 1 ? 's' : ''}</span>
+          <div className="flex items-center gap-2 px-4 py-3 bg-red-50 border-b border-red-100">
+            <div className="w-2 h-2 rounded-full bg-red-500" />
+            <h3 className="text-[13px] font-semibold text-red-700">Unavailable</h3>
+            <span className="ml-auto text-[11px] text-red-400 font-medium">{byStatus.Unavailable.length} player{byStatus.Unavailable.length !== 1 ? 's' : ''}</span>
           </div>
-          {availableByGroup.map(({ group, positions }) => (
-            <div key={group}>
-              <div className="px-4 py-2 bg-slate-50 border-b border-t border-slate-100">
-                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{group}s</span>
-              </div>
-              {positions.map(({ posName, athletes: posAthletes }) => (
-                <div key={posName}>
-                  <div className="px-4 py-1.5 bg-white border-b border-slate-50 flex items-center gap-2">
-                    <span className="text-[11px] font-medium text-slate-600">{posName}</span>
-                    <span className="text-[10px] text-slate-300">{posAthletes.length}</span>
-                  </div>
-                  <div className="divide-y divide-slate-50">
-                    {posAthletes.map((row: any) => (
-                      <EODAthleteRow key={row.athlete.id} row={row} showPosition={true} fmtShort={fmtShort} />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ))}
+          <div className="divide-y divide-slate-50">
+            {byStatus.Unavailable.map((row: any) => <EODAthleteRow key={row.athlete.id} row={row} showPosition={false} fmtShort={fmtShort} />)}
+          </div>
         </div>
       )}
     </div>
   );
 };
 
-// ── Single athlete row inside EOD report ────────────────────────────────────
+// ── Single athlete row in EOD report ─────────────────────────────────────────
 const EODAthleteRow = ({ row, showPosition, fmtShort }: { row: any; showPosition: boolean; fmtShort: (d: string) => string }) => {
   const { athlete, status, note, injuries } = row;
   const hasDetail = (note && note.trim()) || injuries.length > 0;
@@ -2268,7 +2241,7 @@ const EODAthleteRow = ({ row, showPosition, fmtShort }: { row: any; showPosition
         <span className="text-[13px] font-medium text-slate-800 flex-1">{athlete.name}</span>
         {showPosition && athlete.positionNumbers?.length > 0 && (
           <span className="text-[10px] text-slate-400 bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5">
-            {athlete.positionNumbers.sort((a: number, b: number) => a - b).join(', ')}
+            {[...athlete.positionNumbers].sort((a: number, b: number) => a - b).join(', ')}
           </span>
         )}
       </div>
@@ -2283,8 +2256,7 @@ const EODAthleteRow = ({ row, showPosition, fmtShort }: { row: any; showPosition
                 {inj.contact && <span className="text-red-400">{inj.contact}</span>}
                 {inj.surface && <span className="text-red-400">{inj.surface}</span>}
                 {inj.notes && <span className="text-red-600 w-full">{inj.notes}</span>}
-                {inj.returnDate && <span className="text-slate-400">ETR {fmtShort(inj.returnDate)}</span>}
-                {!inj.returnDate && <span className="text-red-600 font-medium">Season</span>}
+                {inj.returnDate ? <span className="text-slate-400">ETR {fmtShort(inj.returnDate)}</span> : <span className="text-red-600 font-medium">Season</span>}
               </div>
             </div>
           ))}
@@ -2299,6 +2271,242 @@ const EODAthleteRow = ({ row, showPosition, fmtShort }: { row: any; showPosition
     </div>
   );
 };
+
+// ── Injury Report Tab ─────────────────────────────────────────────────────────
+const InjuryReportTab = ({ athletes, teamStructure, seasonDates, availabilityRecords }: any) => {
+  const today = new Date().toISOString().split('T')[0];
+  const EVENT_OPTS = ['Training', 'Match', 'Other'];
+  const SURFACE_OPTS = ['4G', 'Grass', 'Other'];
+  const CONTACT_OPTS = ['Contact', 'Non-Contact'];
+  // Status: Active = injury ongoing, Historical = resolved
+  const STATUS_OPTS = ['Active', 'Historical'];
+
+  // Date period state (shared pattern)
+  const defaultPeriod = seasonDates.find((sd: any) => sd.isDefault);
+  const [dateMode, setDateMode] = useState(defaultPeriod ? 'period' : 'all');
+  const [selectedPeriodId, setSelectedPeriodId] = useState(defaultPeriod?.id.toString() || '');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+
+  // Position/group state (shared pattern)
+  const assignedPositions: number[] = useMemo(() => Array.from(new Set(athletes.flatMap((a: any) => a.positionNumbers || []) as number[])).sort((a: any, b: any) => a - b), [athletes]);
+  const uniquePositionNames = useMemo(() => {
+    const names = new Map();
+    assignedPositions.forEach((posNum: number) => {
+      const pos = teamStructure.find((p: any) => p.number === posNum);
+      if (pos && !names.has(pos.name)) names.set(pos.name, { name: pos.name, numbers: [], group: pos.group });
+      if (pos) names.get(pos.name).numbers.push(posNum);
+    });
+    return Array.from(names.values()) as any[];
+  }, [assignedPositions, teamStructure]);
+
+  const [selectedGroups, setSelectedGroups] = useState<string[]>(['Forward', 'Back']);
+  const [selectedPositionNames, setSelectedPositionNames] = useState<string[]>([]);
+  const [showFilters, setShowFilters] = useState(false);
+  const [filterEvent, setFilterEvent] = useState<string[]>([]);
+  const [filterSurface, setFilterSurface] = useState<string[]>([]);
+  const [filterContact, setFilterContact] = useState<string[]>([]);
+  const [filterStatus, setFilterStatus] = useState<string[]>([]);
+
+  const dateRange = useMemo(() => {
+    if (dateMode === 'custom' && customFrom && customTo) return { from: customFrom, to: customTo };
+    if (dateMode === 'period' && selectedPeriodId) { const p = seasonDates.find((sd: any) => sd.id.toString() === selectedPeriodId); if (p) return { from: p.fromDate, to: p.toDate }; }
+    return null;
+  }, [dateMode, selectedPeriodId, customFrom, customTo, seasonDates]);
+
+  const toggleGroup = (group: string) => {
+    setSelectedGroups(prev => prev.includes(group) ? prev.filter(g => g !== group) : [...prev, group]);
+  };
+  const togglePositionName = (posName: string) => {
+    setSelectedPositionNames(prev => prev.includes(posName) ? prev.filter(n => n !== posName) : [...prev, posName]);
+  };
+  const toggleFilter = (arr: string[], val: string, set: (v: string[]) => void) => {
+    set(arr.includes(val) ? arr.filter(x => x !== val) : [...arr, val]);
+  };
+  const hasAnyFilter = filterEvent.length + filterSurface.length + filterContact.length + filterStatus.length > 0 || selectedPositionNames.length > 0 || selectedGroups.length < 2;
+  const clearAllFilters = () => { setFilterEvent([]); setFilterSurface([]); setFilterContact([]); setFilterStatus([]); setSelectedPositionNames([]); setSelectedGroups(['Forward', 'Back']); };
+
+  const allInjuries = useMemo(() => {
+    const rows: any[] = [];
+    athletes.forEach((a: any) => {
+      if (!a.injuries) return;
+      a.injuries.forEach((inj: any) => {
+        const isActive = !inj.returnDate || inj.returnDate >= today;
+        const status = isActive ? 'Active' : 'Historical';
+        const timeLoss = inj.startDate && inj.returnDate
+          ? Math.round((new Date(inj.returnDate).getTime() - new Date(inj.startDate).getTime()) / 86400000)
+          : null;
+        const position = getPositionDisplay(a.positionNumbers || [], teamStructure);
+        rows.push({ athlete: a, injury: inj, position, status, timeLoss });
+      });
+    });
+    return rows;
+  }, [athletes, teamStructure, today]);
+
+  const filtered = useMemo(() => allInjuries.filter(row => {
+    // Date range filter — injury must overlap with selected period
+    if (dateRange) {
+      const start = row.injury.startDate || '';
+      const end = row.injury.returnDate || '9999-12-31';
+      if (end < dateRange.from || start > dateRange.to) return false;
+    }
+    // Position group filter
+    if (selectedGroups.length < 2 || selectedPositionNames.length > 0) {
+      const posNames = (row.athlete.positionNumbers || []).map((n: number) => teamStructure.find((p: any) => p.number === n)?.name).filter(Boolean);
+      const groups = (row.athlete.positionNumbers || []).map((n: number) => teamStructure.find((p: any) => p.number === n)?.group).filter(Boolean);
+      if (selectedPositionNames.length > 0 && !posNames.some((n: any) => selectedPositionNames.includes(n))) return false;
+      if (selectedGroups.length < 2 && !groups.some((g: any) => selectedGroups.includes(g))) return false;
+    }
+    if (filterEvent.length > 0 && !filterEvent.includes(row.injury.event || 'Training')) return false;
+    if (filterSurface.length > 0 && !filterSurface.includes(row.injury.surface || '4G')) return false;
+    if (filterContact.length > 0 && !filterContact.includes(row.injury.contact || 'Contact')) return false;
+    if (filterStatus.length > 0 && !filterStatus.includes(row.status)) return false;
+    return true;
+  }), [allInjuries, dateRange, selectedGroups, selectedPositionNames, filterEvent, filterSurface, filterContact, filterStatus]);
+
+  const fmtDate = (d: string) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }) : '—';
+  const nameParts = (name: string) => { const parts = (name || '').trim().split(' '); return { first: parts[0] || '', last: parts.slice(1).join(' ') || '' }; };
+
+  // Chip toggle button — consistent with Availability tab style
+  const Chip = ({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) => (
+    <button onClick={onClick}
+      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${active ? 'bg-slate-800 text-white' : 'bg-gray-100 text-slate-600 hover:bg-gray-200'}`}>
+      {label}
+    </button>
+  );
+
+  return (
+    <>
+      {/* Time Period — identical layout to Availability tab */}
+      <div className="bg-white rounded-lg border border-slate-200 p-4">
+        <h3 className="font-semibold text-sm mb-3">Time Period</h3>
+        <div className="flex flex-wrap gap-2 mb-3">
+          <Chip label="All Time" active={dateMode === 'all'} onClick={() => setDateMode('all')} />
+          {seasonDates.map((p: any) => (
+            <Chip key={p.id} label={p.title} active={dateMode === 'period' && selectedPeriodId === p.id.toString()} onClick={() => { setDateMode('period'); setSelectedPeriodId(p.id.toString()); }} />
+          ))}
+          <Chip label="Custom" active={dateMode === 'custom'} onClick={() => setDateMode('custom')} />
+        </div>
+        {dateMode === 'custom' && (
+          <div className="grid grid-cols-2 gap-2">
+            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} className="px-3 py-2 text-sm border rounded-lg" />
+            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} className="px-3 py-2 text-sm border rounded-lg" />
+          </div>
+        )}
+      </div>
+
+      {/* Filters — accordion like Availability tab */}
+      <div className="bg-white rounded-lg border border-slate-200 p-4">
+        <button onClick={() => setShowFilters(!showFilters)} className="w-full flex justify-between items-center">
+          <h3 className="font-semibold text-sm">Filters</h3>
+          {showFilters ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+        </button>
+        {showFilters && (
+          <div className="mt-3 space-y-3">
+            <div>
+              <p className="text-xs text-gray-500 mb-2">Position Group</p>
+              <div className="flex gap-2">
+                <Chip label="Forwards" active={selectedGroups.includes('Forward')} onClick={() => toggleGroup('Forward')} />
+                <Chip label="Backs" active={selectedGroups.includes('Back')} onClick={() => toggleGroup('Back')} />
+              </div>
+            </div>
+            {uniquePositionNames.length > 0 && (
+              <div>
+                <p className="text-xs text-gray-500 mb-2">Positions</p>
+                <div className="flex flex-wrap gap-1">
+                  {uniquePositionNames.map((pos: any) => (
+                    <button key={pos.name} onClick={() => togglePositionName(pos.name)}
+                      className={`px-2 py-1 rounded text-xs ${selectedPositionNames.includes(pos.name) ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>
+                      {pos.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div>
+              <p className="text-xs text-gray-500 mb-2">Status</p>
+              <div className="flex gap-2">
+                {STATUS_OPTS.map(o => (
+                  <button key={o} onClick={() => toggleFilter(filterStatus, o, setFilterStatus)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${filterStatus.includes(o) ? (o === 'Active' ? 'bg-red-600 text-white border-red-600' : 'bg-green-600 text-white border-green-600') : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>
+                    {o}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 mb-2">Event</p>
+              <div className="flex gap-2 flex-wrap">
+                {EVENT_OPTS.map(o => <Chip key={o} label={o} active={filterEvent.includes(o)} onClick={() => toggleFilter(filterEvent, o, setFilterEvent)} />)}
+              </div>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 mb-2">Surface</p>
+              <div className="flex gap-2 flex-wrap">
+                {SURFACE_OPTS.map(o => <Chip key={o} label={o} active={filterSurface.includes(o)} onClick={() => toggleFilter(filterSurface, o, setFilterSurface)} />)}
+              </div>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 mb-2">Contact</p>
+              <div className="flex gap-2 flex-wrap">
+                {CONTACT_OPTS.map(o => <Chip key={o} label={o} active={filterContact.includes(o)} onClick={() => toggleFilter(filterContact, o, setFilterContact)} />)}
+              </div>
+            </div>
+            {hasAnyFilter && (
+              <button onClick={clearAllFilters} className="text-[11px] text-slate-400 hover:text-slate-600 mt-1">Clear all filters</button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Table */}
+      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+          <h3 className="text-[13px] font-semibold text-slate-800">Injury Log</h3>
+          <span className="text-[11px] text-slate-400">{filtered.length} record{filtered.length !== 1 ? 's' : ''}</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-100">
+                {['First','Last','Position','Body Part','Event','Surface','Contact','Start','ETR','Days Lost','Status'].map(h => (
+                  <th key={h} className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {filtered.length === 0 ? (
+                <tr><td colSpan={11} className="text-center py-10 text-slate-400 text-[13px]">No injuries match the selected filters</td></tr>
+              ) : filtered.map((row: any, i: number) => {
+                const { first, last } = nameParts(row.athlete.name);
+                return (
+                  <tr key={i} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-3 py-2.5 font-medium text-slate-800">{first}</td>
+                    <td className="px-3 py-2.5 text-slate-700">{last}</td>
+                    <td className="px-3 py-2.5 text-slate-500">{row.position}</td>
+                    <td className="px-3 py-2.5 text-slate-700">{row.injury.bodyPart}</td>
+                    <td className="px-3 py-2.5"><span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px]">{row.injury.event || 'Training'}</span></td>
+                    <td className="px-3 py-2.5"><span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px]">{row.injury.surface || '4G'}</span></td>
+                    <td className="px-3 py-2.5"><span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px]">{row.injury.contact || 'Contact'}</span></td>
+                    <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">{fmtDate(row.injury.startDate)}</td>
+                    <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">{fmtDate(row.injury.returnDate)}</td>
+                    <td className="px-3 py-2.5 font-medium text-slate-700">{row.timeLoss !== null ? row.timeLoss : '—'}</td>
+                    <td className="px-3 py-2.5">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${row.status === 'Active' ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-slate-50 text-slate-500 border border-slate-200'}`}>
+                        {row.status}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
+  );
+};
+
 
 
 const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, onDeleteDrillType, onSaveSeasonDate, onDeleteSeasonDate, onSaveTeamStructure, onDeleteTeamStructure, saving }: any) => {
@@ -2684,132 +2892,5 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
 };
 
 
-const InjuryReportPage = ({ athletes, teamStructure }: any) => {
-  const [filterEvent, setFilterEvent] = useState<string[]>([]);
-  const [filterSurface, setFilterSurface] = useState<string[]>([]);
-  const [filterContact, setFilterContact] = useState<string[]>([]);
-  const [filterStatus, setFilterStatus] = useState<string[]>([]);
-
-  const today = new Date().toISOString().split('T')[0];
-
-  const EVENT_OPTS = ['Training', 'Match', 'Other'];
-  const SURFACE_OPTS = ['4G', 'Grass', 'Other'];
-  const CONTACT_OPTS = ['Contact', 'Non-Contact'];
-  const STATUS_OPTS = ['Active', 'Resolved'];
-
-  const toggleFilter = (arr: string[], val: string, set: (v: string[]) => void) => {
-    set(arr.includes(val) ? arr.filter(x => x !== val) : [...arr, val]);
-  };
-
-  const FilterChips = ({ label, opts, active, set }: { label: string; opts: string[]; active: string[]; set: (v: string[]) => void }) => (
-    <div className="mb-3">
-      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">{label}</p>
-      <div className="flex flex-wrap gap-1.5">
-        {opts.map(o => (
-          <button key={o} onClick={() => toggleFilter(active, o, set)}
-            className={`px-2.5 py-1 rounded text-[11px] font-medium border transition-colors ${active.includes(o) ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
-            {o}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-
-  const allInjuries: { athlete: any; injury: any; position: string; status: string; timeLoss: number | null }[] = [];
-  athletes.forEach((a: any) => {
-    if (!a.injuries) return;
-    a.injuries.forEach((inj: any) => {
-      const isActive = !inj.returnDate || inj.returnDate >= today;
-      const status = isActive ? 'Active' : 'Resolved';
-      const timeLoss = inj.startDate && inj.returnDate
-        ? Math.round((new Date(inj.returnDate).getTime() - new Date(inj.startDate).getTime()) / 86400000)
-        : null;
-      const position = getPositionDisplay(a.positionNumbers || [], teamStructure);
-      allInjuries.push({ athlete: a, injury: inj, position, status, timeLoss });
-    });
-  });
-
-  const filtered = allInjuries.filter(row => {
-    if (filterEvent.length > 0 && !filterEvent.includes(row.injury.event || 'Training')) return false;
-    if (filterSurface.length > 0 && !filterSurface.includes(row.injury.surface || '4G')) return false;
-    if (filterContact.length > 0 && !filterContact.includes(row.injury.contact || 'Contact')) return false;
-    if (filterStatus.length > 0 && !filterStatus.includes(row.status)) return false;
-    return true;
-  });
-
-  const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' }) : '—';
-  const nameParts = (name: string) => {
-    const parts = (name || '').trim().split(' ');
-    return { first: parts[0] || '', last: parts.slice(1).join(' ') || '' };
-  };
-
-  return (
-    <div className="max-w-md md:max-w-5xl mx-auto p-4 md:p-6">
-      {/* Filters */}
-      <div className="bg-white rounded-lg border border-slate-200 p-4 mb-4">
-        <h3 className="text-[13px] font-semibold text-slate-800 mb-3">Filters</h3>
-        <FilterChips label="Event" opts={EVENT_OPTS} active={filterEvent} set={setFilterEvent} />
-        <FilterChips label="Surface" opts={SURFACE_OPTS} active={filterSurface} set={setFilterSurface} />
-        <FilterChips label="Contact" opts={CONTACT_OPTS} active={filterContact} set={setFilterContact} />
-        <FilterChips label="Status" opts={STATUS_OPTS} active={filterStatus} set={setFilterStatus} />
-        {(filterEvent.length + filterSurface.length + filterContact.length + filterStatus.length) > 0 && (
-          <button onClick={() => { setFilterEvent([]); setFilterSurface([]); setFilterContact([]); setFilterStatus([]); }}
-            className="text-[11px] text-slate-400 hover:text-slate-600 mt-1">Clear all filters</button>
-        )}
-      </div>
-
-      {/* Table */}
-      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-          <h3 className="text-[13px] font-semibold text-slate-800">Injury Log</h3>
-          <span className="text-[11px] text-slate-400">{filtered.length} record{filtered.length !== 1 ? 's' : ''}</span>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-[12px]">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-100">
-                <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">First</th>
-                <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Last</th>
-                <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Position</th>
-                <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Body Part</th>
-                <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Event</th>
-                <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Surface</th>
-                <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Contact</th>
-                <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Start</th>
-                <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">ETR</th>
-                <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Days Lost</th>
-                <th className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {filtered.length === 0 ? (
-                <tr><td colSpan={11} className="text-center py-10 text-slate-400">No injuries match the selected filters</td></tr>
-              ) : filtered.map((row, i) => {
-                const { first, last } = nameParts(row.athlete.name);
-                return (
-                  <tr key={i} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-3 py-2.5 font-medium text-slate-800">{first}</td>
-                    <td className="px-3 py-2.5 text-slate-700">{last}</td>
-                    <td className="px-3 py-2.5 text-slate-500">{row.position}</td>
-                    <td className="px-3 py-2.5 text-slate-700">{row.injury.bodyPart}</td>
-                    <td className="px-3 py-2.5"><span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px]">{row.injury.event || 'Training'}</span></td>
-                    <td className="px-3 py-2.5"><span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px]">{row.injury.surface || '4G'}</span></td>
-                    <td className="px-3 py-2.5"><span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px]">{row.injury.contact || 'Contact'}</span></td>
-                    <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">{fmtDate(row.injury.startDate)}</td>
-                    <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">{fmtDate(row.injury.returnDate)}</td>
-                    <td className="px-3 py-2.5 font-medium text-slate-700">{row.timeLoss !== null ? row.timeLoss : '—'}</td>
-                    <td className="px-3 py-2.5">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${row.status === 'Active' ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-green-50 text-green-600 border border-green-100'}`}>{row.status}</span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-};
 
 export default AthleteManager;
