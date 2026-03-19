@@ -110,15 +110,16 @@ const StatusBadge = ({ status, size = 'sm' }: { status: string; size?: 'xs' | 's
   );
 };
 
-/** Coloured select — use anywhere you need an editable status dropdown */
+/** Coloured select — compact pill-style, matches StatusBadge proportions */
 const StatusSelect = ({ value, onChange, className = '' }: { value: string; onChange: (v: string) => void; className?: string }) => {
   const s = STATUS_STYLES[value] || STATUS_STYLES['Available'];
   return (
-    <div className={`relative inline-block ${className}`}>
+    <div className={`relative inline-flex items-center ${className}`}>
+      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 absolute left-2 pointer-events-none z-10 ${s.dot}`} />
       <select
         value={value}
         onChange={e => onChange(e.target.value)}
-        className={`h-7 pl-2 pr-6 text-[11px] rounded border font-semibold appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-400 ${s.select}`}
+        className={`h-6 pl-5 pr-5 text-[11px] rounded-full border font-semibold appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-blue-400 ${s.badge}`}
         style={{ WebkitAppearance: 'none' }}
       >
         {Object.keys(STATUS_STYLES).map(opt => (
@@ -126,7 +127,7 @@ const StatusSelect = ({ value, onChange, className = '' }: { value: string; onCh
         ))}
       </select>
       <div className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2">
-        <svg className="w-2.5 h-2.5 text-white/80" fill="none" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        <svg className={`w-2 h-2 opacity-50`} fill="none" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
       </div>
     </div>
   );
@@ -1521,10 +1522,10 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
   }
 
   return (
-    <div className="max-w-md md:max-w-3xl mx-auto">
-      {/* Toolbar */}
-      <div className="bg-white border-b border-slate-200 px-4 py-2.5 mb-4">
-        <div className="flex gap-2 mb-2.5">
+    <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6">
+      {/* Toolbar — matches Home page structure */}
+      <div className="bg-white rounded-lg border border-slate-200 mb-4 overflow-hidden">
+        <div className="flex gap-2 p-2.5">
           <div className="flex-1 relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 w-3.5 h-3.5" />
             <input type="text" placeholder="Search athletes…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
@@ -1535,16 +1536,13 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
             <Plus className="w-3.5 h-3.5" />Add
           </button>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 px-2.5 pb-2.5">
           <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
             className="flex-1 h-8 px-3 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500" />
           <button onClick={async () => {
               setEodLoading(true);
               try {
-                const { data } = await supabase
-                  .from('eod_reports')
-                  .select('*')
-                  .eq('date', selectedDate);
+                const { data } = await supabase.from('eod_reports').select('*').eq('date', selectedDate);
                 setSavedEodData(data && data.length > 0 ? data : null);
               } catch { setSavedEodData(null); }
               setEodLoading(false);
@@ -1553,19 +1551,19 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
             disabled={eodLoading}
             className="h-8 px-3 bg-amber-600 text-white rounded text-[12px] font-medium flex items-center gap-1.5 hover:bg-amber-700 transition-colors whitespace-nowrap disabled:opacity-60">
             {eodLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-            End of Day Report
+            End of Day
           </button>
         </div>
       </div>
 
       {showSaveSuccess && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-[13px] font-medium">✓ Saved</div>}
 
-      <div className="px-4 md:px-6 pb-24">
+      <div className="pb-24">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
           {filteredAthletes.map(athlete => (
             <div key={athlete.id} className="bg-white rounded-lg border border-slate-200 p-3.5">
               {/* Header row */}
-              <div className="flex items-center gap-3 mb-2.5">
+              <div className="flex items-center gap-3">
                 <div className="cursor-pointer flex-shrink-0" onClick={() => { setSelectedAthleteId(athlete.id); navigateTo('athlete-profile'); }}>
                   {athlete.photo
                     ? <img src={athlete.photo} alt="" className="w-8 h-8 rounded-md object-cover" />
@@ -1589,19 +1587,26 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
                     }
                   }} />
               </div>
-              {/* Public note */}
-              {athlete.notes && athlete.isPublic && (
-                <div className="mb-2 p-2 bg-blue-50 border border-blue-100 rounded flex items-start gap-1.5">
-                  <MessageSquare className="w-3 h-3 mt-0.5 flex-shrink-0 text-blue-400" />
-                  <span className="text-[11px] text-blue-700">{athlete.notes}</span>
+              {/* Group tag — matches Home page */}
+              {getPositionGroup(athlete.positionNumbers, typedTeamStructure) && (
+                <div className="mt-2">
+                  <span className="text-[10px] font-medium text-slate-400 bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5">{getPositionGroup(athlete.positionNumbers, typedTeamStructure)}</span>
                 </div>
               )}
               <InjuryDisplay athlete={athlete} />
-              {/* Note button */}
-              <button onClick={() => { setSelectedAthlete(athlete); setTempNotes(athlete.notes); setTempIsPublic(athlete.isPublic); setShowNotesModal(true); }}
-                className={`w-full mt-2 flex items-center justify-center gap-1.5 h-7 rounded text-[11px] font-medium transition-colors ${athlete.notes ? 'bg-blue-50 text-blue-700 border border-blue-100 hover:bg-blue-100' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-                <MessageSquare className="w-3 h-3" />{athlete.notes ? 'Edit Note' : 'Add Note'}
-              </button>
+              {/* Note — inline if present, subtle add button if not */}
+              {athlete.notes ? (
+                <button onClick={() => { setSelectedAthlete(athlete); setTempNotes(athlete.notes); setTempIsPublic(athlete.isPublic); setShowNotesModal(true); }}
+                  className="mt-2 w-full text-left p-2 bg-blue-50 border border-blue-100 rounded flex items-start gap-1.5 hover:bg-blue-100 transition-colors">
+                  <MessageSquare className="w-3 h-3 mt-0.5 flex-shrink-0 text-blue-400" />
+                  <span className="text-[11px] text-blue-700 leading-snug">{athlete.notes}</span>
+                </button>
+              ) : (
+                <button onClick={() => { setSelectedAthlete(athlete); setTempNotes(''); setTempIsPublic(false); setShowNotesModal(true); }}
+                  className="mt-2 flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-600 transition-colors">
+                  <MessageSquare className="w-3 h-3" />Add note
+                </button>
+              )}
             </div>
           ))}
         </div>
