@@ -187,7 +187,10 @@ const AthleteManager = () => {
           bodyPart: i.body_part,
           startDate: i.start_date,
           returnDate: i.return_date,
-          notes: i.notes
+          notes: i.notes,
+          event: i.event,
+          surface: i.surface,
+          contact: i.contact,
         }))
       })));
 
@@ -231,6 +234,7 @@ const AthleteManager = () => {
         status: r.status,
         note: r.note,
         isPublic: r.is_public,
+        selectionStatus: r.selection_status,
       }));
 
       if (availData) setAvailabilityRecords([
@@ -412,39 +416,25 @@ const AthleteManager = () => {
         status: a.status,
         note: a.notes || '',
         is_public: a.isPublic,
+        selection_status: (a as any).selectionStatus || 'Available for Selection',
       }));
       const { error: insEodErr } = await supabase
         .from('eod_reports')
         .insert(eodRows);
       if (insEodErr) throw new Error('Save EOD snapshot: ' + insEodErr.message);
 
-      // Step 2: Write availability_records for TOMORROW so the status/notes
-      // flow through to the next day without touching today's availability screen.
-      // The athletes table status is NOT changed here — today's availability remains as-is.
-      const tomorrow = new Date(date);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const tomorrowStr = tomorrow.toISOString().split('T')[0];
-
-      // Delete any existing availability record for tomorrow (we'll replace them)
-      const { error: delTomErr } = await supabase
-        .from('availability_records')
-        .delete()
-        .eq('date', tomorrowStr);
-      if (delTomErr) throw new Error('Clear tomorrow records: ' + delTomErr.message);
-
-      const tomorrowRecords = eodAthletes.map((a: Athlete) => ({
-        date: tomorrowStr,
-        athlete_id: a.id,
-        status: a.status,
-        note: a.notes || '',
-      }));
-      const { error: insTomErr } = await supabase
-        .from('availability_records')
-        .insert(tomorrowRecords);
-      if (insTomErr) throw new Error('Insert tomorrow records: ' + insTomErr.message);
-
-      // Update injuries only — these are date-independent and should apply immediately
+      // Step 2: Forward-propagate status/notes/injuries to the athletes table.
+      // This persists EOD changes as the new baseline for future days.
+      // availability_records for tomorrow are also written so the reporting
+      // view has a dated snapshot.
       for (const a of eodAthletes) {
+        const { error: athErr } = await supabase.from('athletes').update({
+          status: a.status,
+          notes: a.notes,
+          is_public: a.isPublic,
+        }).eq('id', a.id);
+        if (athErr) throw new Error('Update athlete ' + a.id + ': ' + athErr.message);
+
         const { error: injDelErr } = await supabase.from('athlete_injuries').delete().eq('athlete_id', a.id);
         if (injDelErr) throw new Error('Delete injuries: ' + injDelErr.message);
 
@@ -464,6 +454,22 @@ const AthleteManager = () => {
           if (injInsErr) throw new Error('Insert injuries: ' + injInsErr.message);
         }
       }
+
+      // Step 3: Write availability_records for tomorrow as a dated snapshot
+      // so the reporting view can show the EOD state for that date.
+      const tomorrow = new Date(date);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+      await supabase.from('availability_records').delete().eq('date', tomorrowStr);
+      const tomorrowRecords = eodAthletes.map((a: Athlete) => ({
+        date: tomorrowStr,
+        athlete_id: a.id,
+        status: a.status,
+        note: a.notes || '',
+      }));
+      const { error: insTomErr } = await supabase.from('availability_records').insert(tomorrowRecords);
+      if (insTomErr) throw new Error('Insert tomorrow records: ' + insTomErr.message);
 
       await fetchAllData();
     } catch (error) {
