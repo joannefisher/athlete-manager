@@ -1021,6 +1021,37 @@ const HomePage = ({ athletes, navigateTo, setSelectedAthleteId, teamStructure }:
 };
 
 
+// ── Custom coloured status dropdown for EOD input table ─────────────────────
+const EOD_STATUS_OPTIONS = [
+  { value: 'Available',   label: 'Available',   bg: 'bg-green-500', text: 'text-white', border: 'border-green-600', optBg: '#16a34a' },
+  { value: 'Modified',    label: 'Modified',    bg: 'bg-amber-500', text: 'text-white', border: 'border-amber-600', optBg: '#d97706' },
+  { value: 'Unavailable', label: 'Unavailable', bg: 'bg-red-500',   text: 'text-white', border: 'border-red-600',   optBg: '#dc2626' },
+] as const;
+
+const EODStatusSelect = ({ value, onChange }: { value: string; onChange: (v: string) => void }) => {
+  const opt = EOD_STATUS_OPTIONS.find(o => o.value === value) || EOD_STATUS_OPTIONS[0];
+  return (
+    <div className="relative inline-block">
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className={`h-7 pl-2 pr-6 text-[11px] rounded border font-semibold appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-400 ${opt.bg} ${opt.text} ${opt.border}`}
+        style={{ WebkitAppearance: 'none' }}
+      >
+        {EOD_STATUS_OPTIONS.map(o => (
+          <option key={o.value} value={o.value} style={{ backgroundColor: o.optBg, color: '#fff', fontWeight: 600 }}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      {/* Chevron arrow */}
+      <div className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2">
+        <svg className="w-2.5 h-2.5 text-white/80" fill="none" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+      </div>
+    </div>
+  );
+};
+
 const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD, onBack, saving }: any) => {
   const typedTeamStructure: TeamPosition[] = teamStructure;
   const today = new Date().toISOString().split('T')[0];
@@ -1101,21 +1132,23 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
     updateAthlete(athleteId, { injuries: (athlete.injuries || []).filter((i: any) => i.id !== injuryId) });
   };
 
-  // Sort order is fixed at mount time — status changes do NOT re-order rows
-  // This prevents the jarring jump when a player's status is updated mid-edit
-  const [rowOrder] = useState<string[]>(() => {
+  // Sort order AND group membership are fixed at mount — status changes never re-order or re-group
+  const [rowMeta] = useState<{ id: string; initialStatus: string }[]>(() => {
     const statusOrder: Record<string, number> = { 'Available': 0, 'Modified': 1, 'Unavailable': 2 };
     return [...athletes]
-      .sort((a, b) => {
-        const so = (statusOrder[(a as any).status] ?? 3) - (statusOrder[(b as any).status] ?? 3);
-        return so !== 0 ? so : (a as any).name.localeCompare((b as any).name);
+      .sort((a: any, b: any) => {
+        const so = (statusOrder[a.status] ?? 3) - (statusOrder[b.status] ?? 3);
+        return so !== 0 ? so : a.name.localeCompare(b.name);
       })
-      .map((a: any) => a.id);
+      .map((a: any) => ({ id: a.id, initialStatus: a.status }));
   });
-  // Render in the fixed order, looking up current state from eodAthletes
-  const sorted = rowOrder
-    .map(id => eodAthletes.find(a => a.id === id))
-    .filter(Boolean) as Athlete[];
+  // Render in fixed order, live data from eodAthletes
+  const sorted = rowMeta
+    .map(m => {
+      const a = eodAthletes.find(x => x.id === m.id);
+      return a ? { athlete: a, initialStatus: m.initialStatus } : null;
+    })
+    .filter(Boolean) as { athlete: Athlete; initialStatus: string }[];
 
   const activeInjuries = (a: Athlete) => {
     if (!a.injuries) return [];
@@ -1157,25 +1190,30 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {sorted.map((a, idx) => {
-                const prev = idx > 0 ? sorted[idx - 1] : null;
-                const showGroup = !prev || prev.status !== a.status;
+              {sorted.map(({ athlete: a, initialStatus }, idx) => {
+                // showGroup uses INITIAL status so headers never move when status changes
+                const prevInitial = idx > 0 ? sorted[idx - 1].initialStatus : null;
+                const showGroup = !prevInitial || prevInitial !== initialStatus;
+                const groupCount = sorted.filter(x => x.initialStatus === initialStatus).length;
                 const injuries = activeInjuries(a);
                 const isModifiedOrUnavailable = a.status === 'Modified' || a.status === 'Unavailable';
+                // Status colour helpers — reflect LIVE status on the row/dot
+                const statusDot = a.status === 'Available' ? 'bg-green-500' : a.status === 'Modified' ? 'bg-amber-500' : 'bg-red-500';
+                const groupHeaderCls = initialStatus === 'Available' ? 'bg-green-50 text-green-700' : initialStatus === 'Modified' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700';
                 return (
                   <React.Fragment key={a.id}>
                     {showGroup && (
                       <tr>
-                        <td colSpan={5} className={`px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${a.status === 'Available' ? 'bg-green-50 text-green-600' : a.status === 'Modified' ? 'bg-amber-50 text-amber-600' : 'bg-red-50 text-red-600'}`}>
-                          {a.status} ({sorted.filter(x => x.status === a.status).length})
+                        <td colSpan={5} className={`px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${groupHeaderCls}`}>
+                          {initialStatus} ({groupCount})
                         </td>
                       </tr>
                     )}
-                    <tr className={`hover:bg-slate-50 transition-colors ${a.status === 'Unavailable' ? 'opacity-80' : ''}`}>
-                      {/* Name */}
+                    <tr className="hover:bg-slate-50 transition-colors">
+                      {/* Name + live status dot */}
                       <td className="px-3 py-2.5">
                         <div className="flex items-center gap-2">
-                          <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${a.status === 'Available' ? 'bg-green-500' : a.status === 'Modified' ? 'bg-amber-500' : 'bg-red-500'}`} />
+                          <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDot}`} />
                           <span className="text-[13px] font-medium text-slate-800 whitespace-nowrap">{a.name}</span>
                         </div>
                       </td>
@@ -1183,14 +1221,9 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
                       <td className="px-3 py-2.5 text-[12px] text-slate-500 whitespace-nowrap">
                         {getPositionDisplay(a.positionNumbers, typedTeamStructure)}
                       </td>
-                      {/* Status dropdown */}
+                      {/* Status — custom coloured dropdown */}
                       <td className="px-3 py-2.5">
-                        <select value={a.status} onChange={e => updateAthlete(a.id, { status: e.target.value })}
-                          className={`h-7 px-2 text-[11px] rounded border font-medium focus:outline-none focus:ring-1 focus:ring-blue-500 ${a.status === 'Available' ? 'bg-green-50 text-green-700 border-green-200' : a.status === 'Modified' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
-                          <option value="Available">Available</option>
-                          <option value="Modified">Modified</option>
-                          <option value="Unavailable">Unavailable</option>
-                        </select>
+                        <EODStatusSelect value={a.status} onChange={val => updateAthlete(a.id, { status: val })} />
                       </td>
                       {/* Selection — only for Modified/Unavailable */}
                       <td className="px-3 py-2.5 hidden md:table-cell">
@@ -1206,7 +1239,6 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
                       {/* Notes & Injuries */}
                       <td className="px-3 py-2.5">
                         <div className="space-y-1.5">
-                          {/* Active injuries */}
                           {injuries.map((inj: any) => (
                             <div key={inj.id} className="flex items-start gap-1.5 p-1.5 bg-red-50 border border-red-100 rounded text-[11px] text-red-700">
                               <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0 text-red-400" />
@@ -1215,20 +1247,17 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
                               <button onClick={() => removeInjury(a.id, inj.id)} className="p-0.5 hover:bg-red-100 rounded flex-shrink-0"><X className="w-2.5 h-2.5 text-red-400" /></button>
                             </div>
                           ))}
-                          {/* Public note — always visible on table */}
                           {a.notes && a.isPublic && (
                             <div className="flex items-start gap-1.5 p-1.5 bg-blue-50 border border-blue-100 rounded text-[11px] text-blue-700">
                               <MessageSquare className="w-3 h-3 mt-0.5 flex-shrink-0 text-blue-400" />
                               <span className="flex-1">{a.notes}</span>
                             </div>
                           )}
-                          {/* Private note — exists but content hidden; owner can see/edit */}
                           {a.notes && !a.isPublic && (
                             <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-[10px] text-slate-400 italic">
                               <Lock className="w-2.5 h-2.5 flex-shrink-0" />Private note
                             </div>
                           )}
-                          {/* Action buttons */}
                           <div className="flex gap-1 flex-wrap">
                             <button onClick={() => openAddInjury(a.id)}
                               className="flex items-center gap-1 px-2 h-6 bg-red-50 text-red-600 border border-red-100 rounded text-[10px] font-medium hover:bg-red-100 transition-colors">
@@ -2102,7 +2131,6 @@ const AvailabilityReportTab = ({ athletes, availabilityRecords, seasonDates, tea
 // ── EOD Report Tab ───────────────────────────────────────────────────────────
 const EODReportTab = ({ athletes, availabilityRecords, teamStructure }: any) => {
   const eodDates = useMemo(() => {
-    // EOD rows are stored with date key '<YYYY-MM-DD>__EOD__'
     const dates = [...new Set(
       availabilityRecords
         .filter((r: any) => typeof r.date === 'string' && r.date.endsWith('__EOD__'))
@@ -2128,26 +2156,47 @@ const EODReportTab = ({ athletes, availabilityRecords, teamStructure }: any) => 
     return athletes.map((a: Athlete) => {
       const rec = eodRecs.find((r: any) => r.athleteId === a.id);
       if (!rec) return null;
-      const noteText = rec.note || '';
       return {
         athlete: a,
         status: rec.status,
-        note: noteText,
+        note: rec.note || '',
+        isPublic: rec.isPublic ?? a.isPublic,
+        selectionStatus: (a as any).selectionStatus || 'Available for Selection',
         injuries: (a.injuries || []).filter((i: any) => i.startDate <= selectedDate && (!i.returnDate || i.returnDate >= selectedDate)),
       };
     }).filter(Boolean);
   }, [selectedDate, availabilityRecords, athletes]);
 
-  // Available first, then Modified, then Unavailable
-  const byStatus = useMemo(() => ({
-    Available:   snapshot.filter((r: any) => r.status === 'Available').sort((a: any, b: any) => a.athlete.name.localeCompare(b.athlete.name)),
-    Modified:    snapshot.filter((r: any) => r.status === 'Modified').sort((a: any, b: any) => a.athlete.name.localeCompare(b.athlete.name)),
-    Unavailable: snapshot.filter((r: any) => r.status === 'Unavailable').sort((a: any, b: any) => a.athlete.name.localeCompare(b.athlete.name)),
-  }), [snapshot]);
+  // Available first, Modified second (sorted: available-for-selection first, then not), Unavailable last (sorted by ETR)
+  const byStatus = useMemo(() => {
+    const available = snapshot.filter((r: any) => r.status === 'Available')
+      .sort((a: any, b: any) => a.athlete.name.localeCompare(b.athlete.name));
 
+    const modified = snapshot.filter((r: any) => r.status === 'Modified')
+      .sort((a: any, b: any) => {
+        // Available for Selection first, then Unavailable for Selection
+        const aAvail = (a.selectionStatus !== 'Unavailable for Selection') ? 0 : 1;
+        const bAvail = (b.selectionStatus !== 'Unavailable for Selection') ? 0 : 1;
+        if (aAvail !== bAvail) return aAvail - bAvail;
+        return a.athlete.name.localeCompare(b.athlete.name);
+      });
+
+    const unavailable = snapshot.filter((r: any) => r.status === 'Unavailable')
+      .sort((a: any, b: any) => {
+        // Sort by soonest ETR first; no ETR (season-long) goes to end
+        const aEtr = a.injuries[0]?.returnDate || '9999-12-31';
+        const bEtr = b.injuries[0]?.returnDate || '9999-12-31';
+        if (aEtr !== bEtr) return aEtr < bEtr ? -1 : 1;
+        return a.athlete.name.localeCompare(b.athlete.name);
+      });
+
+    return { available, modified, unavailable };
+  }, [snapshot]);
+
+  // Available: group by position group then position name (no position numbers shown)
   const availableByGroup = useMemo(() => {
     const groups: Record<string, { posName: string; posNumber: number; athletes: any[] }[]> = {};
-    byStatus.Available.forEach((row: any) => {
+    byStatus.available.forEach((row: any) => {
       const posNums = row.athlete.positionNumbers || [];
       if (posNums.length === 0) {
         if (!groups['Unassigned']) groups['Unassigned'] = [];
@@ -2158,7 +2207,7 @@ const EODReportTab = ({ athletes, availabilityRecords, teamStructure }: any) => 
       const primaryNum = Math.min(...posNums);
       const posInfo = teamStructure.find((p: any) => p.number === primaryNum);
       const group = posInfo?.group || 'Other';
-      const posName = posInfo?.name || `Pos ${primaryNum}`;
+      const posName = posInfo?.name || `Position ${primaryNum}`;
       if (!groups[group]) groups[group] = [];
       let posEntry = groups[group].find((p: any) => p.posName === posName);
       if (!posEntry) { posEntry = { posName, posNumber: primaryNum, athletes: [] }; groups[group].push(posEntry); }
@@ -2168,7 +2217,7 @@ const EODReportTab = ({ athletes, availabilityRecords, teamStructure }: any) => 
     const ordered: { group: string; positions: { posName: string; posNumber: number; athletes: any[] }[] }[] = [];
     ['Forward', 'Back', 'Other', 'Unassigned'].forEach(g => { if (groups[g]) ordered.push({ group: g, positions: groups[g] }); });
     return ordered;
-  }, [byStatus.Available, teamStructure]);
+  }, [byStatus.available, teamStructure]);
 
   if (eodDates.length === 0) {
     return (
@@ -2181,6 +2230,7 @@ const EODReportTab = ({ athletes, availabilityRecords, teamStructure }: any) => 
 
   return (
     <div className="space-y-4">
+      {/* Date picker */}
       <div className="bg-white rounded-lg border border-slate-200 p-4 flex items-center gap-4 flex-wrap">
         <div className="flex items-center gap-2 flex-1 min-w-[200px]">
           <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">Report Date</label>
@@ -2204,27 +2254,32 @@ const EODReportTab = ({ athletes, availabilityRecords, teamStructure }: any) => 
         </div>
       )}
 
-      {/* Available — with position grouping */}
-      {byStatus.Available.length > 0 && (
+      {/* ── AVAILABLE — multi-column grid, grouped by position name ── */}
+      {byStatus.available.length > 0 && (
         <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
           <div className="flex items-center gap-2 px-4 py-3 bg-green-50 border-b border-green-100">
             <div className="w-2 h-2 rounded-full bg-green-500" />
             <h3 className="text-[13px] font-semibold text-green-700">Available</h3>
-            <span className="ml-auto text-[11px] text-green-400 font-medium">{byStatus.Available.length} player{byStatus.Available.length !== 1 ? 's' : ''}</span>
+            <span className="ml-auto text-[11px] text-green-400 font-medium">{byStatus.available.length} player{byStatus.available.length !== 1 ? 's' : ''}</span>
           </div>
           {availableByGroup.map(({ group, positions }: any) => (
             <div key={group}>
-              <div className="px-4 py-2 bg-slate-50 border-b border-t border-slate-100">
+              {/* Position group header */}
+              <div className="px-4 py-1.5 bg-slate-50 border-b border-slate-100">
                 <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{group}s</span>
               </div>
               {positions.map(({ posName, athletes: posAthletes }: any) => (
-                <div key={posName}>
-                  <div className="px-4 py-1.5 bg-white border-b border-slate-50 flex items-center gap-2">
-                    <span className="text-[11px] font-medium text-slate-600">{posName}</span>
-                    <span className="text-[10px] text-slate-300">{posAthletes.length}</span>
+                <div key={posName} className="border-b border-slate-50 last:border-b-0">
+                  {/* Position name header */}
+                  <div className="px-4 py-1 flex items-center gap-2 bg-white">
+                    <span className="text-[11px] font-semibold text-slate-600">{posName}</span>
+                    <span className="text-[10px] text-slate-300 font-medium">{posAthletes.length}</span>
                   </div>
-                  <div className="divide-y divide-slate-50">
-                    {posAthletes.map((row: any) => <EODAthleteRow key={row.athlete.id} row={row} showPosition={true} fmtShort={fmtShort} />)}
+                  {/* Multi-column grid of athletes */}
+                  <div className="px-3 pb-2 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1.5">
+                    {posAthletes.map((row: any) => (
+                      <EODAvailableCell key={row.athlete.id} row={row} fmtShort={fmtShort} />
+                    ))}
                   </div>
                 </div>
               ))}
@@ -2233,30 +2288,49 @@ const EODReportTab = ({ athletes, availabilityRecords, teamStructure }: any) => 
         </div>
       )}
 
-      {/* Modified */}
-      {byStatus.Modified.length > 0 && (
+      {/* ── MODIFIED — table with selection status, available-for-selection first ── */}
+      {byStatus.modified.length > 0 && (
         <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
           <div className="flex items-center gap-2 px-4 py-3 bg-amber-50 border-b border-amber-100">
             <div className="w-2 h-2 rounded-full bg-amber-500" />
             <h3 className="text-[13px] font-semibold text-amber-700">Modified</h3>
-            <span className="ml-auto text-[11px] text-amber-400 font-medium">{byStatus.Modified.length} player{byStatus.Modified.length !== 1 ? 's' : ''}</span>
+            <span className="ml-auto text-[11px] text-amber-400 font-medium">{byStatus.modified.length} player{byStatus.modified.length !== 1 ? 's' : ''}</span>
           </div>
-          <div className="divide-y divide-slate-50">
-            {byStatus.Modified.map((row: any) => <EODAthleteRow key={row.athlete.id} row={row} showPosition={false} fmtShort={fmtShort} />)}
-          </div>
+          {/* Sub-group headers if both selection statuses present */}
+          {(() => {
+            const forSel = byStatus.modified.filter((r: any) => r.selectionStatus !== 'Unavailable for Selection');
+            const notSel = byStatus.modified.filter((r: any) => r.selectionStatus === 'Unavailable for Selection');
+            const showSubHeaders = forSel.length > 0 && notSel.length > 0;
+            return (
+              <div className="divide-y divide-slate-50">
+                {showSubHeaders && forSel.length > 0 && (
+                  <div className="px-4 py-1.5 bg-slate-50">
+                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Available for Selection</span>
+                  </div>
+                )}
+                {forSel.map((row: any) => <EODModifiedRow key={row.athlete.id} row={row} fmtShort={fmtShort} />)}
+                {showSubHeaders && notSel.length > 0 && (
+                  <div className="px-4 py-1.5 bg-slate-50">
+                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Unavailable for Selection</span>
+                  </div>
+                )}
+                {notSel.map((row: any) => <EODModifiedRow key={row.athlete.id} row={row} fmtShort={fmtShort} />)}
+              </div>
+            );
+          })()}
         </div>
       )}
 
-      {/* Unavailable */}
-      {byStatus.Unavailable.length > 0 && (
+      {/* ── UNAVAILABLE — ordered by soonest ETR ── */}
+      {byStatus.unavailable.length > 0 && (
         <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
           <div className="flex items-center gap-2 px-4 py-3 bg-red-50 border-b border-red-100">
             <div className="w-2 h-2 rounded-full bg-red-500" />
             <h3 className="text-[13px] font-semibold text-red-700">Unavailable</h3>
-            <span className="ml-auto text-[11px] text-red-400 font-medium">{byStatus.Unavailable.length} player{byStatus.Unavailable.length !== 1 ? 's' : ''}</span>
+            <span className="ml-auto text-[11px] text-red-400 font-medium">{byStatus.unavailable.length} player{byStatus.unavailable.length !== 1 ? 's' : ''}</span>
           </div>
           <div className="divide-y divide-slate-50">
-            {byStatus.Unavailable.map((row: any) => <EODAthleteRow key={row.athlete.id} row={row} showPosition={false} fmtShort={fmtShort} />)}
+            {byStatus.unavailable.map((row: any) => <EODUnavailableRow key={row.athlete.id} row={row} fmtShort={fmtShort} />)}
           </div>
         </div>
       )}
@@ -2264,9 +2338,42 @@ const EODReportTab = ({ athletes, availabilityRecords, teamStructure }: any) => 
   );
 };
 
-// ── Single athlete row in EOD report ─────────────────────────────────────────
-const EODAthleteRow = ({ row, showPosition, fmtShort }: { row: any; showPosition: boolean; fmtShort: (d: string) => string }) => {
-  const { athlete, status, note, injuries } = row;
+// ── Available: compact card for multi-column grid ────────────────────────────
+const EODAvailableCell = ({ row, fmtShort }: { row: any; fmtShort: (d: string) => string }) => {
+  const { athlete, note, injuries } = row;
+  const hasDetail = (note && note.trim()) || injuries.length > 0;
+  return (
+    <div className={`rounded-md px-2.5 py-2 border ${hasDetail ? 'bg-green-50 border-green-100' : 'bg-slate-50 border-slate-100'}`}>
+      <div className="flex items-center gap-1.5">
+        {athlete.photo
+          ? <img src={athlete.photo} alt="" className="w-5 h-5 rounded flex-shrink-0 object-cover" />
+          : <div className="w-5 h-5 bg-slate-200 rounded flex items-center justify-center text-[8px] font-semibold text-slate-400 flex-shrink-0">{athlete.avatar}</div>}
+        <span className="text-[12px] font-medium text-slate-800 truncate">{athlete.name}</span>
+      </div>
+      {hasDetail && (
+        <div className="mt-1 space-y-0.5">
+          {injuries.map((inj: any) => (
+            <div key={inj.id} className="text-[10px] text-red-600 flex items-center gap-1">
+              <AlertCircle className="w-2.5 h-2.5 flex-shrink-0" />
+              <span className="truncate">{inj.bodyPart}{inj.returnDate ? ` · ETR ${fmtShort(inj.returnDate)}` : ' · Season'}</span>
+            </div>
+          ))}
+          {note && note.trim() && (
+            <div className="text-[10px] text-blue-600 flex items-center gap-1">
+              <MessageSquare className="w-2.5 h-2.5 flex-shrink-0" />
+              <span className="truncate">{note.trim()}</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── Modified: row with selection status pill, no position numbers ────────────
+const EODModifiedRow = ({ row, fmtShort }: { row: any; fmtShort: (d: string) => string }) => {
+  const { athlete, note, injuries, selectionStatus } = row;
+  const forSelection = selectionStatus !== 'Unavailable for Selection';
   const hasDetail = (note && note.trim()) || injuries.length > 0;
   return (
     <div className="px-4 py-2.5">
@@ -2275,11 +2382,9 @@ const EODAthleteRow = ({ row, showPosition, fmtShort }: { row: any; showPosition
           ? <img src={athlete.photo} alt="" className="w-7 h-7 rounded flex-shrink-0 object-cover" />
           : <div className="w-7 h-7 bg-slate-100 rounded flex items-center justify-center text-[9px] font-semibold text-slate-400 flex-shrink-0">{athlete.avatar}</div>}
         <span className="text-[13px] font-medium text-slate-800 flex-1">{athlete.name}</span>
-        {showPosition && athlete.positionNumbers?.length > 0 && (
-          <span className="text-[10px] text-slate-400 bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5">
-            {[...athlete.positionNumbers].sort((a: number, b: number) => a - b).join(', ')}
-          </span>
-        )}
+        <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${forSelection ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-600 border-red-100'}`}>
+          {forSelection ? 'Available' : 'Not Available'}
+        </span>
       </div>
       {hasDetail && (
         <div className="mt-1.5 ml-9 space-y-1">
@@ -2290,7 +2395,6 @@ const EODAthleteRow = ({ row, showPosition, fmtShort }: { row: any; showPosition
                 <span className="font-medium">{inj.bodyPart}</span>
                 {inj.event && <span className="text-red-500">{inj.event}</span>}
                 {inj.contact && <span className="text-red-400">{inj.contact}</span>}
-                {inj.surface && <span className="text-red-400">{inj.surface}</span>}
                 {inj.notes && <span className="text-red-600 w-full">{inj.notes}</span>}
                 {inj.returnDate ? <span className="text-slate-400">ETR {fmtShort(inj.returnDate)}</span> : <span className="text-red-600 font-medium">Season</span>}
               </div>
@@ -2307,6 +2411,52 @@ const EODAthleteRow = ({ row, showPosition, fmtShort }: { row: any; showPosition
     </div>
   );
 };
+
+// ── Unavailable: row with prominent ETR, ordered soonest first ───────────────
+const EODUnavailableRow = ({ row, fmtShort }: { row: any; fmtShort: (d: string) => string }) => {
+  const { athlete, note, injuries } = row;
+  // Pick the earliest ETR across active injuries
+  const etrs = injuries.map((i: any) => i.returnDate).filter(Boolean).sort();
+  const nextEtr = etrs[0] || null;
+  const isSeason = injuries.length > 0 && !nextEtr;
+  const hasNote = note && note.trim();
+  return (
+    <div className="px-4 py-2.5 flex items-start gap-3">
+      <div className="flex-shrink-0">
+        {athlete.photo
+          ? <img src={athlete.photo} alt="" className="w-7 h-7 rounded object-cover" />
+          : <div className="w-7 h-7 bg-slate-100 rounded flex items-center justify-center text-[9px] font-semibold text-slate-400">{athlete.avatar}</div>}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[13px] font-medium text-slate-800">{athlete.name}</span>
+          {injuries.map((inj: any) => (
+            <span key={inj.id} className="text-[11px] text-red-600 bg-red-50 border border-red-100 rounded px-1.5 py-0.5">
+              {inj.bodyPart}{inj.event ? ` · ${inj.event}` : ''}
+            </span>
+          ))}
+        </div>
+        {hasNote && (
+          <div className="mt-1 text-[11px] text-blue-600 flex items-center gap-1">
+            <MessageSquare className="w-2.5 h-2.5 flex-shrink-0" />{note.trim()}
+          </div>
+        )}
+      </div>
+      {/* ETR badge — right-aligned, prominent */}
+      <div className="flex-shrink-0 text-right">
+        {isSeason ? (
+          <span className="text-[11px] font-semibold text-red-600 bg-red-50 border border-red-100 rounded px-2 py-1">Season</span>
+        ) : nextEtr ? (
+          <div>
+            <div className="text-[9px] text-slate-400 uppercase tracking-wider mb-0.5">ETR</div>
+            <div className="text-[13px] font-semibold text-slate-700">{fmtShort(nextEtr)}</div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+};
+
 
 // ── Injury Report Tab ─────────────────────────────────────────────────────────
 const InjuryReportTab = ({ athletes, teamStructure, seasonDates, availabilityRecords }: any) => {
@@ -2495,49 +2645,90 @@ const InjuryReportTab = ({ athletes, teamStructure, seasonDates, availabilityRec
         )}
       </div>
 
-      {/* Table */}
-      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-          <h3 className="text-[13px] font-semibold text-slate-800">Injury Log</h3>
+      {/* Injury cards */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-[13px] font-semibold text-slate-700">Injury Log</h3>
           <span className="text-[11px] text-slate-400">{filtered.length} record{filtered.length !== 1 ? 's' : ''}</span>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-[12px]">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-100">
-                {['First','Last','Position','Body Part','Event','Surface','Contact','Start','ETR','Days Lost','Status'].map(h => (
-                  <th key={h} className="text-left px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {filtered.length === 0 ? (
-                <tr><td colSpan={11} className="text-center py-10 text-slate-400 text-[13px]">No injuries match the selected filters</td></tr>
-              ) : filtered.map((row: any, i: number) => {
-                const { first, last } = nameParts(row.athlete.name);
-                return (
-                  <tr key={i} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-3 py-2.5 font-medium text-slate-800">{first}</td>
-                    <td className="px-3 py-2.5 text-slate-700">{last}</td>
-                    <td className="px-3 py-2.5 text-slate-500">{row.position}</td>
-                    <td className="px-3 py-2.5 text-slate-700">{row.injury.bodyPart}</td>
-                    <td className="px-3 py-2.5"><span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px]">{row.injury.event || 'Training'}</span></td>
-                    <td className="px-3 py-2.5"><span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px]">{row.injury.surface || '4G'}</span></td>
-                    <td className="px-3 py-2.5"><span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px]">{row.injury.contact || 'Contact'}</span></td>
-                    <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">{fmtDate(row.injury.startDate)}</td>
-                    <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">{fmtDate(row.injury.returnDate)}</td>
-                    <td className="px-3 py-2.5 font-medium text-slate-700">{row.timeLoss !== null ? row.timeLoss : '—'}</td>
-                    <td className="px-3 py-2.5">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${row.status === 'Active' ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-slate-50 text-slate-500 border border-slate-200'}`}>
-                        {row.status}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+
+        {filtered.length === 0 ? (
+          <div className="bg-white rounded-lg border border-slate-200 p-10 text-center">
+            <p className="text-slate-400 text-[13px]">No injuries match the selected filters</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {filtered.map((row: any, i: number) => {
+              const isActive = row.status === 'Active';
+              return (
+                <div key={i} className={`bg-white rounded-lg border overflow-hidden ${isActive ? 'border-red-200' : 'border-slate-200'}`}>
+                  {/* Card header — name + status badge */}
+                  <div className={`flex items-center justify-between px-3 py-2.5 ${isActive ? 'bg-red-50' : 'bg-slate-50'} border-b ${isActive ? 'border-red-100' : 'border-slate-100'}`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      {row.athlete.photo
+                        ? <img src={row.athlete.photo} alt="" className="w-7 h-7 rounded-md object-cover flex-shrink-0" />
+                        : <div className="w-7 h-7 bg-slate-200 rounded-md flex items-center justify-center text-[9px] font-semibold text-slate-500 flex-shrink-0">{row.athlete.avatar}</div>}
+                      <div className="min-w-0">
+                        <p className="text-[13px] font-semibold text-slate-900 truncate">{row.athlete.name}</p>
+                        <p className="text-[10px] text-slate-400 truncate">{row.position}</p>
+                      </div>
+                    </div>
+                    <span className={`flex-shrink-0 ml-2 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${isActive ? 'bg-red-100 text-red-600 border-red-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                      {row.status}
+                    </span>
+                  </div>
+
+                  {/* Body part prominent */}
+                  <div className="px-3 pt-2.5 pb-1 flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-[15px] font-bold text-slate-800 leading-tight">{row.injury.bodyPart}</p>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {row.injury.event && (
+                          <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px] font-medium">{row.injury.event}</span>
+                        )}
+                        {row.injury.surface && (
+                          <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px] font-medium">{row.injury.surface}</span>
+                        )}
+                        {row.injury.contact && (
+                          <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px] font-medium">{row.injury.contact}</span>
+                        )}
+                      </div>
+                    </div>
+                    {/* Days lost badge */}
+                    {row.timeLoss !== null && (
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-[18px] font-bold text-slate-700 leading-none">{row.timeLoss}</p>
+                        <p className="text-[9px] text-slate-400 uppercase tracking-wide mt-0.5">days</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Dates row */}
+                  <div className="px-3 pb-2.5 flex items-center gap-4 mt-1">
+                    <div>
+                      <p className="text-[9px] text-slate-400 uppercase tracking-wide">Start</p>
+                      <p className="text-[12px] font-medium text-slate-600">{fmtDate(row.injury.startDate)}</p>
+                    </div>
+                    {row.injury.returnDate ? (
+                      <div>
+                        <p className="text-[9px] text-slate-400 uppercase tracking-wide">ETR</p>
+                        <p className={`text-[12px] font-medium ${isActive ? 'text-red-600' : 'text-slate-600'}`}>{fmtDate(row.injury.returnDate)}</p>
+                      </div>
+                    ) : isActive ? (
+                      <div>
+                        <p className="text-[9px] text-slate-400 uppercase tracking-wide">ETR</p>
+                        <p className="text-[12px] font-semibold text-red-600">Season</p>
+                      </div>
+                    ) : null}
+                    {row.injury.notes && (
+                      <p className="text-[11px] text-slate-400 italic truncate flex-1 ml-2">{row.injury.notes}</p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </>
   );
