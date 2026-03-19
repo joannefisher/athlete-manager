@@ -1457,22 +1457,47 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
       setDateRecordsMap({});
       return;
     }
-    // For any other date, fetch its availability_records from the DB
     let cancelled = false;
-    supabase
-      .from('availability_records')
-      .select('athlete_id, status, note')
-      .eq('date', selectedDate)
-      .then(({ data }) => {
-        if (cancelled) return;
-        if (data && data.length > 0) {
+
+    const loadRecordsForDate = async (targetDate: string) => {
+      // 1. Try the exact date first
+      const { data: exact } = await supabase
+        .from('availability_records')
+        .select('athlete_id, status, note')
+        .eq('date', targetDate);
+      if (!cancelled && exact && exact.length > 0) {
+        const map: Record<string, { status: string; note: string }> = {};
+        exact.forEach((r: any) => { map[r.athlete_id] = { status: r.status, note: r.note }; });
+        setDateRecordsMap(map);
+        return;
+      }
+
+      // 2. No records for that date — find the most recent EOD report before targetDate.
+      // EOD reports are stored in eod_reports, sorted descending, take the latest before targetDate.
+      const { data: recentEod } = await supabase
+        .from('eod_reports')
+        .select('athlete_id, status, note')
+        .lt('date', targetDate)
+        .order('date', { ascending: false })
+        .limit(athletes.length || 50);
+
+      if (!cancelled) {
+        if (recentEod && recentEod.length > 0) {
+          // Use the most recent EOD date's records (all rows from the latest date batch)
           const map: Record<string, { status: string; note: string }> = {};
-          data.forEach((r: any) => { map[r.athlete_id] = { status: r.status, note: r.note }; });
+          // Group by athlete_id, only keep the first (most recent date) entry per athlete
+          recentEod.forEach((r: any) => {
+            if (!map[r.athlete_id]) map[r.athlete_id] = { status: r.status, note: r.note };
+          });
           setDateRecordsMap(map);
         } else {
+          // No EOD reports at all — clear overlay, show base athlete data
           setDateRecordsMap({});
         }
-      });
+      }
+    };
+
+    loadRecordsForDate(selectedDate);
     return () => { cancelled = true; };
   }, [selectedDate]);
 
@@ -1666,7 +1691,9 @@ const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, 
   }
 
   if (editingTeam) {
-    return <TeamSelectionModal athletes={typedAthletes} team1={editingTeam.team1 || {}} setTeam1={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, team1: t} : d)); setEditingTeam((prev: any) => ({...prev, team1: t})); }} team2={editingTeam.team2 || {}} setTeam2={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, team2: t} : d)); setEditingTeam((prev: any) => ({...prev, team2: t})); }} subs1={editingTeam.subs1 || {}} setSubs1={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, subs1: t} : d)); setEditingTeam((prev: any) => ({...prev, subs1: t})); }} subs2={editingTeam.subs2 || {}} setSubs2={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, subs2: t} : d)); setEditingTeam((prev: any) => ({...prev, subs2: t})); }} onClearAll={() => { const empty = {team1:{},team2:{},subs1:{},subs2:{}}; setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, ...empty} : d)); setEditingTeam((prev: any) => ({...prev, ...empty})); }} onBack={() => setEditingTeam(null)} positions={getPositionsForDrill(editingTeam)} teamStructure={typedTeamStructure} title="Edit Team" />;
+    const drillPositions = getPositionsForDrill(editingTeam);
+    const stripToPos = (obj: any) => Object.fromEntries(Object.entries(obj || {}).filter(([pos]) => drillPositions.includes(Number(pos))));
+    return <TeamSelectionModal athletes={typedAthletes} team1={editingTeam.team1 || {}} setTeam1={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, team1: t} : d)); setEditingTeam((prev: any) => ({...prev, team1: t})); }} team2={editingTeam.team2 || {}} setTeam2={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, team2: t} : d)); setEditingTeam((prev: any) => ({...prev, team2: t})); }} subs1={editingTeam.subs1 || {}} setSubs1={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, subs1: t} : d)); setEditingTeam((prev: any) => ({...prev, subs1: t})); }} subs2={editingTeam.subs2 || {}} setSubs2={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, subs2: t} : d)); setEditingTeam((prev: any) => ({...prev, subs2: t})); }} onClearAll={() => { const empty = {team1:{},team2:{},subs1:{},subs2:{}}; setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, ...empty} : d)); setEditingTeam((prev: any) => ({...prev, ...empty})); }} onBack={() => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, team1: stripToPos(d.team1), team2: stripToPos(d.team2), subs1: stripToPos(d.subs1), subs2: stripToPos(d.subs2)} : d)); setEditingTeam(null); }} positions={drillPositions} teamStructure={typedTeamStructure} title="Edit Team" />;
   }
 
   return (
@@ -1807,16 +1834,21 @@ const AddDrillPage = ({ drills, setDrills, navigateTo, drillTypes, defaultTeam, 
   const handleSave = () => {
     if (!name.trim()) { setNameError(true); return; }
     const resolvedType = type || typedDrillTypes[0]?.name || 'General';
+    // Strip team objects to only the positions relevant to this drill type,
+    // so the accordion grid never shows unrelated default-team slots.
+    const drillPositions = getPositionsForDrillType();
+    const stripToPositions = (obj: Record<string, any>) =>
+      Object.fromEntries(Object.entries(obj).filter(([pos]) => drillPositions.includes(Number(pos))));
     setDrills([...drills, {
       id: String(Date.now()),
       name: name.trim(),
       type: resolvedType,
       notes,
       intensity,
-      team1,
-      team2,
-      subs1,
-      subs2,
+      team1: stripToPositions(team1),
+      team2: stripToPositions(team2),
+      subs1: stripToPositions(subs1),
+      subs2: stripToPositions(subs2),
     }]);
     navigateTo('session-plan');
   };
