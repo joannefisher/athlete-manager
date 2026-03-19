@@ -2231,8 +2231,16 @@ const AvailabilityReportTab = ({ athletes, availabilityRecords, seasonDates, tea
     }).filter(Boolean);
   }, [dateRange, filteredAthleteIds, availabilityRecords]);
 
-  const W = 300, H = 160, pad = { top: 20, right: 20, bottom: 30, left: 35 };
-  const iW = W - pad.left - pad.right, iH = H - pad.top - pad.bottom;
+  // Average availability across the period
+  const periodAverages = useMemo(() => {
+    if (chartData.length === 0) return null;
+    const avg = (key: string) => Math.round((chartData as any[]).reduce((sum, d: any) => sum + d[key], 0) / chartData.length);
+    return { available: avg('available'), modified: avg('modified'), unavailable: avg('unavailable') };
+  }, [chartData]);
+
+  // Full-width responsive SVG — use a wide viewBox so labels don't crowd
+  const VW = 800, VH = 200, pad = { top: 24, right: 16, bottom: 32, left: 40 };
+  const iW = VW - pad.left - pad.right, iH = VH - pad.top - pad.bottom;
   const path = (data: any[], key: string) => data.length < 2 ? '' : data.map((d, i) => `${i === 0 ? 'M' : 'L'} ${pad.left + (i / (data.length - 1)) * iW} ${pad.top + iH - (d[key] / 100) * iH}`).join(' ');
 
   return (
@@ -2265,24 +2273,61 @@ const AvailabilityReportTab = ({ athletes, availabilityRecords, seasonDates, tea
         )}
       </div>
       <div className="bg-white rounded-lg border border-slate-200 p-4">
-        <h3 className="font-semibold text-sm mb-3">Availability Over Time</h3>
-        <div className="flex flex-wrap gap-2 mb-3">
-          <label className="flex items-center gap-1.5 text-xs cursor-pointer"><input type="checkbox" checked={showAvailable} onChange={e => setShowAvailable(e.target.checked)} className="w-3 h-3" /><div className="w-2.5 h-2.5 rounded bg-green-500"></div>Available</label>
-          <label className="flex items-center gap-1.5 text-xs cursor-pointer"><input type="checkbox" checked={showModified} onChange={e => setShowModified(e.target.checked)} className="w-3 h-3" /><div className="w-2.5 h-2.5 rounded bg-amber-500"></div>Modified</label>
-          <label className="flex items-center gap-1.5 text-xs cursor-pointer"><input type="checkbox" checked={showUnavailable} onChange={e => setShowUnavailable(e.target.checked)} className="w-3 h-3" /><div className="w-2.5 h-2.5 rounded bg-red-500"></div>Unavailable</label>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-sm">Availability Over Time</h3>
+          <div className="flex gap-2">
+            <label className="flex items-center gap-1.5 text-xs cursor-pointer"><input type="checkbox" checked={showAvailable} onChange={e => setShowAvailable(e.target.checked)} className="w-3 h-3" /><div className="w-2 h-2 rounded-full bg-green-500"></div>Available</label>
+            <label className="flex items-center gap-1.5 text-xs cursor-pointer"><input type="checkbox" checked={showModified} onChange={e => setShowModified(e.target.checked)} className="w-3 h-3" /><div className="w-2 h-2 rounded-full bg-amber-500"></div>Modified</label>
+            <label className="flex items-center gap-1.5 text-xs cursor-pointer"><input type="checkbox" checked={showUnavailable} onChange={e => setShowUnavailable(e.target.checked)} className="w-3 h-3" /><div className="w-2 h-2 rounded-full bg-red-500"></div>Unavailable</label>
+          </div>
         </div>
+
+        {/* Period average summary strip */}
+        {periodAverages && (
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            {[
+              { label: 'Avg Available',   value: periodAverages.available,   bar: 'bg-green-500', text: 'text-green-700', bg: 'bg-green-50',  border: 'border-green-100' },
+              { label: 'Avg Modified',    value: periodAverages.modified,    bar: 'bg-amber-500', text: 'text-amber-700', bg: 'bg-amber-50',  border: 'border-amber-100' },
+              { label: 'Avg Unavailable', value: periodAverages.unavailable, bar: 'bg-red-500',   text: 'text-red-700',   bg: 'bg-red-50',    border: 'border-red-100'   },
+            ].map(k => (
+              <div key={k.label} className={`rounded-lg border ${k.bg} ${k.border} px-3 py-2.5 flex items-center justify-between`}>
+                <div>
+                  <div className={`text-xl font-bold leading-none ${k.text}`}>{k.value}%</div>
+                  <div className="text-[10px] text-slate-400 mt-1">{k.label}</div>
+                </div>
+                <div className={`w-1 h-6 rounded-sm ${k.bar}`} />
+              </div>
+            ))}
+          </div>
+        )}
+
         {chartData.length === 0 ? <p className="text-center py-8 text-slate-500 text-sm">No data.</p> : (
-          <svg width={W} height={H} className="w-full h-auto">
-            {[0, 50, 100].map(v => <g key={v}><line x1={pad.left} y1={pad.top + iH - (v / 100) * iH} x2={W - pad.right} y2={pad.top + iH - (v / 100) * iH} stroke="#e5e7eb" strokeDasharray="4,4" /><text x={pad.left - 5} y={pad.top + iH - (v / 100) * iH + 4} textAnchor="end" className="text-xs fill-gray-400">{v}%</text></g>)}
-            {showAvailable && <path d={path(chartData as any[], 'available')} fill="none" stroke="#22c55e" strokeWidth="2" />}
-            {showModified && <path d={path(chartData as any[], 'modified')} fill="none" stroke="#f59e0b" strokeWidth="2" />}
-            {showUnavailable && <path d={path(chartData as any[], 'unavailable')} fill="none" stroke="#ef4444" strokeWidth="2" />}
-            {showAvailable && (chartData as any[]).map((d: any, i) => <circle key={'a'+i} cx={pad.left + (i / Math.max(chartData.length - 1, 1)) * iW} cy={pad.top + iH - (d.available / 100) * iH} r="3" fill="#22c55e" />)}
-            {showModified && (chartData as any[]).map((d: any, i) => <circle key={'m'+i} cx={pad.left + (i / Math.max(chartData.length - 1, 1)) * iW} cy={pad.top + iH - (d.modified / 100) * iH} r="3" fill="#f59e0b" />)}
-            {showUnavailable && (chartData as any[]).map((d: any, i) => <circle key={'u'+i} cx={pad.left + (i / Math.max(chartData.length - 1, 1)) * iW} cy={pad.top + iH - (d.unavailable / 100) * iH} r="3" fill="#ef4444" />)}
+          <svg viewBox={`0 0 ${VW} ${VH}`} className="w-full h-auto" preserveAspectRatio="none">
+            {/* Grid lines + y-axis labels */}
+            {[0, 25, 50, 75, 100].map(v => (
+              <g key={v}>
+                <line x1={pad.left} y1={pad.top + iH - (v / 100) * iH} x2={VW - pad.right} y2={pad.top + iH - (v / 100) * iH} stroke={v === 0 ? '#cbd5e1' : '#f1f5f9'} strokeWidth={v === 0 ? '1' : '1'} />
+                <text x={pad.left - 6} y={pad.top + iH - (v / 100) * iH + 4} textAnchor="end" fontSize="18" fill="#94a3b8">{v}%</text>
+              </g>
+            ))}
+            {/* Average dashed reference lines */}
+            {periodAverages && showAvailable && (
+              <line x1={pad.left} y1={pad.top + iH - (periodAverages.available / 100) * iH} x2={VW - pad.right} y2={pad.top + iH - (periodAverages.available / 100) * iH} stroke="#22c55e" strokeWidth="1" strokeDasharray="6,4" opacity="0.4" />
+            )}
+            {periodAverages && showModified && (
+              <line x1={pad.left} y1={pad.top + iH - (periodAverages.modified / 100) * iH} x2={VW - pad.right} y2={pad.top + iH - (periodAverages.modified / 100) * iH} stroke="#f59e0b" strokeWidth="1" strokeDasharray="6,4" opacity="0.4" />
+            )}
+            {/* Lines */}
+            {showAvailable && <path d={path(chartData as any[], 'available')} fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />}
+            {showModified && <path d={path(chartData as any[], 'modified')} fill="none" stroke="#f59e0b" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />}
+            {showUnavailable && <path d={path(chartData as any[], 'unavailable')} fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />}
+            {/* Dots — only render if not too many data points */}
+            {chartData.length <= 60 && showAvailable && (chartData as any[]).map((d: any, i) => <circle key={'a'+i} cx={pad.left + (i / Math.max(chartData.length - 1, 1)) * iW} cy={pad.top + iH - (d.available / 100) * iH} r="4" fill="#22c55e" />)}
+            {chartData.length <= 60 && showModified && (chartData as any[]).map((d: any, i) => <circle key={'m'+i} cx={pad.left + (i / Math.max(chartData.length - 1, 1)) * iW} cy={pad.top + iH - (d.modified / 100) * iH} r="4" fill="#f59e0b" />)}
+            {chartData.length <= 60 && showUnavailable && (chartData as any[]).map((d: any, i) => <circle key={'u'+i} cx={pad.left + (i / Math.max(chartData.length - 1, 1)) * iW} cy={pad.top + iH - (d.unavailable / 100) * iH} r="4" fill="#ef4444" />)}
           </svg>
         )}
-        <p className="text-xs text-slate-400 text-center mt-2">{chartData.length} days • {filteredAthleteIds.length} athletes</p>
+        <p className="text-xs text-slate-400 text-center mt-2">{chartData.length} days · {filteredAthleteIds.length} athletes</p>
       </div>
     </>
   );
