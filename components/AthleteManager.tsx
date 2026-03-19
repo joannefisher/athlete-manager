@@ -157,135 +157,94 @@ const AthleteManager = () => {
   const fetchAllData = useCallback(async () => {
     setLoading(true);
     try {
-      // Fetch team structure
-      const { data: teamData } = await supabase
-        .from('team_structure')
-        .select('*')
-        .order('number');
-      if (teamData) setTeamStructure(teamData.map((t: any) => ({ 
-        id: t.id, 
-        number: t.number, 
-        name: t.name, 
-        group: t.position_group 
+      const todayStr = new Date().toISOString().split('T')[0];
+
+      // Fire all independent queries in parallel
+      const [
+        { data: teamData },
+        { data: athletesData },
+        { data: allPositions },
+        { data: allInjuries },
+        { data: todayRecords },
+        { data: drillTypesData },
+        { data: allDrillTypePositions },
+        { data: seasonData },
+        { data: availData },
+        { data: eodData },
+        { data: defaultTeamData },
+      ] = await Promise.all([
+        supabase.from('team_structure').select('*').order('number'),
+        supabase.from('athletes').select('*').order('name'),
+        supabase.from('athlete_positions').select('*'),
+        supabase.from('athlete_injuries').select('*'),
+        supabase.from('availability_records').select('athlete_id, status, note').eq('date', todayStr),
+        supabase.from('drill_types').select('*').order('name'),
+        supabase.from('drill_type_positions').select('*'),
+        supabase.from('season_dates').select('*').order('from_date'),
+        supabase.from('availability_records').select('id, date, athlete_id, status, note'),
+        supabase.from('eod_reports').select('id, date, athlete_id, status, note, is_public, selection_status'),
+        supabase.from('default_team').select('*'),
+      ]);
+
+      // Team structure
+      if (teamData) setTeamStructure(teamData.map((t: any) => ({
+        id: t.id, number: t.number, name: t.name, group: t.position_group
       })));
 
-      // Fetch athletes
-      const { data: athletesData } = await supabase.from('athletes').select('*').order('name');
-      const { data: allPositions } = await supabase.from('athlete_positions').select('*');
-      const { data: allInjuries } = await supabase.from('athlete_injuries').select('*');
-
-      // Fetch today's availability_records — if they exist for an athlete we
-      // use them as the live status/note so that EOD-written records (saved
-      // yesterday for today) take effect when the app opens today.
-      const todayStr = new Date().toISOString().split('T')[0];
-      const { data: todayRecords } = await supabase
-        .from('availability_records')
-        .select('*')
-        .eq('date', todayStr);
+      // Athletes — overlay today's availability_records on top
       const todayMap: Record<string, { status: string; note: string }> = {};
-      (todayRecords || []).forEach((r: any) => {
-        todayMap[r.athlete_id] = { status: r.status, note: r.note };
-      });
-
+      (todayRecords || []).forEach((r: any) => { todayMap[r.athlete_id] = { status: r.status, note: r.note }; });
       if (athletesData) setAthletes(athletesData.map((a: any) => {
-        // Prefer today's availability_record if one exists
         const todayRec = todayMap[a.id];
         return {
-          id: a.id,
-          name: a.name,
+          id: a.id, name: a.name,
           status: todayRec ? todayRec.status : a.status,
           notes: todayRec ? todayRec.note : a.notes,
-          isPublic: a.is_public,
-          avatar: a.avatar,
-          photo: a.photo_url,
+          isPublic: a.is_public, avatar: a.avatar, photo: a.photo_url,
           positionNumbers: (allPositions || []).filter((p: any) => p.athlete_id === a.id).map((p: any) => p.position_number),
           injuries: (allInjuries || []).filter((i: any) => i.athlete_id === a.id).map((i: any) => ({
-            id: i.id,
-            bodyPart: i.body_part,
-            startDate: i.start_date,
-            returnDate: i.return_date,
-            notes: i.notes,
-            event: i.event,
-            surface: i.surface,
-            contact: i.contact,
+            id: i.id, bodyPart: i.body_part, startDate: i.start_date,
+            returnDate: i.return_date, notes: i.notes,
+            event: i.event, surface: i.surface, contact: i.contact,
           }))
         };
       }));
 
-      // Fetch drill types with positions
-      const { data: drillTypesData } = await supabase.from('drill_types').select('*').order('name');
-      const { data: allDrillTypePositions } = await supabase.from('drill_type_positions').select('*');
+      // Drill types
       if (drillTypesData) setDrillTypes(drillTypesData.map((dt: any) => ({
-        id: dt.id,
-        name: dt.name,
+        id: dt.id, name: dt.name,
         positions: (allDrillTypePositions || []).filter((p: any) => p.drill_type_id === dt.id).map((p: any) => p.position_number)
       })));
 
-      // Fetch season dates
-      const { data: seasonData } = await supabase
-        .from('season_dates')
-        .select('*')
-        .order('from_date');
+      // Season dates
       if (seasonData) setSeasonDates(seasonData.map((s: any) => ({
-        id: s.id,
-        title: s.title,
-        fromDate: s.from_date,
-        toDate: s.to_date,
-        isDefault: s.is_default
+        id: s.id, title: s.title, fromDate: s.from_date, toDate: s.to_date, isDefault: s.is_default
       })));
 
-      // Fetch availability records
-      const { data: availData } = await supabase
-        .from('availability_records')
-        .select('*');
-
-      // Fetch EOD reports and merge in as synthetic availability records
-      // EOD records are tagged with a note prefix so EODReportTab can identify them
-      const { data: eodData } = await supabase
-        .from('eod_reports')
-        .select('*');
-
+      // Availability records + EOD reports merged
       const eodAsRecords = (eodData || []).map((r: any) => ({
-        id: 'eod_' + r.id,
-        date: r.date + '__EOD__',   // tag so EODReportTab can filter by endsWith('__EOD__')
-        athleteId: r.athlete_id,
-        status: r.status,
-        note: r.note,
-        isPublic: r.is_public,
-        selectionStatus: r.selection_status,
+        id: 'eod_' + r.id, date: r.date + '__EOD__',
+        athleteId: r.athlete_id, status: r.status, note: r.note,
+        isPublic: r.is_public, selectionStatus: r.selection_status,
       }));
-
       if (availData) setAvailabilityRecords([
-        ...availData.map((r: any) => ({
-          id: r.id,
-          date: r.date,
-          athleteId: r.athlete_id,
-          status: r.status,
-          note: r.note
-        })),
+        ...availData.map((r: any) => ({ id: r.id, date: r.date, athleteId: r.athlete_id, status: r.status, note: r.note })),
         ...eodAsRecords,
       ]);
 
-      // Fetch default team
-      const { data: defaultTeamData } = await supabase
-        .from('default_team')
-        .select('*');
+      // Default team
       if (defaultTeamData) {
-        const team1: Record<number, string> = {}, team2: Record<number, string> = {}, subs1: Record<number, string> = {}, subs2: Record<number, string> = {};
+        const team1: Record<number, string> = {}, team2: Record<number, string> = {},
+              subs1: Record<number, string> = {}, subs2: Record<number, string> = {};
         defaultTeamData.forEach((dt: any) => {
-          if (dt.team_number === 1) {
-            if (dt.is_substitute) subs1[dt.position_number] = dt.athlete_id;
-            else team1[dt.position_number] = dt.athlete_id;
-          } else {
-            if (dt.is_substitute) subs2[dt.position_number] = dt.athlete_id;
-            else team2[dt.position_number] = dt.athlete_id;
-          }
+          if (dt.team_number === 1) { if (dt.is_substitute) subs1[dt.position_number] = dt.athlete_id; else team1[dt.position_number] = dt.athlete_id; }
+          else { if (dt.is_substitute) subs2[dt.position_number] = dt.athlete_id; else team2[dt.position_number] = dt.athlete_id; }
         });
         setDefaultTeam({ team1, team2, subs1, subs2 });
       }
 
-      // Fetch today's session plan
-      await loadSessionPlan(new Date().toISOString().split('T')[0]);
+      // Session plan (depends on nothing else, run after state is set)
+      await loadSessionPlan(todayStr);
 
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -484,7 +443,30 @@ const AthleteManager = () => {
       const { error: insTomErr } = await supabase.from('availability_records').insert(tomorrowRecords);
       if (insTomErr) throw new Error('Insert tomorrow records: ' + insTomErr.message);
 
-      await fetchAllData();
+      // Only re-fetch the records that changed — avoids full reload
+      const [{ data: newAvail }, { data: newEod }] = await Promise.all([
+        supabase.from('availability_records').select('id, date, athlete_id, status, note'),
+        supabase.from('eod_reports').select('id, date, athlete_id, status, note, is_public, selection_status'),
+      ]);
+      const eodAsRecs = (newEod || []).map((r: any) => ({
+        id: 'eod_' + r.id, date: r.date + '__EOD__',
+        athleteId: r.athlete_id, status: r.status, note: r.note,
+        isPublic: r.is_public, selectionStatus: r.selection_status,
+      }));
+      setAvailabilityRecords([
+        ...(newAvail || []).map((r: any) => ({ id: r.id, date: r.date, athleteId: r.athlete_id, status: r.status, note: r.note })),
+        ...eodAsRecs,
+      ]);
+      // Refresh injuries (changed in EOD save)
+      const { data: freshInjuries } = await supabase.from('athlete_injuries').select('*');
+      setAthletes(prev => prev.map(a => ({
+        ...a,
+        injuries: (freshInjuries || []).filter((i: any) => i.athlete_id === a.id).map((i: any) => ({
+          id: i.id, bodyPart: i.body_part, startDate: i.start_date,
+          returnDate: i.return_date, notes: i.notes,
+          event: i.event, surface: i.surface, contact: i.contact,
+        }))
+      })));
     } catch (error) {
       console.error('Error saving EOD report:', error);
       setSaving(false);
@@ -505,7 +487,18 @@ const AthleteManager = () => {
         note: a.notes || ''
       }));
       await supabase.from('availability_records').insert(records);
-      await fetchAllData();
+      // Only re-fetch availability records — not the entire dataset
+      const { data: newAvail } = await supabase.from('availability_records').select('id, date, athlete_id, status, note');
+      const { data: eodData } = await supabase.from('eod_reports').select('id, date, athlete_id, status, note, is_public, selection_status');
+      const eodAsRecords = (eodData || []).map((r: any) => ({
+        id: 'eod_' + r.id, date: r.date + '__EOD__',
+        athleteId: r.athlete_id, status: r.status, note: r.note,
+        isPublic: r.is_public, selectionStatus: r.selection_status,
+      }));
+      setAvailabilityRecords([
+        ...(newAvail || []).map((r: any) => ({ id: r.id, date: r.date, athleteId: r.athlete_id, status: r.status, note: r.note })),
+        ...eodAsRecords,
+      ]);
     } catch (error) {
       console.error('Error saving availability:', error);
     } finally {
@@ -539,41 +532,34 @@ const AthleteManager = () => {
       // Delete existing drills for this session
       await supabase.from('drills').delete().eq('session_plan_id', sessionPlan.id);
 
-      // Insert new drills
-      for (let i = 0; i < drillsToSave.length; i++) {
-        const drill = drillsToSave[i];
-        const { data: newDrill } = await supabase
+      if (drillsToSave.length > 0) {
+        // Insert all drills in one batch
+        const { data: newDrills } = await supabase
           .from('drills')
-          .insert({
+          .insert(drillsToSave.map((drill, i) => ({
             session_plan_id: sessionPlan.id,
             name: drill.name,
             drill_type: drill.type,
             intensity: drill.intensity,
             notes: drill.notes,
-            sort_order: i
-          })
-          .select()
-          .single();
+            sort_order: i,
+          })))
+          .select();
 
-        if (!newDrill) continue;
-
-        // Insert team assignments
-        const assignments: any[] = [];
-        Object.entries(drill.team1 || {}).forEach(([pos, athleteId]) => {
-          if (athleteId) assignments.push({ drill_id: newDrill.id, position_number: parseInt(pos), team_number: 1, is_substitute: false, athlete_id: athleteId });
+        // Build all team assignments and insert in one batch
+        const allAssignments: any[] = [];
+        (newDrills || []).forEach((newDrill: any, i: number) => {
+          const drill = drillsToSave[i];
+          const push = (pos: string, athleteId: any, teamNum: number, isSub: boolean) => {
+            if (athleteId) allAssignments.push({ drill_id: newDrill.id, position_number: parseInt(pos), team_number: teamNum, is_substitute: isSub, athlete_id: athleteId });
+          };
+          Object.entries(drill.team1 || {}).forEach(([p, id]) => push(p, id, 1, false));
+          Object.entries(drill.team2 || {}).forEach(([p, id]) => push(p, id, 2, false));
+          Object.entries(drill.subs1 || {}).forEach(([p, id]) => push(p, id, 1, true));
+          Object.entries(drill.subs2 || {}).forEach(([p, id]) => push(p, id, 2, true));
         });
-        Object.entries(drill.team2 || {}).forEach(([pos, athleteId]) => {
-          if (athleteId) assignments.push({ drill_id: newDrill.id, position_number: parseInt(pos), team_number: 2, is_substitute: false, athlete_id: athleteId });
-        });
-        Object.entries(drill.subs1 || {}).forEach(([pos, athleteId]) => {
-          if (athleteId) assignments.push({ drill_id: newDrill.id, position_number: parseInt(pos), team_number: 1, is_substitute: true, athlete_id: athleteId });
-        });
-        Object.entries(drill.subs2 || {}).forEach(([pos, athleteId]) => {
-          if (athleteId) assignments.push({ drill_id: newDrill.id, position_number: parseInt(pos), team_number: 2, is_substitute: true, athlete_id: athleteId });
-        });
-
-        if (assignments.length > 0) {
-          await supabase.from('drill_team_assignments').insert(assignments);
+        if (allAssignments.length > 0) {
+          await supabase.from('drill_team_assignments').insert(allAssignments);
         }
       }
     } catch (error) {
@@ -1959,7 +1945,7 @@ const TeamSelectionModal = ({ athletes, team1, setTeam1, team2, setTeam2, subs1,
 
   const getStatusStyle = (id, isSub) => {
     const s = getStatus(id);
-    if (!s) return isSub ? 'bg-gray-50 text-gray-400 border-gray-100' : 'bg-gray-100 border-gray-200';
+    if (!s) return isSub ? 'bg-slate-50 text-slate-400 border-slate-100' : 'bg-slate-100 border-slate-200';
     if (s === 'Available') return isSub ? 'bg-green-50 text-green-700 border-green-100' : 'bg-green-100 text-green-800 border-green-200';
     if (s === 'Modified') return isSub ? 'bg-amber-50 text-amber-700 border-amber-100' : 'bg-amber-100 text-amber-800 border-amber-200';
     return isSub ? 'bg-red-50 text-red-700 border-red-100' : 'bg-red-100 text-red-800 border-red-200';
@@ -2026,13 +2012,13 @@ const TeamSelectionModal = ({ athletes, team1, setTeam1, team2, setTeam2, subs1,
       <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6">
         <div className="bg-white rounded-lg border border-slate-200">
           <div className="p-4 border-b flex items-center gap-3">
-            <button onClick={() => setSelectedCell(null)} className="p-1 hover:bg-gray-100 rounded-lg"><ArrowLeft className="w-5 h-5" /></button>
+            <button onClick={() => setSelectedCell(null)} className="p-1 hover:bg-slate-100 rounded-lg"><ArrowLeft className="w-5 h-5" /></button>
             <h3 className="font-semibold text-sm">{selectedCell.isSub ? 'Sub for ' : ''}{posName}</h3>
           </div>
           <div className="p-4">
             <input type="text" placeholder="Search..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full px-3 py-2 text-sm border rounded-lg mb-3" />
             <div className="max-h-72 overflow-y-auto">
-              <button onClick={() => selectAthlete(null)} className="w-full p-2 text-left bg-gray-50 hover:bg-gray-100 rounded-lg text-sm text-gray-500 mb-2">Clear selection</button>
+              <button onClick={() => selectAthlete(null)} className="w-full p-2 text-left bg-slate-50 hover:bg-slate-100 rounded-lg text-sm text-slate-500 mb-2">Clear selection</button>
 
               {matchingPosition.length > 0 && (
                 <div className="mb-3">
@@ -2043,19 +2029,19 @@ const TeamSelectionModal = ({ athletes, team1, setTeam1, team2, setTeam2, subs1,
 
               {sameGroupOther.length > 0 && (
                 <div className="mb-3">
-                  <div className="text-xs font-semibold text-gray-600 px-2 py-1 bg-gray-100 rounded mb-1">Other {posGroup}s</div>
+                  <div className="text-xs font-semibold text-slate-600 px-2 py-1 bg-slate-100 rounded mb-1">Other {posGroup}s</div>
                   <div className="space-y-1">{sameGroupOther.map(renderAthlete)}</div>
                 </div>
               )}
 
               {otherGroup.length > 0 && (
                 <div className="mb-3">
-                  <div className="text-xs font-semibold text-gray-400 px-2 py-1 bg-gray-50 rounded mb-1">{posGroup === 'Forward' ? 'Backs' : 'Forwards'}</div>
+                  <div className="text-xs font-semibold text-slate-400 px-2 py-1 bg-slate-50 rounded mb-1">{posGroup === 'Forward' ? 'Backs' : 'Forwards'}</div>
                   <div className="space-y-1">{otherGroup.map(renderAthlete)}</div>
                 </div>
               )}
 
-              {sortedAthletes.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No athletes found</p>}
+              {sortedAthletes.length === 0 && <p className="text-sm text-slate-400 text-center py-4">No athletes found</p>}
             </div>
           </div>
         </div>
@@ -2067,21 +2053,21 @@ const TeamSelectionModal = ({ athletes, team1, setTeam1, team2, setTeam2, subs1,
     <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6">
       <div className="bg-white rounded-lg border border-slate-200">
         <div className="p-4 border-b flex items-center gap-3">
-          <button onClick={onBack} className="p-1 hover:bg-gray-100 rounded-lg"><ArrowLeft className="w-5 h-5" /></button>
+          <button onClick={onBack} className="p-1 hover:bg-slate-100 rounded-lg"><ArrowLeft className="w-5 h-5" /></button>
           <h3 className="font-semibold text-sm">{title}</h3>
         </div>
         <div className="p-4 overflow-x-auto">
           <div className="grid grid-cols-5 gap-1 min-w-[400px]">
-            <div className="text-xs text-gray-500 text-center pb-2">Team 1</div>
-            <div className="text-xs text-gray-500 text-center pb-2">Sub</div>
-            <div className="text-xs text-gray-500 text-center pb-2"></div>
-            <div className="text-xs text-gray-500 text-center pb-2">Sub</div>
-            <div className="text-xs text-gray-500 text-center pb-2">Team 2</div>
+            <div className="text-xs text-slate-500 text-center pb-2">Team 1</div>
+            <div className="text-xs text-slate-500 text-center pb-2">Sub</div>
+            <div className="text-xs text-slate-500 text-center pb-2"></div>
+            <div className="text-xs text-slate-500 text-center pb-2">Sub</div>
+            <div className="text-xs text-slate-500 text-center pb-2">Team 2</div>
             {sorted.map(pos => (
               <React.Fragment key={pos}>
                 <button onClick={() => setSelectedCell({ row: pos, team: 1, isSub: false })} className={`p-1.5 text-left rounded text-xs truncate border ${getStatusStyle(team1[pos], false)}`}>{team1[pos] ? getAthName(team1[pos]) : getPosName(pos)}</button>
                 <button onClick={() => setSelectedCell({ row: pos, team: 1, isSub: true })} className={`p-1.5 text-left rounded text-xs truncate border ${getStatusStyle(subs1[pos], true)}`}>{subs1[pos] ? getAthName(subs1[pos]) : '-'}</button>
-                <div className="flex items-center justify-center text-xs text-gray-400">{pos}</div>
+                <div className="flex items-center justify-center text-xs text-slate-400">{pos}</div>
                 <button onClick={() => setSelectedCell({ row: pos, team: 2, isSub: true })} className={`p-1.5 text-left rounded text-xs truncate border ${getStatusStyle(subs2[pos], true)}`}>{subs2[pos] ? getAthName(subs2[pos]) : '-'}</button>
                 <button onClick={() => setSelectedCell({ row: pos, team: 2, isSub: false })} className={`p-1.5 text-left rounded text-xs truncate border ${getStatusStyle(team2[pos], false)}`}>{team2[pos] ? getAthName(team2[pos]) : getPosName(pos)}</button>
               </React.Fragment>
@@ -2123,10 +2109,10 @@ const AvailabilityChart = ({ athleteId, availabilityRecords, seasonDates }: any)
     <div className="bg-white rounded-lg border border-slate-200 p-4">
       <h3 className="font-semibold text-sm mb-3">Availability Report</h3>
       <div className="flex flex-wrap gap-2 mb-4">
-        <button onClick={() => setSelectedPeriod('all')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedPeriod === 'all' ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>All Time</button>
-        {seasonDates.map(p => <button key={p.id} onClick={() => setSelectedPeriod(p.id.toString())} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedPeriod === p.id.toString() ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>{p.title}</button>)}
+        <button onClick={() => setSelectedPeriod('all')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedPeriod === 'all' ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>All Time</button>
+        {seasonDates.map(p => <button key={p.id} onClick={() => setSelectedPeriod(p.id.toString())} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedPeriod === p.id.toString() ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>{p.title}</button>)}
       </div>
-      {stats.total === 0 ? <p className="text-center py-6 text-gray-500 text-sm">No data.</p> : (
+      {stats.total === 0 ? <p className="text-center py-6 text-slate-500 text-sm">No data.</p> : (
         <>
           <div className="h-8 rounded-lg overflow-hidden flex mb-3">
             {stats.available > 0 && <div className="bg-green-500 flex items-center justify-center text-white text-xs" style={{width: stats.available+'%'}}>{stats.available > 10 && stats.available+'%'}</div>}
@@ -2138,7 +2124,7 @@ const AvailabilityChart = ({ athleteId, availabilityRecords, seasonDates }: any)
             <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-amber-500"></div>Modified ({stats.modified}%)</div>
             <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-red-500"></div>Unavailable ({stats.unavailable}%)</div>
           </div>
-          <p className="text-xs text-gray-400 mt-2">{stats.total} days</p>
+          <p className="text-xs text-slate-400 mt-2">{stats.total} days</p>
         </>
       )}
     </div>
@@ -2249,9 +2235,9 @@ const AvailabilityReportTab = ({ athletes, availabilityRecords, seasonDates, tea
       <div className="bg-white rounded-lg border border-slate-200 p-4">
         <h3 className="font-semibold text-sm mb-3">Time Period</h3>
         <div className="flex flex-wrap gap-2 mb-3">
-          <button onClick={() => setDateMode('all')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${dateMode === 'all' ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>All Time</button>
-          {seasonDates.map((p: any) => <button key={p.id} onClick={() => { setDateMode('period'); setSelectedPeriodId(p.id.toString()); }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${dateMode === 'period' && selectedPeriodId === p.id.toString() ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>{p.title}</button>)}
-          <button onClick={() => setDateMode('custom')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${dateMode === 'custom' ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>Custom</button>
+          <button onClick={() => setDateMode('all')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${dateMode === 'all' ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>All Time</button>
+          {seasonDates.map((p: any) => <button key={p.id} onClick={() => { setDateMode('period'); setSelectedPeriodId(p.id.toString()); }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${dateMode === 'period' && selectedPeriodId === p.id.toString() ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>{p.title}</button>)}
+          <button onClick={() => setDateMode('custom')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${dateMode === 'custom' ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>Custom</button>
         </div>
         {dateMode === 'custom' && <div className="grid grid-cols-2 gap-2"><input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} className="px-3 py-2 text-sm border rounded-lg" /><input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} className="px-3 py-2 text-sm border rounded-lg" /></div>}
       </div>
@@ -2259,17 +2245,17 @@ const AvailabilityReportTab = ({ athletes, availabilityRecords, seasonDates, tea
         <button onClick={() => setShowFilters(!showFilters)} className="w-full flex justify-between items-center"><h3 className="font-semibold text-sm">Filters</h3>{showFilters ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</button>
         {showFilters && (
           <div className="mt-3 space-y-3">
-            <div><p className="text-xs text-gray-500 mb-2">Position Group</p><div className="flex gap-2">
-              <button onClick={() => toggleGroup('Forward')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedGroups.includes('Forward') ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>Forwards</button>
-              <button onClick={() => toggleGroup('Back')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedGroups.includes('Back') ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>Backs</button>
+            <div><p className="text-xs text-slate-500 mb-2">Position Group</p><div className="flex gap-2">
+              <button onClick={() => toggleGroup('Forward')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedGroups.includes('Forward') ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>Forwards</button>
+              <button onClick={() => toggleGroup('Back')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedGroups.includes('Back') ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>Backs</button>
             </div></div>
-            <div><p className="text-xs text-gray-500 mb-2">Positions</p><div className="flex flex-wrap gap-1">
+            <div><p className="text-xs text-slate-500 mb-2">Positions</p><div className="flex flex-wrap gap-1">
               {(uniquePositionNames as any[]).map((pos: any) => {
                 const allSelected = pos.numbers.every((n: any) => selectedPositions.includes(n));
-                return <button key={pos.name} onClick={() => togglePositionName(pos.name)} className={`px-2 py-1 rounded text-xs ${allSelected ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>{pos.name}</button>;
+                return <button key={pos.name} onClick={() => togglePositionName(pos.name)} className={`px-2 py-1 rounded text-xs ${allSelected ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>{pos.name}</button>;
               })}
             </div></div>
-            <div><p className="text-xs text-gray-500 mb-2">Athletes ({selectedAthleteIds.length}/{athletes.length})</p><div className="space-y-1 max-h-32 overflow-y-auto">{athletes.map((a: any) => <label key={a.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={selectedAthleteIds.includes(a.id)} onChange={() => setSelectedAthleteIds((p: any) => p.includes(a.id) ? p.filter((x: any) => x !== a.id) : [...p, a.id])} className="w-4 h-4" />{a.name}</label>)}</div></div>
+            <div><p className="text-xs text-slate-500 mb-2">Athletes ({selectedAthleteIds.length}/{athletes.length})</p><div className="space-y-1 max-h-32 overflow-y-auto">{athletes.map((a: any) => <label key={a.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={selectedAthleteIds.includes(a.id)} onChange={() => setSelectedAthleteIds((p: any) => p.includes(a.id) ? p.filter((x: any) => x !== a.id) : [...p, a.id])} className="w-4 h-4" />{a.name}</label>)}</div></div>
           </div>
         )}
       </div>
@@ -2280,7 +2266,7 @@ const AvailabilityReportTab = ({ athletes, availabilityRecords, seasonDates, tea
           <label className="flex items-center gap-1.5 text-xs cursor-pointer"><input type="checkbox" checked={showModified} onChange={e => setShowModified(e.target.checked)} className="w-3 h-3" /><div className="w-2.5 h-2.5 rounded bg-amber-500"></div>Modified</label>
           <label className="flex items-center gap-1.5 text-xs cursor-pointer"><input type="checkbox" checked={showUnavailable} onChange={e => setShowUnavailable(e.target.checked)} className="w-3 h-3" /><div className="w-2.5 h-2.5 rounded bg-red-500"></div>Unavailable</label>
         </div>
-        {chartData.length === 0 ? <p className="text-center py-8 text-gray-500 text-sm">No data.</p> : (
+        {chartData.length === 0 ? <p className="text-center py-8 text-slate-500 text-sm">No data.</p> : (
           <svg width={W} height={H} className="w-full h-auto">
             {[0, 50, 100].map(v => <g key={v}><line x1={pad.left} y1={pad.top + iH - (v / 100) * iH} x2={W - pad.right} y2={pad.top + iH - (v / 100) * iH} stroke="#e5e7eb" strokeDasharray="4,4" /><text x={pad.left - 5} y={pad.top + iH - (v / 100) * iH + 4} textAnchor="end" className="text-xs fill-gray-400">{v}%</text></g>)}
             {showAvailable && <path d={path(chartData as any[], 'available')} fill="none" stroke="#22c55e" strokeWidth="2" />}
@@ -2291,7 +2277,7 @@ const AvailabilityReportTab = ({ athletes, availabilityRecords, seasonDates, tea
             {showUnavailable && (chartData as any[]).map((d: any, i) => <circle key={'u'+i} cx={pad.left + (i / Math.max(chartData.length - 1, 1)) * iW} cy={pad.top + iH - (d.unavailable / 100) * iH} r="3" fill="#ef4444" />)}
           </svg>
         )}
-        <p className="text-xs text-gray-400 text-center mt-2">{chartData.length} days • {filteredAthleteIds.length} athletes</p>
+        <p className="text-xs text-slate-400 text-center mt-2">{chartData.length} days • {filteredAthleteIds.length} athletes</p>
       </div>
     </>
   );
@@ -2730,7 +2716,7 @@ const InjuryReportTab = ({ athletes, teamStructure, seasonDates, availabilityRec
   // Chip toggle button — consistent with Availability tab style
   const Chip = ({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) => (
     <button onClick={onClick}
-      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${active ? 'bg-slate-800 text-white' : 'bg-gray-100 text-slate-600 hover:bg-gray-200'}`}>
+      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${active ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
       {label}
     </button>
   );
@@ -2764,7 +2750,7 @@ const InjuryReportTab = ({ athletes, teamStructure, seasonDates, availabilityRec
         {showFilters && (
           <div className="mt-3 space-y-3">
             <div>
-              <p className="text-xs text-gray-500 mb-2">Position Group</p>
+              <p className="text-xs text-slate-500 mb-2">Position Group</p>
               <div className="flex gap-2">
                 <Chip label="Forwards" active={selectedGroups.includes('Forward')} onClick={() => toggleGroup('Forward')} />
                 <Chip label="Backs" active={selectedGroups.includes('Back')} onClick={() => toggleGroup('Back')} />
@@ -2772,11 +2758,11 @@ const InjuryReportTab = ({ athletes, teamStructure, seasonDates, availabilityRec
             </div>
             {uniquePositionNames.length > 0 && (
               <div>
-                <p className="text-xs text-gray-500 mb-2">Positions</p>
+                <p className="text-xs text-slate-500 mb-2">Positions</p>
                 <div className="flex flex-wrap gap-1">
                   {uniquePositionNames.map((pos: any) => (
                     <button key={pos.name} onClick={() => togglePositionName(pos.name)}
-                      className={`px-2 py-1 rounded text-xs ${selectedPositionNames.includes(pos.name) ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>
+                      className={`px-2 py-1 rounded text-xs ${selectedPositionNames.includes(pos.name) ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>
                       {pos.name}
                     </button>
                   ))}
@@ -2784,7 +2770,7 @@ const InjuryReportTab = ({ athletes, teamStructure, seasonDates, availabilityRec
               </div>
             )}
             <div>
-              <p className="text-xs text-gray-500 mb-2">Status</p>
+              <p className="text-xs text-slate-500 mb-2">Status</p>
               <div className="flex gap-2">
                 {STATUS_OPTS.map(o => (
                   <button key={o} onClick={() => toggleFilter(filterStatus, o, setFilterStatus)}
@@ -2795,19 +2781,19 @@ const InjuryReportTab = ({ athletes, teamStructure, seasonDates, availabilityRec
               </div>
             </div>
             <div>
-              <p className="text-xs text-gray-500 mb-2">Event</p>
+              <p className="text-xs text-slate-500 mb-2">Event</p>
               <div className="flex gap-2 flex-wrap">
                 {EVENT_OPTS.map(o => <Chip key={o} label={o} active={filterEvent.includes(o)} onClick={() => toggleFilter(filterEvent, o, setFilterEvent)} />)}
               </div>
             </div>
             <div>
-              <p className="text-xs text-gray-500 mb-2">Surface</p>
+              <p className="text-xs text-slate-500 mb-2">Surface</p>
               <div className="flex gap-2 flex-wrap">
                 {SURFACE_OPTS.map(o => <Chip key={o} label={o} active={filterSurface.includes(o)} onClick={() => toggleFilter(filterSurface, o, setFilterSurface)} />)}
               </div>
             </div>
             <div>
-              <p className="text-xs text-gray-500 mb-2">Contact</p>
+              <p className="text-xs text-slate-500 mb-2">Contact</p>
               <div className="flex gap-2 flex-wrap">
                 {CONTACT_OPTS.map(o => <Chip key={o} label={o} active={filterContact.includes(o)} onClick={() => toggleFilter(filterContact, o, setFilterContact)} />)}
               </div>
@@ -2930,27 +2916,27 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
   return (
     <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6 space-y-3">
       <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-        <button onClick={() => setExpanded(expanded === 'teamStructure' ? null : 'teamStructure')} className="w-full p-4 flex justify-between items-center hover:bg-gray-50">
-          <div><h3 className="font-semibold text-sm text-left">Team Structure</h3><p className="text-xs text-gray-500">{teamStructure.length} positions</p></div>
+        <button onClick={() => setExpanded(expanded === 'teamStructure' ? null : 'teamStructure')} className="w-full p-4 flex justify-between items-center hover:bg-slate-50">
+          <div><h3 className="font-semibold text-sm text-left">Team Structure</h3><p className="text-xs text-slate-500">{teamStructure.length} positions</p></div>
           {expanded === 'teamStructure' ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
         </button>
         {expanded === 'teamStructure' && (
           <div className="border-t">
             {['Forward', 'Back'].map(group => (
               <div key={group}>
-                <div className="px-4 py-2 bg-gray-50 text-xs font-semibold text-gray-600">{group}s</div>
+                <div className="px-4 py-2 bg-slate-50 text-xs font-semibold text-slate-600">{group}s</div>
                 {teamStructure.filter(p => p.group === group).map(pos => (
                   <div key={pos.id} className="p-3 border-b last:border-b-0">
                     {editingId === pos.id ? (
                       <div className="space-y-2">
                         <div className="flex gap-2"><input type="number" value={editData.number || ''} onChange={e => setEditData({...editData, number: e.target.value})} className="w-16 px-2 py-1 text-sm border rounded" placeholder="#" /><input type="text" value={editData.name || ''} onChange={e => setEditData({...editData, name: e.target.value})} className="flex-1 px-2 py-1 text-sm border rounded" placeholder="Name" /></div>
                         <select value={editData.group || 'Forward'} onChange={e => setEditData({...editData, group: e.target.value})} className="w-full px-2 py-1 text-sm border rounded"><option>Forward</option><option>Back</option></select>
-                        <div className="flex gap-2"><button onClick={() => { const updated = {...pos, number: parseInt(editData.number), name: editData.name, group: editData.group}; onSaveTeamStructure(updated); setLocalTeamStructure(teamStructure.map(p => p.id === pos.id ? updated : p).sort((a,b) => a.number - b.number)); setEditingId(null); }} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Save</button><button onClick={() => setEditingId(null)} className="flex-1 px-2 py-1 bg-gray-100 rounded text-xs">Cancel</button></div>
+                        <div className="flex gap-2"><button onClick={() => { const updated = {...pos, number: parseInt(editData.number), name: editData.name, group: editData.group}; onSaveTeamStructure(updated); setLocalTeamStructure(teamStructure.map(p => p.id === pos.id ? updated : p).sort((a,b) => a.number - b.number)); setEditingId(null); }} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Save</button><button onClick={() => setEditingId(null)} className="flex-1 px-2 py-1 bg-slate-100 rounded text-xs">Cancel</button></div>
                       </div>
                     ) : (
                       <div className="flex justify-between items-center">
                         <span className="text-sm">{pos.number}. {pos.name}</span>
-                        <div className="flex gap-1"><button onClick={() => { setEditingId(pos.id); setEditData({number: pos.number, name: pos.name, group: pos.group}); }} className="p-1 hover:bg-gray-100 rounded"><Edit2 className="w-4 h-4 text-gray-500" /></button><button onClick={() => { onDeleteTeamStructure(pos.id); setLocalTeamStructure(teamStructure.filter(p => p.id !== pos.id)); }} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button></div>
+                        <div className="flex gap-1"><button onClick={() => { setEditingId(pos.id); setEditData({number: pos.number, name: pos.name, group: pos.group}); }} className="p-1 hover:bg-slate-100 rounded"><Edit2 className="w-4 h-4 text-slate-500" /></button><button onClick={() => { onDeleteTeamStructure(pos.id); setLocalTeamStructure(teamStructure.filter(p => p.id !== pos.id)); }} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button></div>
                       </div>
                     )}
                   </div>
@@ -2961,15 +2947,15 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
               <div className="p-3 border-t space-y-2">
                 <div className="flex gap-2"><input type="number" value={newData.number || ''} onChange={e => setNewData({...newData, number: e.target.value})} className="w-16 px-2 py-1 text-sm border rounded" placeholder="#" /><input type="text" value={newData.name || ''} onChange={e => setNewData({...newData, name: e.target.value})} className="flex-1 px-2 py-1 text-sm border rounded" placeholder="Name" /></div>
                 <select value={newData.group || 'Forward'} onChange={e => setNewData({...newData, group: e.target.value})} className="w-full px-2 py-1 text-sm border rounded"><option>Forward</option><option>Back</option></select>
-                <div className="flex gap-2"><button onClick={() => { if (newData.name && newData.number) { const newPos = {id: String(Date.now()), number: parseInt(newData.number), name: newData.name, group: newData.group || 'Forward'}; onSaveTeamStructure(newPos); setLocalTeamStructure([...teamStructure, newPos].sort((a,b) => a.number - b.number)); setNewData({}); setShowAdd(null); }}} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Add</button><button onClick={() => { setShowAdd(null); setNewData({}); }} className="flex-1 px-2 py-1 bg-gray-100 rounded text-xs">Cancel</button></div>
+                <div className="flex gap-2"><button onClick={() => { if (newData.name && newData.number) { const newPos = {id: String(Date.now()), number: parseInt(newData.number), name: newData.name, group: newData.group || 'Forward'}; onSaveTeamStructure(newPos); setLocalTeamStructure([...teamStructure, newPos].sort((a,b) => a.number - b.number)); setNewData({}); setShowAdd(null); }}} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Add</button><button onClick={() => { setShowAdd(null); setNewData({}); }} className="flex-1 px-2 py-1 bg-slate-100 rounded text-xs">Cancel</button></div>
               </div>
             ) : <div className="p-3 border-t"><button onClick={() => setShowAdd('position')} className="w-full px-4 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium"><Plus className="w-4 h-4 inline mr-1" />Add Position</button></div>}
           </div>
         )}
       </div>
       <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-        <button onClick={() => setExpanded(expanded === 'drillTypes' ? null : 'drillTypes')} className="w-full p-4 flex justify-between items-center hover:bg-gray-50">
-          <div><h3 className="font-semibold text-sm text-left">Drill Types</h3><p className="text-xs text-gray-500">{drillTypes.length} types</p></div>
+        <button onClick={() => setExpanded(expanded === 'drillTypes' ? null : 'drillTypes')} className="w-full p-4 flex justify-between items-center hover:bg-slate-50">
+          <div><h3 className="font-semibold text-sm text-left">Drill Types</h3><p className="text-xs text-slate-500">{drillTypes.length} types</p></div>
           {expanded === 'drillTypes' ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
         </button>
         {expanded === 'drillTypes' && (
@@ -2981,10 +2967,10 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                     <div className="flex gap-2">
                       <input type="text" value={editData.name || ''} onChange={e => setEditData({...editData, name: e.target.value})} className="flex-1 px-2 py-1 text-sm border rounded" />
                       <button onClick={() => { const updated = {...dt, name: editData.name, positions: editData.positions || dt.positions}; onSaveDrillType(updated); setLocalDrillTypes(drillTypes.map(d => d.id === dt.id ? updated : d)); setEditingId(null); }} className="p-1 bg-green-100 text-green-700 rounded"><Check className="w-4 h-4" /></button>
-                      <button onClick={() => setEditingId(null)} className="p-1 bg-gray-100 rounded"><X className="w-4 h-4" /></button>
+                      <button onClick={() => setEditingId(null)} className="p-1 bg-slate-100 rounded"><X className="w-4 h-4" /></button>
                     </div>
                     <div>
-                      <p className="text-xs text-gray-500 mb-2">Position Group:</p>
+                      <p className="text-xs text-slate-500 mb-2">Position Group:</p>
                       <div className="flex gap-2 mb-3">
                         {['Forward', 'Back'].map(group => {
                           const groupPositions = teamStructure.filter(p => p.group === group).map(p => p.number);
@@ -2997,13 +2983,13 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                               } else {
                                 setEditData({...editData, positions: [...new Set([...currentPositions, ...groupPositions])].sort((a,b) => a - b)});
                               }
-                            }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${allSelected ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>
+                            }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${allSelected ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>
                               {group}s
                             </button>
                           );
                         })}
                       </div>
-                      <p className="text-xs text-gray-500 mb-2">Positions:</p>
+                      <p className="text-xs text-slate-500 mb-2">Positions:</p>
                       <div className="flex flex-wrap gap-1">
                         {['Forward', 'Back'].map(group => (
                           <React.Fragment key={group}>
@@ -3014,7 +3000,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                                   ? currentPositions.filter(p => p !== pos.number)
                                   : [...currentPositions, pos.number].sort((a,b) => a - b);
                                 setEditData({...editData, positions: newPositions});
-                              }} className={`px-2 py-1 rounded text-xs ${(editData.positions || dt.positions || []).includes(pos.number) ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>
+                              }} className={`px-2 py-1 rounded text-xs ${(editData.positions || dt.positions || []).includes(pos.number) ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>
                                 {pos.number}. {pos.name}
                               </button>
                             ))}
@@ -3023,7 +3009,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                       </div>
                       <div className="flex gap-2 mt-2">
                         <button onClick={() => setEditData({...editData, positions: teamStructure.map(p => p.number)})} className="text-xs text-blue-600">Select All</button>
-                        <button onClick={() => setEditData({...editData, positions: []})} className="text-xs text-gray-500">Clear All</button>
+                        <button onClick={() => setEditData({...editData, positions: []})} className="text-xs text-slate-500">Clear All</button>
                       </div>
                     </div>
                   </div>
@@ -3031,10 +3017,10 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                   <div className="flex justify-between items-center">
                     <div>
                       <p className="text-sm font-medium">{dt.name}</p>
-                      <p className="text-xs text-gray-500">{dt.positions.length} positions</p>
+                      <p className="text-xs text-slate-500">{dt.positions.length} positions</p>
                     </div>
                     <div className="flex gap-1">
-                      <button onClick={() => { setEditingId('dt-' + dt.id); setEditData({name: dt.name, positions: dt.positions}); }} className="p-1 hover:bg-gray-100 rounded"><Edit2 className="w-4 h-4 text-gray-500" /></button>
+                      <button onClick={() => { setEditingId('dt-' + dt.id); setEditData({name: dt.name, positions: dt.positions}); }} className="p-1 hover:bg-slate-100 rounded"><Edit2 className="w-4 h-4 text-slate-500" /></button>
                       <button onClick={() => setLocalDrillTypes(drillTypes.filter(d => d.id !== dt.id))} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button>
                     </div>
                   </div>
@@ -3047,7 +3033,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                   <input type="text" value={newData.name || ''} onChange={e => setNewData({...newData, name: e.target.value})} placeholder="Type name" className="flex-1 px-2 py-1 text-sm border rounded" />
                 </div>
                 <div>
-                  <p className="text-xs text-gray-500 mb-2">Position Group:</p>
+                  <p className="text-xs text-slate-500 mb-2">Position Group:</p>
                   <div className="flex gap-2 mb-3">
                     {['Forward', 'Back'].map(group => {
                       const groupPositions = teamStructure.filter(p => p.group === group).map(p => p.number);
@@ -3060,13 +3046,13 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                           } else {
                             setNewData({...newData, positions: [...new Set([...currentPositions, ...groupPositions])].sort((a,b) => a - b)});
                           }
-                        }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${allSelected ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>
+                        }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${allSelected ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>
                           {group}s
                         </button>
                       );
                     })}
                   </div>
-                  <p className="text-xs text-gray-500 mb-2">Positions:</p>
+                  <p className="text-xs text-slate-500 mb-2">Positions:</p>
                   <div className="flex flex-wrap gap-1">
                     {['Forward', 'Back'].map(group => (
                       <React.Fragment key={group}>
@@ -3077,7 +3063,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                               ? currentPositions.filter(p => p !== pos.number)
                               : [...currentPositions, pos.number].sort((a,b) => a - b);
                             setNewData({...newData, positions: newPositions});
-                          }} className={`px-2 py-1 rounded text-xs ${(newData.positions || teamStructure.map(p => p.number)).includes(pos.number) ? 'bg-slate-800 text-white' : 'bg-gray-100'}`}>
+                          }} className={`px-2 py-1 rounded text-xs ${(newData.positions || teamStructure.map(p => p.number)).includes(pos.number) ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>
                             {pos.number}. {pos.name}
                           </button>
                         ))}
@@ -3087,7 +3073,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                 </div>
                 <div className="flex gap-2">
                   <button onClick={() => { if (newData.name) { const newDt = {id: String(Date.now()), name: newData.name, positions: newData.positions || teamStructure.map(p => p.number)}; onSaveDrillType(newDt); setLocalDrillTypes([...drillTypes, newDt]); setNewData({}); setShowAdd(null); }}} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Add</button>
-                  <button onClick={() => { setShowAdd(null); setNewData({}); }} className="flex-1 px-2 py-1 bg-gray-100 rounded text-xs">Cancel</button>
+                  <button onClick={() => { setShowAdd(null); setNewData({}); }} className="flex-1 px-2 py-1 bg-slate-100 rounded text-xs">Cancel</button>
                 </div>
               </div>
             ) : <div className="p-3"><button onClick={() => setShowAdd('drillType')} className="w-full px-4 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium"><Plus className="w-4 h-4 inline mr-1" />Add Drill Type</button></div>}
@@ -3095,8 +3081,8 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
         )}
       </div>
       <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-        <button onClick={() => setExpanded(expanded === 'seasonDates' ? null : 'seasonDates')} className="w-full p-4 flex justify-between items-center hover:bg-gray-50">
-          <div><h3 className="font-semibold text-sm text-left">Season Dates</h3><p className="text-xs text-gray-500">{seasonDates.length} periods</p></div>
+        <button onClick={() => setExpanded(expanded === 'seasonDates' ? null : 'seasonDates')} className="w-full p-4 flex justify-between items-center hover:bg-slate-50">
+          <div><h3 className="font-semibold text-sm text-left">Season Dates</h3><p className="text-xs text-slate-500">{seasonDates.length} periods</p></div>
           {expanded === 'seasonDates' ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
         </button>
         {expanded === 'seasonDates' && (
@@ -3108,12 +3094,12 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                     <input type="text" value={editData.title || ''} onChange={e => setEditData({...editData, title: e.target.value})} className="w-full px-2 py-1 text-sm border rounded" placeholder="Title" />
                     <div className="grid grid-cols-2 gap-2"><input type="date" value={editData.fromDate || ''} onChange={e => setEditData({...editData, fromDate: e.target.value})} className="px-2 py-1 text-sm border rounded" /><input type="date" value={editData.toDate || ''} onChange={e => setEditData({...editData, toDate: e.target.value})} className="px-2 py-1 text-sm border rounded" /></div>
                     <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={editData.isDefault || false} onChange={e => setEditData({...editData, isDefault: e.target.checked})} />Default</label>
-                    <div className="flex gap-2"><button onClick={() => { let upd = seasonDates; if (editData.isDefault) upd = seasonDates.map(s => ({...s, isDefault: false})); const updated = {...sd, ...editData}; onSaveSeasonDate(updated); setLocalSeasonDates(upd.map(s => s.id === sd.id ? updated : s)); setEditingId(null); }} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Save</button><button onClick={() => setEditingId(null)} className="flex-1 px-2 py-1 bg-gray-100 rounded text-xs">Cancel</button></div>
+                    <div className="flex gap-2"><button onClick={() => { let upd = seasonDates; if (editData.isDefault) upd = seasonDates.map(s => ({...s, isDefault: false})); const updated = {...sd, ...editData}; onSaveSeasonDate(updated); setLocalSeasonDates(upd.map(s => s.id === sd.id ? updated : s)); setEditingId(null); }} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Save</button><button onClick={() => setEditingId(null)} className="flex-1 px-2 py-1 bg-slate-100 rounded text-xs">Cancel</button></div>
                   </div>
                 ) : (
                   <div className="flex justify-between items-center">
-                    <div><div className="flex items-center gap-2"><p className="text-sm font-medium">{sd.title}</p>{sd.isDefault && <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full">Default</span>}</div><p className="text-xs text-gray-500">{fmtDate(sd.fromDate)} - {fmtDate(sd.toDate)}</p></div>
-                    <div className="flex gap-1"><button onClick={() => setLocalSeasonDates(seasonDates.map(s => ({...s, isDefault: s.id === sd.id ? !s.isDefault : false})))} className={`p-1 rounded ${sd.isDefault ? 'bg-blue-50 text-blue-600' : 'hover:bg-gray-100 text-gray-500'}`}><Target className="w-4 h-4" /></button><button onClick={() => { setEditingId('sd-' + sd.id); setEditData({title: sd.title, fromDate: sd.fromDate, toDate: sd.toDate, isDefault: sd.isDefault}); }} className="p-1 hover:bg-gray-100 rounded"><Edit2 className="w-4 h-4 text-gray-500" /></button><button onClick={() => setLocalSeasonDates(seasonDates.filter(s => s.id !== sd.id))} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button></div>
+                    <div><div className="flex items-center gap-2"><p className="text-sm font-medium">{sd.title}</p>{sd.isDefault && <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full">Default</span>}</div><p className="text-xs text-slate-500">{fmtDate(sd.fromDate)} - {fmtDate(sd.toDate)}</p></div>
+                    <div className="flex gap-1"><button onClick={() => setLocalSeasonDates(seasonDates.map(s => ({...s, isDefault: s.id === sd.id ? !s.isDefault : false})))} className={`p-1 rounded ${sd.isDefault ? 'bg-blue-50 text-blue-600' : 'hover:bg-slate-100 text-slate-500'}`}><Target className="w-4 h-4" /></button><button onClick={() => { setEditingId('sd-' + sd.id); setEditData({title: sd.title, fromDate: sd.fromDate, toDate: sd.toDate, isDefault: sd.isDefault}); }} className="p-1 hover:bg-slate-100 rounded"><Edit2 className="w-4 h-4 text-slate-500" /></button><button onClick={() => setLocalSeasonDates(seasonDates.filter(s => s.id !== sd.id))} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button></div>
                   </div>
                 )}
               </div>
@@ -3123,7 +3109,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                 <input type="text" value={newData.title || ''} onChange={e => setNewData({...newData, title: e.target.value})} className="w-full px-2 py-1 text-sm border rounded" placeholder="Title" />
                 <div className="grid grid-cols-2 gap-2"><input type="date" value={newData.fromDate || ''} onChange={e => setNewData({...newData, fromDate: e.target.value})} className="px-2 py-1 text-sm border rounded" /><input type="date" value={newData.toDate || ''} onChange={e => setNewData({...newData, toDate: e.target.value})} className="px-2 py-1 text-sm border rounded" /></div>
                 <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={newData.isDefault || false} onChange={e => setNewData({...newData, isDefault: e.target.checked})} />Default</label>
-                <div className="flex gap-2"><button onClick={() => { if (newData.title && newData.fromDate && newData.toDate) { let upd = seasonDates; if (newData.isDefault) upd = seasonDates.map(s => ({...s, isDefault: false})); const newSd = {id: String(Date.now()), ...newData}; onSaveSeasonDate(newSd); setLocalSeasonDates([...upd, newSd]); setNewData({}); setShowAdd(null); }}} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Add</button><button onClick={() => { setShowAdd(null); setNewData({}); }} className="flex-1 px-2 py-1 bg-gray-100 rounded text-xs">Cancel</button></div>
+                <div className="flex gap-2"><button onClick={() => { if (newData.title && newData.fromDate && newData.toDate) { let upd = seasonDates; if (newData.isDefault) upd = seasonDates.map(s => ({...s, isDefault: false})); const newSd = {id: String(Date.now()), ...newData}; onSaveSeasonDate(newSd); setLocalSeasonDates([...upd, newSd]); setNewData({}); setShowAdd(null); }}} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Add</button><button onClick={() => { setShowAdd(null); setNewData({}); }} className="flex-1 px-2 py-1 bg-slate-100 rounded text-xs">Cancel</button></div>
               </div>
             ) : <div className="p-3"><button onClick={() => setShowAdd('seasonDate')} className="w-full px-4 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium"><Plus className="w-4 h-4 inline mr-1" />Add Time Period</button></div>}
           </div>
@@ -3178,7 +3164,7 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
         <div className="bg-white rounded-lg border border-slate-200 p-4 space-y-4">
           <div className="flex justify-center">
             <div className="relative">
-              {photo ? <img src={photo} alt="" className="w-24 h-24 rounded-full object-cover border-4 border-gray-200" /> : <div className="w-24 h-24 bg-gray-200 rounded-full flex items-center justify-center font-bold text-2xl border-4 border-gray-200">{genAvatar(name) || <User className="w-10 h-10 text-gray-400" />}</div>}
+              {photo ? <img src={photo} alt="" className="w-24 h-24 rounded-full object-cover border-4 border-slate-200" /> : <div className="w-24 h-24 bg-slate-200 rounded-full flex items-center justify-center font-bold text-2xl border-4 border-slate-200">{genAvatar(name) || <User className="w-10 h-10 text-slate-400" />}</div>}
               <label className="absolute bottom-0 right-0 w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center cursor-pointer hover:bg-blue-700">
                 <Camera className="w-4 h-4 text-white" />
                 <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) { const r = new FileReader(); r.onloadend = () => setPhoto(r.result); r.readAsDataURL(f); }}} />
@@ -3189,19 +3175,19 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
           <div>
             <label className="block text-xs font-medium mb-1">Positions</label>
             <button onClick={() => setShowPositionPicker(!showPositionPicker)} className="w-full px-3 py-2 text-sm border rounded-lg text-left flex justify-between items-center">
-              <span className={selectedNames.length > 0 ? '' : 'text-gray-400'}>{selectedNames.length > 0 ? selectedNames.join(', ') : 'Select positions...'}</span>
+              <span className={selectedNames.length > 0 ? '' : 'text-slate-400'}>{selectedNames.length > 0 ? selectedNames.join(', ') : 'Select positions...'}</span>
               {showPositionPicker ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
             </button>
             {showPositionPicker && (
-              <div className="mt-2 p-3 bg-gray-50 rounded-lg border">
+              <div className="mt-2 p-3 bg-slate-50 rounded-lg border">
                 {['Forward', 'Back'].map(group => (
                   <div key={group} className="mb-3 last:mb-0">
-                    <p className="text-xs font-semibold text-gray-500 mb-2">{group}s</p>
+                    <p className="text-xs font-semibold text-slate-500 mb-2">{group}s</p>
                     <div className="flex flex-wrap gap-2">
                       {uniqueNames.filter((pn: string) => teamStructure.find((p: any) => p.name === pn && p.group === group)).map((pn: string) => {
                         const nums = teamStructure.filter((p: any) => p.name === pn).map((p: any) => p.number);
                         const sel = nums.some((n: number) => positionNumbers.includes(n));
-                        return <button key={pn} onClick={() => { if (sel) setPositionNumbers(positionNumbers.filter((n: number) => !nums.includes(n))); else setPositionNumbers(Array.from(new Set([...positionNumbers, ...nums])).sort((a: number, b: number) => a - b)); }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${sel ? 'bg-slate-800 text-white' : 'bg-white border hover:bg-gray-100'}`}>{pn}</button>;
+                        return <button key={pn} onClick={() => { if (sel) setPositionNumbers(positionNumbers.filter((n: number) => !nums.includes(n))); else setPositionNumbers(Array.from(new Set([...positionNumbers, ...nums])).sort((a: number, b: number) => a - b)); }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${sel ? 'bg-slate-800 text-white' : 'bg-white border hover:bg-slate-100'}`}>{pn}</button>;
                       })}
                     </div>
                   </div>
@@ -3209,7 +3195,7 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
               </div>
             )}
           </div>
-          {positionNumbers.length > 0 && <p className="text-xs text-gray-500">Group: {getPositionGroup(positionNumbers, teamStructure)}</p>}
+          {positionNumbers.length > 0 && <p className="text-xs text-slate-500">Group: {getPositionGroup(positionNumbers, teamStructure)}</p>}
         </div>
 
         <div className="bg-white rounded-lg border border-slate-200 p-4">
@@ -3218,28 +3204,28 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
             {!showAddInjury && <button onClick={() => { setShowAddInjury(true); setEditingInjuryId(null); setInjuryData({ bodyPart: 'Head', startDate: today, returnDate: '', notes: '', event: 'Training', surface: '4G', contact: 'Contact' }); }} className="text-xs text-blue-600 font-medium">+ Add</button>}
           </div>
           {showAddInjury && (
-            <div className="mb-4 p-3 bg-gray-50 rounded-lg space-y-3">
-              <div><label className="block text-xs text-gray-500 mb-1">Body Part</label><select value={injuryData.bodyPart} onChange={e => setInjuryData({...injuryData, bodyPart: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg">{BODY_PARTS.map(bp => <option key={bp}>{bp}</option>)}</select></div>
+            <div className="mb-4 p-3 bg-slate-50 rounded-lg space-y-3">
+              <div><label className="block text-xs text-slate-500 mb-1">Body Part</label><select value={injuryData.bodyPart} onChange={e => setInjuryData({...injuryData, bodyPart: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg">{BODY_PARTS.map(bp => <option key={bp}>{bp}</option>)}</select></div>
               <div className="grid grid-cols-3 gap-2">
-                <div><label className="block text-xs text-gray-500 mb-1">Event</label><select value={injuryData.event || 'Training'} onChange={e => setInjuryData({...injuryData, event: e.target.value})} className="w-full px-2 py-2 text-sm border rounded-lg"><option>Training</option><option>Match</option><option>Other</option></select></div>
-                <div><label className="block text-xs text-gray-500 mb-1">Surface</label><select value={injuryData.surface || '4G'} onChange={e => setInjuryData({...injuryData, surface: e.target.value})} className="w-full px-2 py-2 text-sm border rounded-lg"><option value="4G">4G</option><option>Grass</option><option>Other</option></select></div>
-                <div><label className="block text-xs text-gray-500 mb-1">Contact</label><select value={injuryData.contact || 'Contact'} onChange={e => setInjuryData({...injuryData, contact: e.target.value})} className="w-full px-2 py-2 text-sm border rounded-lg"><option>Contact</option><option>Non-Contact</option></select></div>
+                <div><label className="block text-xs text-slate-500 mb-1">Event</label><select value={injuryData.event || 'Training'} onChange={e => setInjuryData({...injuryData, event: e.target.value})} className="w-full px-2 py-2 text-sm border rounded-lg"><option>Training</option><option>Match</option><option>Other</option></select></div>
+                <div><label className="block text-xs text-slate-500 mb-1">Surface</label><select value={injuryData.surface || '4G'} onChange={e => setInjuryData({...injuryData, surface: e.target.value})} className="w-full px-2 py-2 text-sm border rounded-lg"><option value="4G">4G</option><option>Grass</option><option>Other</option></select></div>
+                <div><label className="block text-xs text-slate-500 mb-1">Contact</label><select value={injuryData.contact || 'Contact'} onChange={e => setInjuryData({...injuryData, contact: e.target.value})} className="w-full px-2 py-2 text-sm border rounded-lg"><option>Contact</option><option>Non-Contact</option></select></div>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <div><label className="block text-xs text-gray-500 mb-1">Start Date</label><input type="date" value={injuryData.startDate} onChange={e => setInjuryData({...injuryData, startDate: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" /></div>
-                <div><label className="block text-xs text-gray-500 mb-1">Est. Return (ETR)</label><input type="date" value={injuryData.returnDate} onChange={e => setInjuryData({...injuryData, returnDate: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" /></div>
+                <div><label className="block text-xs text-slate-500 mb-1">Start Date</label><input type="date" value={injuryData.startDate} onChange={e => setInjuryData({...injuryData, startDate: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" /></div>
+                <div><label className="block text-xs text-slate-500 mb-1">Est. Return (ETR)</label><input type="date" value={injuryData.returnDate} onChange={e => setInjuryData({...injuryData, returnDate: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" /></div>
               </div>
               {injuryData.startDate && injuryData.returnDate && (() => {
                 const days = Math.round((new Date(injuryData.returnDate).getTime() - new Date(injuryData.startDate).getTime()) / 86400000);
                 return days >= 0 ? <div className="px-3 py-2 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-700 font-medium">⏱ Time Loss: {days} day{days !== 1 ? 's' : ''}</div> : null;
               })()}
-              <div><label className="block text-xs text-gray-500 mb-1">Notes</label><textarea value={injuryData.notes} onChange={e => setInjuryData({...injuryData, notes: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" rows={2} /></div>
-              <div className="flex gap-2"><button onClick={saveInjury} className="flex-1 px-3 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium">{editingInjuryId ? 'Update' : 'Add'}</button><button onClick={() => { setShowAddInjury(false); setEditingInjuryId(null); }} className="flex-1 px-3 py-2 bg-gray-100 rounded-lg text-sm">Cancel</button></div>
+              <div><label className="block text-xs text-slate-500 mb-1">Notes</label><textarea value={injuryData.notes} onChange={e => setInjuryData({...injuryData, notes: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" rows={2} /></div>
+              <div className="flex gap-2"><button onClick={saveInjury} className="flex-1 px-3 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium">{editingInjuryId ? 'Update' : 'Add'}</button><button onClick={() => { setShowAddInjury(false); setEditingInjuryId(null); }} className="flex-1 px-3 py-2 bg-slate-100 rounded-lg text-sm">Cancel</button></div>
             </div>
           )}
           {activeInjuries.length > 0 && (
             <div className="mb-3">
-              <p className="text-xs text-gray-500 mb-2">Active</p>
+              <p className="text-xs text-slate-500 mb-2">Active</p>
               {activeInjuries.map(inj => (
                 <div key={inj.id} className="flex items-start justify-between p-2 bg-red-50 rounded-lg mb-2 border border-red-100">
                   <div>
@@ -3257,23 +3243,23 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
           )}
           {pastInjuries.length > 0 && (
             <div>
-              <p className="text-xs text-gray-500 mb-2">History</p>
+              <p className="text-xs text-slate-500 mb-2">History</p>
               {pastInjuries.map(inj => (
-                <div key={inj.id} className="flex items-start justify-between p-2 bg-gray-50 rounded-lg mb-2">
+                <div key={inj.id} className="flex items-start justify-between p-2 bg-slate-50 rounded-lg mb-2">
                   <div>
-                    <p className="text-sm font-medium text-gray-700">{inj.bodyPart}</p>
-                    <p className="text-xs text-gray-500">{new Date(inj.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {new Date(inj.returnDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
-                    {inj.notes && <p className="text-xs text-gray-600 mt-1">{inj.notes}</p>}
+                    <p className="text-sm font-medium text-slate-700">{inj.bodyPart}</p>
+                    <p className="text-xs text-slate-500">{new Date(inj.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {new Date(inj.returnDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
+                    {inj.notes && <p className="text-xs text-slate-600 mt-1">{inj.notes}</p>}
                   </div>
                   <div className="flex gap-1">
-                    <button onClick={() => { setInjuryData({ bodyPart: inj.bodyPart, startDate: inj.startDate, returnDate: inj.returnDate || '', notes: inj.notes || '', event: inj.event || 'Training', surface: inj.surface || '4G', contact: inj.contact || 'Contact' }); setEditingInjuryId(inj.id); setShowAddInjury(true); }} className="p-1 hover:bg-gray-100 rounded"><Edit2 className="w-3 h-3 text-gray-500" /></button>
-                    <button onClick={() => setInjuries(injuries.filter(i => i.id !== inj.id))} className="p-1 hover:bg-gray-100 rounded"><Trash2 className="w-3 h-3 text-gray-500" /></button>
+                    <button onClick={() => { setInjuryData({ bodyPart: inj.bodyPart, startDate: inj.startDate, returnDate: inj.returnDate || '', notes: inj.notes || '', event: inj.event || 'Training', surface: inj.surface || '4G', contact: inj.contact || 'Contact' }); setEditingInjuryId(inj.id); setShowAddInjury(true); }} className="p-1 hover:bg-slate-100 rounded"><Edit2 className="w-3 h-3 text-slate-500" /></button>
+                    <button onClick={() => setInjuries(injuries.filter(i => i.id !== inj.id))} className="p-1 hover:bg-slate-100 rounded"><Trash2 className="w-3 h-3 text-slate-500" /></button>
                   </div>
                 </div>
               ))}
             </div>
           )}
-          {injuries.length === 0 && !showAddInjury && <p className="text-sm text-gray-400 text-center py-4">No injuries recorded</p>}
+          {injuries.length === 0 && !showAddInjury && <p className="text-sm text-slate-400 text-center py-4">No injuries recorded</p>}
         </div>
         <AvailabilityChart athleteId={athleteId} availabilityRecords={availabilityRecords} seasonDates={seasonDates} />
       </div>
