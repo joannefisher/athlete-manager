@@ -357,8 +357,15 @@ const AthleteManager = () => {
   const saveEndOfDayReport = async (date: string, eodAthletes: Athlete[]) => {
     setSaving(true);
     try {
-      // Step 1: Upsert EOD snapshot into eod_reports table (one row per athlete per date)
-      // Uses eod_reports(date, athlete_id) unique key — upsert replaces on conflict.
+      // Step 1: Delete existing EOD snapshot for this date, then insert fresh rows.
+      // Avoids relying on named constraint for upsert (which requires the constraint
+      // to be explicitly named in Postgres — not always available via Supabase JS client).
+      const { error: delEodErr } = await supabase
+        .from('eod_reports')
+        .delete()
+        .eq('date', date);
+      if (delEodErr) throw new Error('Clear EOD snapshot: ' + delEodErr.message);
+
       const eodRows = eodAthletes.map((a: Athlete) => ({
         date,
         athlete_id: a.id,
@@ -366,10 +373,10 @@ const AthleteManager = () => {
         note: a.notes || '',
         is_public: a.isPublic,
       }));
-      const { error: upsertErr } = await supabase
+      const { error: insEodErr } = await supabase
         .from('eod_reports')
-        .upsert(eodRows, { onConflict: 'date,athlete_id' });
-      if (upsertErr) throw new Error('Save EOD snapshot: ' + upsertErr.message);
+        .insert(eodRows);
+      if (insEodErr) throw new Error('Save EOD snapshot: ' + insEodErr.message);
 
       // Step 2: Forward-propagate to athletes + injuries for future days
       for (const a of eodAthletes) {
@@ -1094,12 +1101,21 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
     updateAthlete(athleteId, { injuries: (athlete.injuries || []).filter((i: any) => i.id !== injuryId) });
   };
 
-  // Group: Available first, then Modified, then Unavailable; within each group alphabetical
-  const statusOrder: Record<string, number> = { 'Available': 0, 'Modified': 1, 'Unavailable': 2 };
-  const sorted = [...eodAthletes].sort((a, b) => {
-    const so = (statusOrder[a.status] ?? 3) - (statusOrder[b.status] ?? 3);
-    return so !== 0 ? so : a.name.localeCompare(b.name);
+  // Sort order is fixed at mount time — status changes do NOT re-order rows
+  // This prevents the jarring jump when a player's status is updated mid-edit
+  const [rowOrder] = useState<string[]>(() => {
+    const statusOrder: Record<string, number> = { 'Available': 0, 'Modified': 1, 'Unavailable': 2 };
+    return [...athletes]
+      .sort((a, b) => {
+        const so = (statusOrder[(a as any).status] ?? 3) - (statusOrder[(b as any).status] ?? 3);
+        return so !== 0 ? so : (a as any).name.localeCompare((b as any).name);
+      })
+      .map((a: any) => a.id);
   });
+  // Render in the fixed order, looking up current state from eodAthletes
+  const sorted = rowOrder
+    .map(id => eodAthletes.find(a => a.id === id))
+    .filter(Boolean) as Athlete[];
 
   const activeInjuries = (a: Athlete) => {
     if (!a.injuries) return [];
