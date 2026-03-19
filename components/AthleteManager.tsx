@@ -173,26 +173,44 @@ const AthleteManager = () => {
       const { data: athletesData } = await supabase.from('athletes').select('*').order('name');
       const { data: allPositions } = await supabase.from('athlete_positions').select('*');
       const { data: allInjuries } = await supabase.from('athlete_injuries').select('*');
-      if (athletesData) setAthletes(athletesData.map((a: any) => ({
-        id: a.id,
-        name: a.name,
-        status: a.status,
-        notes: a.notes,
-        isPublic: a.is_public,
-        avatar: a.avatar,
-        photo: a.photo_url,
-        positionNumbers: (allPositions || []).filter((p: any) => p.athlete_id === a.id).map((p: any) => p.position_number),
-        injuries: (allInjuries || []).filter((i: any) => i.athlete_id === a.id).map((i: any) => ({
-          id: i.id,
-          bodyPart: i.body_part,
-          startDate: i.start_date,
-          returnDate: i.return_date,
-          notes: i.notes,
-          event: i.event,
-          surface: i.surface,
-          contact: i.contact,
-        }))
-      })));
+
+      // Fetch today's availability_records — if they exist for an athlete we
+      // use them as the live status/note so that EOD-written records (saved
+      // yesterday for today) take effect when the app opens today.
+      const todayStr = new Date().toISOString().split('T')[0];
+      const { data: todayRecords } = await supabase
+        .from('availability_records')
+        .select('*')
+        .eq('date', todayStr);
+      const todayMap: Record<string, { status: string; note: string }> = {};
+      (todayRecords || []).forEach((r: any) => {
+        todayMap[r.athlete_id] = { status: r.status, note: r.note };
+      });
+
+      if (athletesData) setAthletes(athletesData.map((a: any) => {
+        // Prefer today's availability_record if one exists
+        const todayRec = todayMap[a.id];
+        return {
+          id: a.id,
+          name: a.name,
+          status: todayRec ? todayRec.status : a.status,
+          notes: todayRec ? todayRec.note : a.notes,
+          isPublic: a.is_public,
+          avatar: a.avatar,
+          photo: a.photo_url,
+          positionNumbers: (allPositions || []).filter((p: any) => p.athlete_id === a.id).map((p: any) => p.position_number),
+          injuries: (allInjuries || []).filter((i: any) => i.athlete_id === a.id).map((i: any) => ({
+            id: i.id,
+            bodyPart: i.body_part,
+            startDate: i.start_date,
+            returnDate: i.return_date,
+            notes: i.notes,
+            event: i.event,
+            surface: i.surface,
+            contact: i.contact,
+          }))
+        };
+      }));
 
       // Fetch drill types with positions
       const { data: drillTypesData } = await supabase.from('drill_types').select('*').order('name');
@@ -423,18 +441,12 @@ const AthleteManager = () => {
         .insert(eodRows);
       if (insEodErr) throw new Error('Save EOD snapshot: ' + insEodErr.message);
 
-      // Step 2: Forward-propagate status/notes/injuries to the athletes table.
-      // This persists EOD changes as the new baseline for future days.
-      // availability_records for tomorrow are also written so the reporting
-      // view has a dated snapshot.
+      // Step 2: Update injuries only — these are date-independent and
+      // must apply immediately (e.g. a new injury added today is still
+      // active tomorrow). We deliberately do NOT update athletes.status
+      // or athletes.notes here — that would change today's Availability
+      // screen, which must stay as-is until the user edits it directly.
       for (const a of eodAthletes) {
-        const { error: athErr } = await supabase.from('athletes').update({
-          status: a.status,
-          notes: a.notes,
-          is_public: a.isPublic,
-        }).eq('id', a.id);
-        if (athErr) throw new Error('Update athlete ' + a.id + ': ' + athErr.message);
-
         const { error: injDelErr } = await supabase.from('athlete_injuries').delete().eq('athlete_id', a.id);
         if (injDelErr) throw new Error('Delete injuries: ' + injDelErr.message);
 
@@ -455,8 +467,9 @@ const AthleteManager = () => {
         }
       }
 
-      // Step 3: Write availability_records for tomorrow as a dated snapshot
-      // so the reporting view can show the EOD state for that date.
+      // Step 3: Write availability_records for tomorrow so that when the
+      // app is opened the next day, fetchAllData picks up EOD statuses as
+      // the starting point for the new day's Availability screen.
       const tomorrow = new Date(date);
       tomorrow.setDate(tomorrow.getDate() + 1);
       const tomorrowStr = tomorrow.toISOString().split('T')[0];
@@ -1730,28 +1743,41 @@ const AddDrillPage = ({ drills, setDrills, navigateTo, drillTypes, defaultTeam, 
   };
 
   const countSelectedPlayers = () => {
-    const t1 = Object.values(team1).filter(Boolean).length;
-    const t2 = Object.values(team2).filter(Boolean).length;
-    const s1 = Object.values(subs1).filter(Boolean).length;
-    const s2 = Object.values(subs2).filter(Boolean).length;
-    return t1 + t2 + s1 + s2;
+    const relevantPositions = getPositionsForDrillType();
+    const count = (obj: Record<string, any>) =>
+      relevantPositions.filter(pos => obj[pos]).length;
+    return count(team1) + count(team2) + count(subs1) + count(subs2);
   };
 
   if (showTeamSelection) {
+    // Only expose the positions relevant to this drill type.
+    // Filter the team objects so the modal only shows/saves relevant slots.
+    const drillPositions = getPositionsForDrillType();
+    const filterToPositions = (obj: Record<string, any>) =>
+      Object.fromEntries(Object.entries(obj).filter(([pos]) => drillPositions.includes(Number(pos))));
+
     return (
       <TeamSelectionModal
         athletes={athletes}
-        team1={team1}
-        setTeam1={setTeam1}
-        team2={team2}
-        setTeam2={setTeam2}
-        subs1={subs1}
-        setSubs1={setSubs1}
-        subs2={subs2}
-        setSubs2={setSubs2}
-        onClearAll={() => { setTeam1({}); setTeam2({}); setSubs1({}); setSubs2({}); }}
+        team1={filterToPositions(team1)}
+        setTeam1={(t: any) => setTeam1({ ...team1, ...t })}
+        team2={filterToPositions(team2)}
+        setTeam2={(t: any) => setTeam2({ ...team2, ...t })}
+        subs1={filterToPositions(subs1)}
+        setSubs1={(t: any) => setSubs1({ ...subs1, ...t })}
+        subs2={filterToPositions(subs2)}
+        setSubs2={(t: any) => setSubs2({ ...subs2, ...t })}
+        onClearAll={() => {
+          // Only clear the positions relevant to this drill — leave others intact
+          const clearPositions = (obj: Record<string, any>) =>
+            Object.fromEntries(Object.entries(obj).filter(([pos]) => !drillPositions.includes(Number(pos))));
+          setTeam1(clearPositions(team1));
+          setTeam2(clearPositions(team2));
+          setSubs1(clearPositions(subs1));
+          setSubs2(clearPositions(subs2));
+        }}
         onBack={() => setShowTeamSelection(false)}
-        positions={getPositionsForDrillType()}
+        positions={drillPositions}
         teamStructure={teamStructure}
         title="Select Team"
       />
