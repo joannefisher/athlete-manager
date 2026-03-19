@@ -1190,7 +1190,7 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
                 <th className="text-left px-3 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Athlete</th>
                 <th className="text-left px-3 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Position</th>
                 <th className="text-left px-3 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Status</th>
-
+                <th className="text-left px-3 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider hidden md:table-cell">Selection</th>
                 <th className="text-left px-3 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Notes / Injury</th>
               </tr>
             </thead>
@@ -1209,7 +1209,7 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
                   <React.Fragment key={a.id}>
                     {showGroup && (
                       <tr>
-                        <td colSpan={4} className={`px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${groupHeaderCls}`}>
+                        <td colSpan={5} className={`px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${groupHeaderCls}`}>
                           {initialStatus} ({groupCount})
                         </td>
                       </tr>
@@ -1230,7 +1230,17 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
                       <td className="px-3 py-2.5">
                         <StatusSelect value={a.status} onChange={val => updateAthlete(a.id, { status: val })} />
                       </td>
-
+                      {/* Selection — only for Modified/Unavailable */}
+                      <td className="px-3 py-2.5 hidden md:table-cell">
+                        {isModifiedOrUnavailable && (
+                          <select value={(a as any).selectionStatus || 'Available for Selection'}
+                            onChange={e => updateAthlete(a.id, { selectionStatus: e.target.value } as any)}
+                            className="h-7 px-2 text-[11px] rounded border border-slate-200 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white">
+                            <option>Available for Selection</option>
+                            <option>Unavailable for Selection</option>
+                          </select>
+                        )}
+                      </td>
                       {/* Notes & Injuries */}
                       <td className="px-3 py-2.5">
                         <div className="space-y-1.5">
@@ -2321,7 +2331,7 @@ const EODReportTab = ({ athletes, availabilityRecords, teamStructure }: any) => 
             <h3 className="text-[13px] font-semibold text-red-700">Unavailable</h3>
             <span className="ml-auto text-[11px] text-red-400 font-medium">{byStatus.unavailable.length} player{byStatus.unavailable.length !== 1 ? 's' : ''}</span>
           </div>
-          <div className="p-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+          <div className="p-3 space-y-2">
             {byStatus.unavailable.map((row: any) => <EODUnavailableRow key={row.athlete.id} row={row} fmtShort={fmtShort} />)}
           </div>
         </div>
@@ -2374,8 +2384,8 @@ const EODModifiedCard = ({ row, fmtShort }: { row: any; fmtShort: (d: string) =>
           ? <img src={athlete.photo} alt="" className="w-6 h-6 rounded flex-shrink-0 object-cover" />
           : <div className="w-6 h-6 bg-slate-200 rounded flex items-center justify-center text-[8px] font-semibold text-slate-400 flex-shrink-0">{athlete.avatar}</div>}
         <span className="text-[12px] font-semibold text-slate-800 flex-1 truncate">{athlete.name}</span>
-        <span className={`flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded border ${forSelection ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-600 border-red-100'}`}>
-          {forSelection ? 'Sel.' : 'No sel.'}
+        <span className={`flex-shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded border whitespace-nowrap ${forSelection ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-600 border-red-100'}`}>
+          {forSelection ? 'Available for Selection' : 'Not Available'}
         </span>
       </div>
       {hasDetail && (
@@ -2417,10 +2427,15 @@ const EODUnavailableRow = ({ row, fmtShort }: { row: any; fmtShort: (d: string) 
         {injuries.length > 0 && (
           <div className="flex flex-wrap gap-1">
             {injuries.map((inj: any) => (
-              <span key={inj.id} className="inline-flex items-center gap-1 text-[10px] font-medium text-red-700 bg-red-50 border border-red-100 rounded px-1.5 py-0.5">
-                <AlertCircle className="w-2.5 h-2.5 flex-shrink-0" />
-                {inj.bodyPart}{inj.event ? ` · ${inj.event}` : ''}
-              </span>
+              <div key={inj.id} className="flex flex-col gap-0.5">
+                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-red-700 bg-red-50 border border-red-100 rounded px-1.5 py-0.5 w-fit">
+                  <AlertCircle className="w-2.5 h-2.5 flex-shrink-0" />
+                  {inj.bodyPart}{inj.event ? ` · ${inj.event}` : ''}
+                </span>
+                {inj.notes && (
+                  <span className="text-[10px] text-red-500 pl-1 italic">{inj.notes}</span>
+                )}
+              </div>
             ))}
           </div>
         )}
