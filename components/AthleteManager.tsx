@@ -493,20 +493,17 @@ const AthleteManager = () => {
     setSaving(false);
   };
 
-  const saveAvailability = async (date: string) => {
+  const saveAvailability = async (date: string, athletesOverride?: Athlete[]) => {
     setSaving(true);
     try {
-      // Delete existing records for this date
+      const source = athletesOverride || athletes;
       await supabase.from('availability_records').delete().eq('date', date);
-
-      // Insert new records
-      const records = athletes.map((a: Athlete) => ({
+      const records = source.map((a: Athlete) => ({
         date,
         athlete_id: a.id,
         status: a.status,
-        note: a.notes
+        note: a.notes || ''
       }));
-
       await supabase.from('availability_records').insert(records);
       await fetchAllData();
     } catch (error) {
@@ -1097,14 +1094,30 @@ const HomePage = ({ athletes, navigateTo, setSelectedAthleteId, teamStructure }:
 };
 
 
-const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD, onBack, saving }: any) => {
+const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD, onBack, saving, savedEodData }: any) => {
   const typedTeamStructure: TeamPosition[] = teamStructure;
   const today = new Date().toISOString().split('T')[0];
 
-  // Local working copy of athletes for EOD edits — does NOT touch today's saved availability
-  const [eodAthletes, setEodAthletes] = useState<Athlete[]>(
-    athletes.map((a: Athlete) => ({ ...a, injuries: a.injuries ? [...a.injuries] : [] }))
-  );
+  // Local working copy — hydrate from saved EOD report if one exists,
+  // otherwise start from today's current athlete data.
+  const [eodAthletes, setEodAthletes] = useState<Athlete[]>(() => {
+    if (savedEodData && savedEodData.length > 0) {
+      // Merge saved EOD fields (status, notes, selectionStatus) over athlete base data
+      return athletes.map((a: Athlete) => {
+        const saved = savedEodData.find((r: any) => r.athlete_id === a.id);
+        if (!saved) return { ...a, injuries: a.injuries ? [...a.injuries] : [] };
+        return {
+          ...a,
+          status: saved.status,
+          notes: saved.note || '',
+          isPublic: saved.is_public ?? a.isPublic,
+          selectionStatus: saved.selection_status || 'Available for Selection',
+          injuries: a.injuries ? [...a.injuries] : [],
+        };
+      });
+    }
+    return athletes.map((a: Athlete) => ({ ...a, injuries: a.injuries ? [...a.injuries] : [] }));
+  });
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [showNoteModal, setShowNoteModal] = useState(false);
   const [showInjuryModal, setShowInjuryModal] = useState(false);
@@ -1429,25 +1442,69 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
   const [tempIsPublic, setTempIsPublic] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [showEOD, setShowEOD] = useState(false);
+  const [savedEodData, setSavedEodData] = useState<any[] | null>(null);
+  const [eodLoading, setEodLoading] = useState(false);
+
+  // When the selected date changes, load availability_records for that date
+  // and overlay them onto the athlete list. This surfaces EOD-written records
+  // for future dates (e.g. tomorrow after yesterday's EOD report was saved).
+  const todayStr = new Date().toISOString().split('T')[0];
+  const [dateRecordsMap, setDateRecordsMap] = useState<Record<string, { status: string; note: string }>>({});
+
+  useEffect(() => {
+    if (selectedDate === todayStr) {
+      // Today's data is already baked into the athletes state by fetchAllData
+      setDateRecordsMap({});
+      return;
+    }
+    // For any other date, fetch its availability_records from the DB
+    let cancelled = false;
+    supabase
+      .from('availability_records')
+      .select('athlete_id, status, note')
+      .eq('date', selectedDate)
+      .then(({ data }) => {
+        if (cancelled) return;
+        if (data && data.length > 0) {
+          const map: Record<string, { status: string; note: string }> = {};
+          data.forEach((r: any) => { map[r.athlete_id] = { status: r.status, note: r.note }; });
+          setDateRecordsMap(map);
+        } else {
+          setDateRecordsMap({});
+        }
+      });
+    return () => { cancelled = true; };
+  }, [selectedDate]);
+
+  // Athletes displayed on screen — overlaid with date-specific records when viewing another day
+  const displayAthletes: Athlete[] = useMemo(() =>
+    typedAthletes.map(a => {
+      const rec = dateRecordsMap[a.id];
+      if (!rec) return a;
+      return { ...a, status: rec.status, notes: rec.note };
+    }),
+    [typedAthletes, dateRecordsMap]
+  );
 
   const handleSave = async () => {
-    await onSave(selectedDate);
+    await onSave(selectedDate, displayAthletes);
     setShowSaveSuccess(true);
     setTimeout(() => setShowSaveSuccess(false), 2000);
   };
 
-  const filteredAthletes = typedAthletes.filter(a => a.name.toLowerCase().includes(searchTerm.toLowerCase()));
+  const filteredAthletes = displayAthletes.filter(a => a.name.toLowerCase().includes(searchTerm.toLowerCase()));
 
   if (showEOD) {
     return (
       <EndOfDayReport
-        athletes={typedAthletes}
+        athletes={displayAthletes}
         setAthletes={setAthletes}
         teamStructure={typedTeamStructure}
         date={selectedDate}
         onSaveEOD={onSaveEOD}
         onBack={() => setShowEOD(false)}
         saving={saving}
+        savedEodData={savedEodData}
       />
     );
   }
@@ -1470,8 +1527,21 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
         <div className="flex gap-2">
           <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
             className="flex-1 h-8 px-3 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500" />
-          <button onClick={() => setShowEOD(true)}
-            className="h-8 px-3 bg-amber-600 text-white rounded text-[12px] font-medium flex items-center gap-1.5 hover:bg-amber-700 transition-colors whitespace-nowrap">
+          <button onClick={async () => {
+              setEodLoading(true);
+              try {
+                const { data } = await supabase
+                  .from('eod_reports')
+                  .select('*')
+                  .eq('date', selectedDate);
+                setSavedEodData(data && data.length > 0 ? data : null);
+              } catch { setSavedEodData(null); }
+              setEodLoading(false);
+              setShowEOD(true);
+            }}
+            disabled={eodLoading}
+            className="h-8 px-3 bg-amber-600 text-white rounded text-[12px] font-medium flex items-center gap-1.5 hover:bg-amber-700 transition-colors whitespace-nowrap disabled:opacity-60">
+            {eodLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
             End of Day Report
           </button>
         </div>
@@ -1495,8 +1565,17 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
                   <p className="text-[11px] text-slate-400 mt-1 truncate">{getPositionDisplay(athlete.positionNumbers, typedTeamStructure)}</p>
                 </div>
                 <StatusSelect value={athlete.status} onChange={async val => {
-                    setAthletes(typedAthletes.map(a => a.id === athlete.id ? { ...a, status: val } : a));
-                    await supabase.from('athletes').update({ status: val }).eq('id', athlete.id);
+                    if (selectedDate === todayStr) {
+                      // Today: update athletes state and DB directly
+                      setAthletes(typedAthletes.map(a => a.id === athlete.id ? { ...a, status: val } : a));
+                      await supabase.from('athletes').update({ status: val }).eq('id', athlete.id);
+                    } else {
+                      // Another date: update the overlay map only (save writes availability_records)
+                      setDateRecordsMap(prev => ({
+                        ...prev,
+                        [athlete.id]: { status: val, note: prev[athlete.id]?.note ?? athlete.notes ?? '' }
+                      }));
+                    }
                   }} />
               </div>
               {/* Public note */}
@@ -1628,12 +1707,18 @@ const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, 
                 <div className="px-4 pb-4 border-t border-slate-100 bg-slate-50 pt-3 space-y-2 text-[13px]">
                   <p><span className="text-slate-400 text-[11px]">Intensity</span> <span className="text-slate-700 ml-1">{drill.intensity}</span></p>
                   {drill.notes && <p><span className="text-slate-400 text-[11px]">Notes</span> <span className="text-slate-700 ml-1">{drill.notes}</span></p>}
-                  {/* Read-only team grid */}
+                  {/* Read-only team grid — only shows positions that have at least one player assigned */}
                   {(() => {
-                    const hasTeam = Object.values({...drill.team1, ...drill.team2, ...drill.subs1, ...drill.subs2}).some(Boolean);
-                    if (!hasTeam) return null;
-                    const sorted = [...(typedTeamStructure.map(p => p.number))].sort((a,b) => a-b);
                     const getName = (id: any) => typedAthletes.find(a => a.id === id)?.name || '';
+                    // Only include positions where at least one slot (t1/t2/s1/s2) has a real assignment
+                    const assignedPositions = typedTeamStructure
+                      .map(p => p.number)
+                      .filter(pos =>
+                        drill.team1?.[pos] || drill.team2?.[pos] ||
+                        drill.subs1?.[pos] || drill.subs2?.[pos]
+                      )
+                      .sort((a, b) => a - b);
+                    if (assignedPositions.length === 0) return null;
                     return (
                       <div className="mt-2 overflow-x-auto">
                         <div className="grid grid-cols-5 gap-1 min-w-[340px] text-[10px]">
@@ -1642,19 +1727,18 @@ const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, 
                           <div className="text-center text-slate-400 pb-1"></div>
                           <div className="text-center text-slate-400 pb-1">Sub</div>
                           <div className="text-center text-slate-400 pb-1">Team 2</div>
-                          {sorted.map(pos => {
+                          {assignedPositions.map(pos => {
                             const t1 = getName(drill.team1?.[pos]);
                             const t2 = getName(drill.team2?.[pos]);
                             const s1 = getName(drill.subs1?.[pos]);
                             const s2 = getName(drill.subs2?.[pos]);
-                            if (!t1 && !t2 && !s1 && !s2) return null;
                             return (
                               <React.Fragment key={pos}>
-                                <div className={`p-1 rounded truncate ${t1 ? 'bg-slate-100 text-slate-700' : 'bg-slate-50 text-slate-300'}`}>{t1 || typedTeamStructure.find(p => p.number === pos)?.name || pos}</div>
-                                <div className={`p-1 rounded truncate ${s1 ? 'bg-slate-100 text-slate-500' : 'text-slate-200'}`}>{s1 || '-'}</div>
+                                <div className={`p-1 rounded truncate ${t1 ? 'bg-slate-100 text-slate-700' : 'bg-transparent text-slate-300'}`}>{t1 || '–'}</div>
+                                <div className={`p-1 rounded truncate ${s1 ? 'bg-slate-100 text-slate-500' : 'text-slate-200'}`}>{s1 || '–'}</div>
                                 <div className="flex items-center justify-center text-slate-300">{pos}</div>
-                                <div className={`p-1 rounded truncate ${s2 ? 'bg-slate-100 text-slate-500' : 'text-slate-200'}`}>{s2 || '-'}</div>
-                                <div className={`p-1 rounded truncate ${t2 ? 'bg-slate-100 text-slate-700' : 'bg-slate-50 text-slate-300'}`}>{t2 || typedTeamStructure.find(p => p.number === pos)?.name || pos}</div>
+                                <div className={`p-1 rounded truncate ${s2 ? 'bg-slate-100 text-slate-500' : 'text-slate-200'}`}>{s2 || '–'}</div>
+                                <div className={`p-1 rounded truncate ${t2 ? 'bg-slate-100 text-slate-700' : 'bg-transparent text-slate-300'}`}>{t2 || '–'}</div>
                               </React.Fragment>
                             );
                           })}
