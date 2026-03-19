@@ -418,15 +418,33 @@ const AthleteManager = () => {
         .insert(eodRows);
       if (insEodErr) throw new Error('Save EOD snapshot: ' + insEodErr.message);
 
-      // Step 2: Forward-propagate to athletes + injuries for future days
-      for (const a of eodAthletes) {
-        const { error: athErr } = await supabase.from('athletes').update({
-          status: a.status,
-          notes: a.notes,
-          is_public: a.isPublic,
-        }).eq('id', a.id);
-        if (athErr) throw new Error('Update athlete ' + a.id + ': ' + athErr.message);
+      // Step 2: Write availability_records for TOMORROW so the status/notes
+      // flow through to the next day without touching today's availability screen.
+      // The athletes table status is NOT changed here — today's availability remains as-is.
+      const tomorrow = new Date(date);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const tomorrowStr = tomorrow.toISOString().split('T')[0];
 
+      // Delete any existing availability record for tomorrow (we'll replace them)
+      const { error: delTomErr } = await supabase
+        .from('availability_records')
+        .delete()
+        .eq('date', tomorrowStr);
+      if (delTomErr) throw new Error('Clear tomorrow records: ' + delTomErr.message);
+
+      const tomorrowRecords = eodAthletes.map((a: Athlete) => ({
+        date: tomorrowStr,
+        athlete_id: a.id,
+        status: a.status,
+        note: a.notes || '',
+      }));
+      const { error: insTomErr } = await supabase
+        .from('availability_records')
+        .insert(tomorrowRecords);
+      if (insTomErr) throw new Error('Insert tomorrow records: ' + insTomErr.message);
+
+      // Update injuries only — these are date-independent and should apply immediately
+      for (const a of eodAthletes) {
         const { error: injDelErr } = await supabase.from('athlete_injuries').delete().eq('athlete_id', a.id);
         if (injDelErr) throw new Error('Delete injuries: ' + injDelErr.message);
 
@@ -763,8 +781,11 @@ const AthleteManager = () => {
     <div className="min-h-screen bg-slate-50 flex">
       {/* Inline loading overlay — sits above page content, doesn't replace it */}
       {loading && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
-          <Loader2 className="w-7 h-7 animate-spin text-blue-500 opacity-70" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-[1px]">
+          <div className="flex flex-col items-center gap-3 bg-white rounded-xl shadow-xl px-8 py-6">
+            <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+            <p className="text-[13px] font-medium text-slate-600">Loading…</p>
+          </div>
         </div>
       )}
 
@@ -1084,7 +1105,8 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
     setSaveError(null);
     try {
       await onSaveEOD(date, eodAthletes);
-      setAthletes(eodAthletes);
+      // Do NOT call setAthletes here — today's availability screen must stay unchanged.
+      // EOD changes are written to tomorrow's availability_records and take effect next day.
       setShowSaveSuccess(true);
       setTimeout(() => { setShowSaveSuccess(false); onBack(); }, 1500);
     } catch (err: any) {
@@ -1230,9 +1252,9 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
                       <td className="px-3 py-2.5">
                         <StatusSelect value={a.status} onChange={val => updateAthlete(a.id, { status: val })} />
                       </td>
-                      {/* Selection — only for Modified/Unavailable */}
+                      {/* Selection — only for Modified (not Unavailable) */}
                       <td className="px-3 py-2.5 hidden md:table-cell">
-                        {isModifiedOrUnavailable && (
+                        {a.status === 'Modified' && (
                           <select value={(a as any).selectionStatus || 'Available for Selection'}
                             onChange={e => updateAthlete(a.id, { selectionStatus: e.target.value } as any)}
                             className="h-7 px-2 text-[11px] rounded border border-slate-200 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white">
@@ -2670,56 +2692,35 @@ const InjuryReportTab = ({ athletes, teamStructure, seasonDates, availabilityRec
 
         const InjuryCard = ({ row }: { row: any }) => {
           const isActive = row.status === 'Active';
+          const etrLabel = row.injury.returnDate ? fmtDate(row.injury.returnDate) : isActive ? 'Season' : '—';
           return (
-            <div className={`bg-white rounded-lg border overflow-hidden ${isActive ? 'border-red-200' : 'border-slate-200'}`}>
-              {/* Header — avatar, name, position, status badge */}
-              <div className={`flex items-center gap-2.5 px-3 py-2.5 border-b ${isActive ? 'bg-red-50 border-red-100' : 'bg-slate-50 border-slate-100'}`}>
-                {row.athlete.photo
-                  ? <img src={row.athlete.photo} alt="" className="w-7 h-7 rounded-md object-cover flex-shrink-0" />
-                  : <div className="w-7 h-7 bg-slate-200 rounded-md flex items-center justify-center text-[9px] font-semibold text-slate-500 flex-shrink-0">{row.athlete.avatar}</div>}
-                <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-semibold text-slate-900 truncate leading-tight">{row.athlete.name}</p>
-                  <p className="text-[10px] text-slate-400 truncate">{row.position}</p>
+            <div className={`bg-white rounded-lg border px-3 py-2 flex items-center gap-2.5 ${isActive ? 'border-red-200' : 'border-slate-200'}`}>
+              {/* Avatar */}
+              {row.athlete.photo
+                ? <img src={row.athlete.photo} alt="" className="w-7 h-7 rounded-md object-cover flex-shrink-0" />
+                : <div className={`w-7 h-7 rounded-md flex items-center justify-center text-[9px] font-semibold flex-shrink-0 ${isActive ? 'bg-red-100 text-red-500' : 'bg-slate-100 text-slate-500'}`}>{row.athlete.avatar}</div>}
+
+              {/* Name + injury detail */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-baseline gap-1.5 flex-wrap">
+                  <span className="text-[13px] font-semibold text-slate-900 leading-tight">{row.athlete.name}</span>
+                  <span className="text-[11px] font-semibold text-slate-700">{row.injury.bodyPart}</span>
+                  {row.injury.event && <span className="px-1 py-0 bg-slate-100 text-slate-500 rounded text-[10px]">{row.injury.event}</span>}
+                  {row.injury.surface && <span className="px-1 py-0 bg-slate-100 text-slate-500 rounded text-[10px]">{row.injury.surface}</span>}
+                  {row.injury.contact && <span className="px-1 py-0 bg-slate-100 text-slate-500 rounded text-[10px]">{row.injury.contact}</span>}
                 </div>
-                <span className={`flex-shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${isActive ? 'bg-red-100 text-red-600 border-red-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
-                  {row.status}
-                </span>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className="text-[10px] text-slate-400">{row.position}</span>
+                  {row.injury.notes && <span className="text-[10px] text-slate-400 italic truncate">· {row.injury.notes}</span>}
+                </div>
               </div>
 
-              {/* Body — body part + chips left, days + dates right */}
-              <div className="px-3 py-2.5 flex items-start gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-[15px] font-bold text-slate-800 leading-tight">{row.injury.bodyPart}</p>
-                  <div className="flex flex-wrap gap-1 mt-1.5">
-                    {row.injury.event && <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px] font-medium">{row.injury.event}</span>}
-                    {row.injury.surface && <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px] font-medium">{row.injury.surface}</span>}
-                    {row.injury.contact && <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px] font-medium">{row.injury.contact}</span>}
-                  </div>
-                  {row.injury.notes && (
-                    <p className="text-[11px] text-slate-400 italic mt-1.5 leading-snug">{row.injury.notes}</p>
-                  )}
-                </div>
-                {/* Right column — days lost + dates */}
-                <div className="flex-shrink-0 text-right space-y-2">
-                  {row.timeLoss !== null && (
-                    <div>
-                      <p className="text-[20px] font-bold text-slate-700 leading-none">{row.timeLoss}</p>
-                      <p className="text-[9px] text-slate-400 uppercase tracking-wide">days</p>
-                    </div>
-                  )}
-                  <div className="flex gap-3 justify-end">
-                    <div>
-                      <p className="text-[9px] text-slate-400 uppercase tracking-wide">Start</p>
-                      <p className="text-[11px] font-medium text-slate-600">{fmtDate(row.injury.startDate)}</p>
-                    </div>
-                    <div>
-                      <p className="text-[9px] text-slate-400 uppercase tracking-wide">ETR</p>
-                      <p className={`text-[11px] font-semibold ${isActive ? 'text-red-600' : 'text-slate-600'}`}>
-                        {row.injury.returnDate ? fmtDate(row.injury.returnDate) : isActive ? 'Season' : '—'}
-                      </p>
-                    </div>
-                  </div>
-                </div>
+              {/* Right — days + ETR */}
+              <div className="flex-shrink-0 text-right">
+                {row.timeLoss !== null && (
+                  <p className="text-[15px] font-bold text-slate-700 leading-none">{row.timeLoss}<span className="text-[9px] font-normal text-slate-400 ml-0.5">d</span></p>
+                )}
+                <p className={`text-[11px] font-semibold mt-0.5 ${isActive ? 'text-red-500' : 'text-slate-500'}`}>{etrLabel}</p>
               </div>
             </div>
           );
