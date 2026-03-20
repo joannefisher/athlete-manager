@@ -1766,7 +1766,7 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
 
   if (editingTeam) {
     const drillPositions = getPositionsForDrill(editingTeam);
-    const stripToPos = (obj: any) => Object.fromEntries(Object.entries(obj || {}).filter(([pos]) => drillPositions.includes(Number(pos))));
+    const stripToPos = (obj: any): Record<number, string> => Object.fromEntries(Object.entries(obj || {}).filter(([pos]) => drillPositions.includes(Number(pos)))) as Record<number, string>;
     return <TeamSelectionModal athletes={typedAthletes}
       team1={editingTeam.team1 || {}} setTeam1={(t: any) => { setDayDrills(dayDrills.map(d => d.id === editingTeam.id ? {...d, team1: t} : d)); setEditingTeam((prev: any) => ({...prev, team1: t})); }}
       team2={editingTeam.team2 || {}} setTeam2={(t: any) => { setDayDrills(dayDrills.map(d => d.id === editingTeam.id ? {...d, team2: t} : d)); setEditingTeam((prev: any) => ({...prev, team2: t})); }}
