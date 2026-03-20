@@ -1752,7 +1752,7 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
     setEditingDefaultTeam(false);
   };
 
-  const totalMinutes = (dlist: Drill[]) => dlist.reduce((s, d) => s + (d.duration || 0), 0);
+  const totalMinutes = (dlist: Drill[]) => dlist.filter(d => !d.isBreak).reduce((s, d) => s + (d.duration || 0), 0);
   const fmtTime = (mins: number) => mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60 > 0 ? (mins % 60) + 'm' : ''}`.trim() : `${mins}m`;
 
   const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -1853,19 +1853,18 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
                   </button>
                 )}
                 {/* Right: fixed-width columns — all rows identical */}
-                <input type="number" min="0" max="300" step="5"
-                  value={drill.duration || ''}
-                  onChange={e => setDayDrills(dayDrills.map(d => d.id === drill.id ? {...d, duration: Math.max(0, parseInt(e.target.value) || 0)} : d))}
-                  placeholder="0"
-                  className="w-14 h-8 px-0 text-[13px] text-center border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 shrink-0" />
-                <span className="text-[11px] text-slate-400 w-6 shrink-0">min</span>
-                {drill.isBreak
-                  ? <span className="w-6 shrink-0" /> /* spacer keeps columns aligned */
-                  : <button onClick={() => setExpandedDrill(expandedDrill === drill.id ? null : drill.id)}
-                      className="w-6 flex items-center justify-center text-slate-300 hover:text-slate-600 transition-colors shrink-0">
-                      {expandedDrill === drill.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                    </button>
-                }
+                {!drill.isBreak && <>
+                  <input type="number" min="0" max="300" step="5"
+                    value={drill.duration || ''}
+                    onChange={e => setDayDrills(dayDrills.map(d => d.id === drill.id ? {...d, duration: Math.max(0, parseInt(e.target.value) || 0)} : d))}
+                    placeholder="0"
+                    className="w-14 h-8 px-0 text-[13px] text-center border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 shrink-0" />
+                  <span className="text-[11px] text-slate-400 w-6 shrink-0">min</span>
+                  <button onClick={() => setExpandedDrill(expandedDrill === drill.id ? null : drill.id)}
+                    className="w-6 flex items-center justify-center text-slate-300 hover:text-slate-600 transition-colors shrink-0">
+                    {expandedDrill === drill.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </button>
+                </>}
                 <button onClick={() => setDayDrills(dayDrills.filter(d => d.id !== drill.id))}
                   className="w-6 flex items-center justify-center text-slate-300 hover:text-red-400 transition-colors shrink-0">
                   <Trash2 className="w-3.5 h-3.5" />
@@ -1932,14 +1931,7 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
             className="flex-1 h-10 bg-white border border-slate-200 text-slate-700 rounded-lg text-[13px] font-medium flex items-center justify-center gap-1.5 hover:bg-slate-50 hover:border-slate-300 transition-colors">
             <Plus className="w-3.5 h-3.5" />Add Drill
           </button>
-          <button onClick={() => {
-              const breakType = typedDrillTypes.find(dt => dt.name === 'Break');
-              const breakDrill: Drill = { id: String(Date.now()), name: 'Break', type: 'Break', intensity: '', notes: '', duration: breakType?.defaultDuration || 15, isBreak: true, team1: {}, team2: {}, subs1: {}, subs2: {} };
-              setDayDrills([...dayDrills, breakDrill]);
-            }}
-            className="h-10 px-4 bg-white border border-slate-200 text-slate-600 rounded-lg text-[13px] font-medium flex items-center gap-1.5 hover:bg-slate-50 hover:border-slate-300 transition-colors">
-            <Plus className="w-3.5 h-3.5" />Break
-          </button>
+
           <button onClick={handleSaveDay} disabled={savingDay === activeDay}
             className={`flex-1 h-10 rounded-lg text-[13px] font-semibold transition-colors ${savingDay === activeDay ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-slate-700'}`}>
             {savingDay === activeDay ? 'Saving…' : 'Save'}
@@ -3198,16 +3190,13 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                 {editingId === 'dt-' + dt.id ? (
                   <div className="space-y-3">
                     <div className="flex gap-2 items-center">
-                      {dt.name === 'Break'
-                        ? <span className="flex-1 text-sm font-medium text-slate-600 px-1">Break</span>
-                        : <input type="text" value={editData.name || ''} onChange={e => setEditData({...editData, name: e.target.value})} className="flex-1 px-2 py-1 text-sm border rounded" />
-                      }
+                      <input type="text" value={editData.name || ''} onChange={e => setEditData({...editData, name: e.target.value})} className="flex-1 px-2 py-1 text-sm border rounded" />
                       <input type="number" min="0" max="300" step="5" value={editData.defaultDuration || ''} onChange={e => setEditData({...editData, defaultDuration: parseInt(e.target.value) || 0})} className="w-14 px-2 py-1 text-sm border rounded text-center" placeholder="min" />
                       <span className="text-xs text-slate-400">min</span>
-                      <button onClick={() => { const updated = {...dt, name: dt.name === 'Break' ? 'Break' : editData.name, defaultDuration: editData.defaultDuration || 0, positions: dt.name === 'Break' ? [] : (editData.positions || dt.positions)}; onSaveDrillType(updated); setLocalDrillTypes(localDrillTypes.map(d => d.id === dt.id ? updated : d)); setEditingId(null); }} className="p-1 bg-green-100 text-green-700 rounded"><Check className="w-4 h-4" /></button>
+                      <button onClick={() => { const updated = {...dt, name: editData.name, defaultDuration: editData.defaultDuration || 0, positions: editData.positions || dt.positions}; onSaveDrillType(updated); setLocalDrillTypes(localDrillTypes.map(d => d.id === dt.id ? updated : d)); setEditingId(null); }} className="p-1 bg-green-100 text-green-700 rounded"><Check className="w-4 h-4" /></button>
                       <button onClick={() => setEditingId(null)} className="p-1 bg-slate-100 rounded"><X className="w-4 h-4" /></button>
                     </div>
-                    {dt.name !== 'Break' && <div>
+                    <div>
                       <p className="text-xs text-slate-500 mb-2">Position Group:</p>
                       <div className="flex gap-2 mb-3">
                         {['Forward', 'Back'].map(group => {
@@ -3249,24 +3238,21 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                         <button onClick={() => setEditData({...editData, positions: teamStructure.map(p => p.number)})} className="text-xs text-blue-600">Select All</button>
                         <button onClick={() => setEditData({...editData, positions: []})} className="text-xs text-slate-500">Clear All</button>
                       </div>
-                    </div>}
+                    </div>
                   </div>
                 ) : (
                   <div className="flex justify-between items-center">
                     <div>
                       <p className="text-sm font-medium flex items-center gap-1.5">
                         {dt.name}
-                        {dt.name === 'Break' && <span className="text-[9px] font-bold text-slate-400 bg-slate-100 rounded px-1.5 py-0.5 uppercase tracking-wider">System</span>}
                       </p>
                       <p className="text-xs text-slate-500">
-                        {dt.name === 'Break' ? 'Default break duration' : `${dt.positions.length} positions`}{dt.defaultDuration ? ` · ${dt.defaultDuration}min` : ''}
+                        {dt.positions.length} positions{dt.defaultDuration ? ` · ${dt.defaultDuration}min` : ''}
                       </p>
                     </div>
                     <div className="flex gap-1">
                       <button onClick={() => { setEditingId('dt-' + dt.id); setEditData({name: dt.name, defaultDuration: dt.defaultDuration || 0, positions: dt.positions}); }} className="p-1 hover:bg-slate-100 rounded"><Edit2 className="w-4 h-4 text-slate-500" /></button>
-                      {dt.name !== 'Break' && (
-                        <button onClick={() => { onDeleteDrillType(dt.id); setLocalDrillTypes(localDrillTypes.filter(d => d.id !== dt.id)); }} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button>
-                      )}
+                      <button onClick={() => { onDeleteDrillType(dt.id); setLocalDrillTypes(localDrillTypes.filter(d => d.id !== dt.id)); }} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button>
                     </div>
                   </div>
                 )}
