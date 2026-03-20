@@ -1607,7 +1607,7 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
               setShowEOD(true);
             }}
             disabled={eodLoading}
-            className="h-8 px-3 bg-amber-600 text-white rounded text-[12px] font-medium flex items-center gap-1.5 hover:bg-amber-700 transition-colors whitespace-nowrap disabled:opacity-60">
+            className="h-8 px-3 bg-white border border-amber-300 text-amber-700 rounded text-[12px] font-medium flex items-center gap-1.5 hover:bg-amber-50 transition-colors whitespace-nowrap disabled:opacity-60">
             {eodLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
             End of Day
           </button>
@@ -1673,7 +1673,7 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
       {/* Bottom bar */}
       <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t border-slate-200 p-4">
         <div className="max-w-md md:max-w-lg mx-auto">
-          <button onClick={handleSave} className="w-full h-10 bg-slate-900 text-white rounded-lg text-[13px] font-medium hover:bg-slate-700 transition-colors">Save</button>
+          <button onClick={handleSave} className="w-full h-10 bg-slate-900 text-white rounded-lg text-[13px] font-semibold hover:bg-slate-700 transition-colors">Save</button>
         </div>
       </div>
 
@@ -1837,48 +1837,40 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
         ) : (
           dayDrills.map(drill => (
             <div key={drill.id} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-              {/* Duration input shared by both break and regular drill rows */}
-              {drill.isBreak ? (
-                <div className="px-4 py-2.5 flex items-center gap-3">
-                  <span className="text-[10px] font-bold text-slate-400 bg-slate-100 rounded px-2 py-1 uppercase tracking-wider shrink-0">Break</span>
-                  <span className="text-[13px] font-medium text-slate-600 flex-1">{drill.name}</span>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <input type="number" min="1" max="300" step="5"
-                      value={drill.duration || ''}
-                      onChange={e => setDayDrills(dayDrills.map(d => d.id === drill.id ? {...d, duration: Math.max(0, parseInt(e.target.value) || 0)} : d))}
-                      className="w-14 h-7 px-2 text-[12px] text-center border border-slate-200 rounded bg-slate-50 focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                    <span className="text-[11px] text-slate-400">min</span>
+              {/* Unified row: [label/expand area flex-1] | [dur input] [min] [chevron or spacer] [trash] */}
+              <div className="h-12 px-4 flex items-center gap-3">
+                {/* Left: label */}
+                {drill.isBreak ? (
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <span className="text-[9px] font-bold text-slate-400 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 uppercase tracking-widest shrink-0">Break</span>
+                    <span className="text-[13px] font-medium text-slate-500 truncate">{drill.name}</span>
                   </div>
-                  <button onClick={() => setDayDrills(dayDrills.filter(d => d.id !== drill.id))}
-                    className="p-1 text-slate-300 hover:text-red-500 transition-colors shrink-0">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ) : (
-                <div className="px-4 py-3 flex items-center gap-2">
+                ) : (
                   <button onClick={() => setExpandedDrill(expandedDrill === drill.id ? null : drill.id)}
-                    className="flex-1 text-left min-w-0">
-                    <h3 className="text-[13px] font-medium text-slate-900 truncate">{drill.name}</h3>
-                    <p className="text-[11px] text-slate-400 mt-0.5">{drill.type}{drill.intensity ? ` · ${drill.intensity}` : ''}</p>
+                    className="flex-1 text-left min-w-0 py-1">
+                    <p className="text-[13px] font-medium text-slate-900 truncate leading-none">{drill.name}</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5 truncate">{drill.type}{drill.intensity ? ` · ${drill.intensity}` : ''}</p>
                   </button>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <input type="number" min="0" max="300" step="5"
-                      value={drill.duration || ''}
-                      onChange={e => setDayDrills(dayDrills.map(d => d.id === drill.id ? {...d, duration: Math.max(0, parseInt(e.target.value) || 0)} : d))}
-                      placeholder="–"
-                      className="w-14 h-7 px-2 text-[12px] text-center border border-slate-200 rounded bg-slate-50 focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                    <span className="text-[11px] text-slate-400">min</span>
-                  </div>
-                  <button onClick={() => setExpandedDrill(expandedDrill === drill.id ? null : drill.id)}
-                    className="p-1 text-slate-300 hover:text-slate-600 transition-colors">
-                    {expandedDrill === drill.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                  </button>
-                  <button onClick={() => setDayDrills(dayDrills.filter(d => d.id !== drill.id))}
-                    className="p-1 text-slate-300 hover:text-red-500 transition-colors">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              )}
+                )}
+                {/* Right: fixed-width columns — all rows identical */}
+                <input type="number" min="0" max="300" step="5"
+                  value={drill.duration || ''}
+                  onChange={e => setDayDrills(dayDrills.map(d => d.id === drill.id ? {...d, duration: Math.max(0, parseInt(e.target.value) || 0)} : d))}
+                  placeholder="0"
+                  className="w-14 h-8 px-0 text-[13px] text-center border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 shrink-0" />
+                <span className="text-[11px] text-slate-400 w-6 shrink-0">min</span>
+                {drill.isBreak
+                  ? <span className="w-6 shrink-0" /> /* spacer keeps columns aligned */
+                  : <button onClick={() => setExpandedDrill(expandedDrill === drill.id ? null : drill.id)}
+                      className="w-6 flex items-center justify-center text-slate-300 hover:text-slate-600 transition-colors shrink-0">
+                      {expandedDrill === drill.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    </button>
+                }
+                <button onClick={() => setDayDrills(dayDrills.filter(d => d.id !== drill.id))}
+                  className="w-6 flex items-center justify-center text-slate-300 hover:text-red-400 transition-colors shrink-0">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
               {!drill.isBreak && expandedDrill === drill.id && (
                 <div className="px-4 pb-4 border-t border-slate-100 bg-slate-50 pt-3 space-y-2 text-[13px]">
                   <p><span className="text-slate-400 text-[11px]">Intensity</span> <span className="text-slate-700 ml-1">{drill.intensity}</span></p>
@@ -1934,10 +1926,10 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
       </div>
 
       {/* Bottom bar */}
-      <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t border-slate-200 p-4">
+      <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t border-slate-200 p-3">
         <div className="max-w-md md:max-w-lg mx-auto flex gap-2">
           <button onClick={() => navigateTo('add-drill')}
-            className="flex-1 h-10 bg-blue-600 text-white rounded-lg text-[13px] font-medium flex items-center justify-center gap-1.5 hover:bg-blue-700 transition-colors">
+            className="flex-1 h-10 bg-white border border-slate-200 text-slate-700 rounded-lg text-[13px] font-medium flex items-center justify-center gap-1.5 hover:bg-slate-50 hover:border-slate-300 transition-colors">
             <Plus className="w-3.5 h-3.5" />Add Drill
           </button>
           <button onClick={() => {
@@ -1945,11 +1937,11 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
               const breakDrill: Drill = { id: String(Date.now()), name: 'Break', type: 'Break', intensity: '', notes: '', duration: breakType?.defaultDuration || 15, isBreak: true, team1: {}, team2: {}, subs1: {}, subs2: {} };
               setDayDrills([...dayDrills, breakDrill]);
             }}
-            className="h-10 px-4 bg-slate-100 text-slate-600 rounded-lg text-[13px] font-medium flex items-center gap-1.5 hover:bg-slate-200 transition-colors">
+            className="h-10 px-4 bg-white border border-slate-200 text-slate-600 rounded-lg text-[13px] font-medium flex items-center gap-1.5 hover:bg-slate-50 hover:border-slate-300 transition-colors">
             <Plus className="w-3.5 h-3.5" />Break
           </button>
           <button onClick={handleSaveDay} disabled={savingDay === activeDay}
-            className={`flex-1 h-10 rounded-lg text-[13px] font-medium transition-colors ${savingDay === activeDay ? 'bg-slate-100 text-slate-400' : 'bg-slate-900 text-white hover:bg-slate-700'}`}>
+            className={`flex-1 h-10 rounded-lg text-[13px] font-semibold transition-colors ${savingDay === activeDay ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-slate-700'}`}>
             {savingDay === activeDay ? 'Saving…' : 'Save'}
           </button>
         </div>
@@ -2121,12 +2113,12 @@ const AddDrillPage = ({ drills, setDrills, weekDrills, setWeekDrills, selectedDa
           </button>
         </div>
       </div>
-      <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t border-slate-200 p-4">
+      <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t border-slate-200 p-3">
         <div className="max-w-md md:max-w-lg mx-auto flex gap-2">
           <button onClick={handleSave}
-            className="flex-1 h-10 bg-slate-900 text-white rounded-lg text-[13px] font-medium hover:bg-slate-700 transition-colors">Save</button>
+            className="flex-1 h-10 bg-slate-900 text-white rounded-lg text-[13px] font-semibold hover:bg-slate-700 transition-colors">Save Drill</button>
           <button onClick={() => navigateTo('session-plan')}
-            className="h-10 px-5 bg-slate-100 text-slate-600 rounded-lg text-[13px] hover:bg-slate-200 transition-colors">Cancel</button>
+            className="h-10 px-5 bg-white border border-slate-200 text-slate-600 rounded-lg text-[13px] font-medium hover:bg-slate-50 hover:border-slate-300 transition-colors">Cancel</button>
         </div>
       </div>
     </div>
