@@ -50,6 +50,7 @@ interface DrillType {
   id: string;
   name: string;
   positions: number[];
+  defaultDuration: number;
 }
 
 interface SeasonDate {
@@ -217,6 +218,7 @@ const AthleteManager = () => {
       // Drill types
       if (drillTypesData) setDrillTypes(drillTypesData.map((dt: any) => ({
         id: dt.id, name: dt.name,
+        defaultDuration: dt.default_duration || 0,
         positions: (allDrillTypePositions || []).filter((p: any) => p.drill_type_id === dt.id).map((p: any) => p.position_number)
       })));
 
@@ -652,12 +654,12 @@ const AthleteManager = () => {
       if (isNew) {
         const { data } = await supabase
           .from('drill_types')
-          .insert({ name: drillType.name })
+          .insert({ name: drillType.name, default_duration: drillType.defaultDuration || 0 })
           .select()
           .single();
         drillTypeId = data.id;
       } else {
-        await supabase.from('drill_types').update({ name: drillType.name }).eq('id', drillType.id);
+        await supabase.from('drill_types').update({ name: drillType.name, default_duration: drillType.defaultDuration || 0 }).eq('id', drillType.id);
       }
 
       await supabase.from('drill_type_positions').delete().eq('drill_type_id', drillTypeId);
@@ -1783,10 +1785,14 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
     <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6">
       {showSaveSuccess && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-[13px] font-medium">✓ Session plan saved</div>}
 
-      {/* Week selector */}
+      {/* Week selector — picks specific date, jumps to that week AND that day */}
       <div className="bg-white rounded-lg border border-slate-200 p-3 mb-3 flex items-center gap-3">
-        <input type="date" value={weekDates[0]}
-          onChange={e => onDateChange(e.target.value)}
+        <input type="date" value={activeDay}
+          onChange={e => {
+            const picked = e.target.value;
+            onDateChange(picked);
+            setActiveDay(picked);
+          }}
           className="flex-1 h-8 px-3 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500" />
         <span className="text-[12px] text-slate-400 whitespace-nowrap">{fmtWC(weekDates[0])}</span>
       </div>
@@ -1939,7 +1945,10 @@ const AddDrillPage = ({ drills, setDrills, weekDrills, setWeekDrills, selectedDa
   const [type, setType] = useState(typedDrillTypes[0]?.name || '');
   const [notes, setNotes] = useState('');
   const [intensity, setIntensity] = useState('Low');
-  const [duration, setDuration] = useState<number>(0);
+  const [duration, setDuration] = useState<number>(() => {
+    const dt = drillTypes.find((d: any) => d.name === (typedDrillTypes[0]?.name || ''));
+    return dt?.defaultDuration || 0;
+  });
   const [team1, setTeam1] = useState({...defaultTeam.team1});
   const [team2, setTeam2] = useState({...defaultTeam.team2});
   const [subs1, setSubs1] = useState({...defaultTeam.subs1});
@@ -2042,7 +2051,11 @@ const AddDrillPage = ({ drills, setDrills, weekDrills, setWeekDrills, selectedDa
         </div>
         <div>
           <label className="block text-[11px] font-medium text-slate-500 mb-1.5">Type</label>
-          <select value={type} onChange={e => setType(e.target.value)}
+          <select value={type} onChange={e => {
+              setType(e.target.value);
+              const dt = drillTypes.find((d: any) => d.name === e.target.value);
+              if (dt?.defaultDuration) setDuration(dt.defaultDuration);
+            }}
             className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500">
             {drillTypes.map(dt => <option key={dt.id}>{dt.name}</option>)}
           </select>
@@ -3169,9 +3182,11 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
               <div key={dt.id} className="p-3">
                 {editingId === 'dt-' + dt.id ? (
                   <div className="space-y-3">
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 items-center">
                       <input type="text" value={editData.name || ''} onChange={e => setEditData({...editData, name: e.target.value})} className="flex-1 px-2 py-1 text-sm border rounded" />
-                      <button onClick={() => { const updated = {...dt, name: editData.name, positions: editData.positions || dt.positions}; onSaveDrillType(updated); setLocalDrillTypes(drillTypes.map(d => d.id === dt.id ? updated : d)); setEditingId(null); }} className="p-1 bg-green-100 text-green-700 rounded"><Check className="w-4 h-4" /></button>
+                      <input type="number" min="0" max="300" step="5" value={editData.defaultDuration || ''} onChange={e => setEditData({...editData, defaultDuration: parseInt(e.target.value) || 0})} className="w-14 px-2 py-1 text-sm border rounded text-center" placeholder="min" />
+                      <span className="text-xs text-slate-400">min</span>
+                      <button onClick={() => { const updated = {...dt, name: editData.name, defaultDuration: editData.defaultDuration || 0, positions: editData.positions || dt.positions}; onSaveDrillType(updated); setLocalDrillTypes(drillTypes.map(d => d.id === dt.id ? updated : d)); setEditingId(null); }} className="p-1 bg-green-100 text-green-700 rounded"><Check className="w-4 h-4" /></button>
                       <button onClick={() => setEditingId(null)} className="p-1 bg-slate-100 rounded"><X className="w-4 h-4" /></button>
                     </div>
                     <div>
@@ -3222,10 +3237,10 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                   <div className="flex justify-between items-center">
                     <div>
                       <p className="text-sm font-medium">{dt.name}</p>
-                      <p className="text-xs text-slate-500">{dt.positions.length} positions</p>
+                      <p className="text-xs text-slate-500">{dt.positions.length} positions{dt.defaultDuration ? ` · ${dt.defaultDuration}min default` : ''}</p>
                     </div>
                     <div className="flex gap-1">
-                      <button onClick={() => { setEditingId('dt-' + dt.id); setEditData({name: dt.name, positions: dt.positions}); }} className="p-1 hover:bg-slate-100 rounded"><Edit2 className="w-4 h-4 text-slate-500" /></button>
+                      <button onClick={() => { setEditingId('dt-' + dt.id); setEditData({name: dt.name, defaultDuration: dt.defaultDuration || 0, positions: dt.positions}); }} className="p-1 hover:bg-slate-100 rounded"><Edit2 className="w-4 h-4 text-slate-500" /></button>
                       <button onClick={() => setLocalDrillTypes(drillTypes.filter(d => d.id !== dt.id))} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button>
                     </div>
                   </div>
@@ -3234,8 +3249,10 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
             ))}
             {showAdd === 'drillType' ? (
               <div className="p-3 space-y-3">
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-center">
                   <input type="text" value={newData.name || ''} onChange={e => setNewData({...newData, name: e.target.value})} placeholder="Type name" className="flex-1 px-2 py-1 text-sm border rounded" />
+                  <input type="number" min="0" max="300" step="5" value={newData.defaultDuration || ''} onChange={e => setNewData({...newData, defaultDuration: parseInt(e.target.value) || 0})} className="w-14 px-2 py-1 text-sm border rounded text-center" placeholder="min" />
+                  <span className="text-xs text-slate-400 whitespace-nowrap">def. min</span>
                 </div>
                 <div>
                   <p className="text-xs text-slate-500 mb-2">Position Group:</p>
@@ -3277,7 +3294,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => { if (newData.name) { const newDt = {id: String(Date.now()), name: newData.name, positions: newData.positions || teamStructure.map(p => p.number)}; onSaveDrillType(newDt); setLocalDrillTypes([...drillTypes, newDt]); setNewData({}); setShowAdd(null); }}} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Add</button>
+                  <button onClick={() => { if (newData.name) { const newDt = {id: String(Date.now()), name: newData.name, defaultDuration: newData.defaultDuration || 0, positions: newData.positions || teamStructure.map(p => p.number)}; onSaveDrillType(newDt); setLocalDrillTypes([...drillTypes, newDt]); setNewData({}); setShowAdd(null); }}} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Add</button>
                   <button onClick={() => { setShowAdd(null); setNewData({}); }} className="flex-1 px-2 py-1 bg-slate-100 rounded text-xs">Cancel</button>
                 </div>
               </div>
