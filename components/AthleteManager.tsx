@@ -74,6 +74,8 @@ interface Drill {
   type: string;
   intensity: string;
   notes: string;
+  duration: number;   // minutes
+  isBreak?: boolean;  // if true, only name+duration shown
   team1: Record<number, string>;
   team2: Record<number, string>;
   subs1: Record<number, string>;
@@ -144,6 +146,7 @@ const AthleteManager = () => {
   // Data states with types
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [drills, setDrills] = useState<Drill[]>([]);
+  const [weekDrills, setWeekDrills] = useState<Record<string, Drill[]>>({});
   const [drillTypes, setDrillTypes] = useState<DrillType[]>([]);
   const [seasonDates, setSeasonDates] = useState<SeasonDate[]>([]);
   const [availabilityRecords, setAvailabilityRecords] = useState<AvailabilityRecord[]>([]);
@@ -246,6 +249,18 @@ const AthleteManager = () => {
 
       // Session plan (depends on nothing else, run after state is set)
       await loadSessionPlan(todayStr);
+      // Pre-load the full current week
+      const weekDates = (() => {
+        const d = new Date(todayStr + 'T00:00:00');
+        const day = d.getDay();
+        const mon = new Date(d);
+        mon.setDate(d.getDate() - ((day + 6) % 7));
+        return Array.from({ length: 7 }, (_, i) => {
+          const dd = new Date(mon); dd.setDate(mon.getDate() + i);
+          return dd.toISOString().split('T')[0];
+        });
+      })();
+      await loadWeekDrills(weekDates);
 
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -291,8 +306,33 @@ const AthleteManager = () => {
           else team2[a.position_number] = a.athlete_id;
         }
       });
-      return { id: d.id, name: d.name, type: d.drill_type, intensity: d.intensity, notes: d.notes, team1, team2, subs1, subs2 };
+      return { id: d.id, name: d.name, type: d.drill_type, intensity: d.intensity, notes: d.notes, duration: d.duration || 0, isBreak: d.is_break || false, team1, team2, subs1, subs2 };
     }));
+  };
+
+  // Load an entire week of session plans in parallel
+  const loadWeekDrills = async (weekDates: string[]) => {
+    const results = await Promise.all(weekDates.map(async (date) => {
+      const { data: sp } = await supabase.from('session_plans').select('id').eq('date', date).maybeSingle();
+      if (!sp) return { date, drills: [] };
+      const { data: drillsData } = await supabase.from('drills').select('*').eq('session_plan_id', sp.id).order('sort_order');
+      if (!drillsData || drillsData.length === 0) return { date, drills: [] };
+      const drillIds = drillsData.map((d: any) => d.id);
+      const { data: assignments } = await supabase.from('drill_team_assignments').select('*').in('drill_id', drillIds);
+      const loaded = drillsData.map((d: any) => {
+        const team1: Record<number, string> = {}, team2: Record<number, string> = {}, subs1: Record<number, string> = {}, subs2: Record<number, string> = {};
+        (assignments || []).filter((a: any) => a.drill_id === d.id).forEach((a: any) => {
+          if (a.team_number === 1) { if (a.is_substitute) subs1[a.position_number] = a.athlete_id; else team1[a.position_number] = a.athlete_id; }
+          else { if (a.is_substitute) subs2[a.position_number] = a.athlete_id; else team2[a.position_number] = a.athlete_id; }
+        });
+        return { id: d.id, name: d.name, type: d.drill_type, intensity: d.intensity, notes: d.notes, duration: d.duration || 0, isBreak: d.is_break || false, team1, team2, subs1, subs2 };
+      });
+      return { date, drills: loaded };
+    }));
+    const map: Record<string, Drill[]> = {};
+    results.forEach(r => { map[r.date] = r.drills; });
+    setWeekDrills(map);
+    return map;
   };
 
   useEffect(() => {
@@ -543,6 +583,8 @@ const AthleteManager = () => {
             drill_type: drill.type,
             intensity: drill.intensity,
             notes: drill.notes,
+            duration: drill.duration || 0,
+            is_break: drill.isBreak || false,
             sort_order: i,
           })))
           .select();
@@ -716,9 +758,23 @@ const AthleteManager = () => {
   };
 
   // Handle date change for session plan
+  const getWeekDates = (date: string): string[] => {
+    const d = new Date(date + 'T00:00:00');
+    const day = d.getDay(); // 0=Sun
+    // Week starts Monday
+    const mon = new Date(d);
+    mon.setDate(d.getDate() - ((day + 6) % 7));
+    return Array.from({ length: 7 }, (_, i) => {
+      const dd = new Date(mon);
+      dd.setDate(mon.getDate() + i);
+      return dd.toISOString().split('T')[0];
+    });
+  };
+
   const handleDateChange = async (newDate: string) => {
     setSelectedDate(newDate);
-    await loadSessionPlan(newDate);
+    // Load all 7 days of the containing week
+    await loadWeekDrills(getWeekDates(newDate));
   };
 
   const [role, setRole] = useState<Role>('Admin');
@@ -873,8 +929,8 @@ const AthleteManager = () => {
         <div className="flex-1">
           {effectivePage === 'home' && <HomePage athletes={athletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} teamStructure={teamStructure} />}
           {effectivePage === 'availability' && <AvailabilityPage athletes={athletes} setAthletes={setAthletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} selectedDate={selectedDate} setSelectedDate={setSelectedDate} availabilityRecords={availabilityRecords} teamStructure={teamStructure} onSave={saveAvailability} onSaveEOD={saveEndOfDayReport} saving={saving} fetchAllData={fetchAllData} />}
-          {effectivePage === 'session-plan' && <SessionPlanPage drills={drills} setDrills={setDrills} navigateTo={navigateTo} athletes={athletes} drillTypes={drillTypes} teamStructure={teamStructure} defaultTeam={defaultTeam} onSaveDefaultTeam={saveDefaultTeam} selectedDate={selectedDate} onDateChange={handleDateChange} onSaveSessionPlan={saveSessionPlan} saving={saving} />}
-          {effectivePage === 'add-drill' && <AddDrillPage drills={drills} setDrills={setDrills} navigateTo={navigateTo} drillTypes={drillTypes} defaultTeam={defaultTeam} athletes={athletes} teamStructure={teamStructure} />}
+          {effectivePage === 'session-plan' && <SessionPlanPage drills={drills} setDrills={setDrills} weekDrills={weekDrills} setWeekDrills={setWeekDrills} navigateTo={navigateTo} athletes={athletes} drillTypes={drillTypes} teamStructure={teamStructure} defaultTeam={defaultTeam} onSaveDefaultTeam={saveDefaultTeam} selectedDate={selectedDate} onDateChange={handleDateChange} onSaveSessionPlan={saveSessionPlan} saving={saving} getWeekDates={getWeekDates} />}
+          {effectivePage === 'add-drill' && <AddDrillPage drills={drills} setDrills={setDrills} weekDrills={weekDrills} setWeekDrills={setWeekDrills} selectedDate={selectedDate} navigateTo={navigateTo} drillTypes={drillTypes} defaultTeam={defaultTeam} athletes={athletes} teamStructure={teamStructure} />}
           {effectivePage === 'athlete-profile' && <AthleteProfilePage athletes={athletes} athleteId={selectedAthleteId} navigateTo={navigateTo} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} onSave={saveAthlete} onDelete={deleteAthlete} saving={saving} />}
           {effectivePage === 'reporting' && <ReportingPage athletes={athletes} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} />}
 
@@ -1648,24 +1704,44 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
   );
 };
 
-const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, teamStructure, defaultTeam, onSaveDefaultTeam, selectedDate, onDateChange, onSaveSessionPlan, saving }: any) => {
+const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigateTo, athletes, drillTypes, teamStructure, defaultTeam, onSaveDefaultTeam, selectedDate, onDateChange, onSaveSessionPlan, saving, getWeekDates }: any) => {
   const typedAthletes: Athlete[] = athletes;
-  const typedDrills: Drill[] = drills;
   const typedDrillTypes: DrillType[] = drillTypes;
   const typedTeamStructure: TeamPosition[] = teamStructure;
+
   const [expandedDrill, setExpandedDrill] = useState<string | null>(null);
   const [editingTeam, setEditingTeam] = useState<Drill | null>(null);
   const [editingDefaultTeam, setEditingDefaultTeam] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+  const [savingDay, setSavingDay] = useState<string | null>(null);
   const [tempDefaultTeam, setTempDefaultTeam] = useState(defaultTeam);
+
+  // Week state
+  const today = new Date().toISOString().split('T')[0];
+  const weekDates = useMemo(() => getWeekDates(selectedDate), [selectedDate]);
+  const [activeDay, setActiveDay] = useState(selectedDate);
+
+  // Sync activeDay when week changes
+  useEffect(() => {
+    if (!weekDates.includes(activeDay)) setActiveDay(weekDates[0]);
+  }, [weekDates.join(',')]);
+
+  // Per-day drills from weekDrills map — fall back to empty array
+  const dayDrills: Drill[] = weekDrills[activeDay] || [];
+  const setDayDrills = (newDrills: Drill[]) => {
+    setWeekDrills((prev: any) => ({ ...prev, [activeDay]: newDrills }));
+  };
 
   const getPositionsForDrill = (drill: Drill) => typedDrillTypes.find(dt => dt.name === drill.type)?.positions || typedTeamStructure.map(p => p.number);
 
-  const handleSave = async () => {
-    if (typedDrills.length > 0) {
-      await onSaveSessionPlan(selectedDate, typedDrills);
+  const handleSaveDay = async () => {
+    setSavingDay(activeDay);
+    try {
+      await onSaveSessionPlan(activeDay, dayDrills);
       setShowSaveSuccess(true);
       setTimeout(() => setShowSaveSuccess(false), 2000);
+    } finally {
+      setSavingDay(null);
     }
   };
 
@@ -1674,8 +1750,15 @@ const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, 
     setEditingDefaultTeam(false);
   };
 
-  const today = new Date().toISOString().split('T')[0];
-  const isToday = selectedDate === today;
+  const totalMinutes = (dlist: Drill[]) => dlist.reduce((s, d) => s + (d.duration || 0), 0);
+  const fmtTime = (mins: number) => mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60 > 0 ? (mins % 60) + 'm' : ''}`.trim() : `${mins}m`;
+
+  const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const fmtDayNum = (d: string) => new Date(d + 'T00:00:00').getDate();
+  const fmtWC = (d: string) => {
+    const mon = new Date(d + 'T00:00:00');
+    return 'w/c ' + mon.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  };
 
   if (editingDefaultTeam) {
     return <TeamSelectionModal athletes={typedAthletes} team1={tempDefaultTeam.team1} setTeam1={(t: any) => setTempDefaultTeam((prev: any) => ({...prev, team1: t}))} team2={tempDefaultTeam.team2} setTeam2={(t: any) => setTempDefaultTeam((prev: any) => ({...prev, team2: t}))} subs1={tempDefaultTeam.subs1} setSubs1={(t: any) => setTempDefaultTeam((prev: any) => ({...prev, subs1: t}))} subs2={tempDefaultTeam.subs2} setSubs2={(t: any) => setTempDefaultTeam((prev: any) => ({...prev, subs2: t}))} onClearAll={() => setTempDefaultTeam({ team1: {}, team2: {}, subs1: {}, subs2: {} })} onBack={handleSaveDefaultTeam} positions={typedTeamStructure.map(p => p.number)} teamStructure={typedTeamStructure} title="Edit Default Team" />;
@@ -1684,58 +1767,98 @@ const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, 
   if (editingTeam) {
     const drillPositions = getPositionsForDrill(editingTeam);
     const stripToPos = (obj: any) => Object.fromEntries(Object.entries(obj || {}).filter(([pos]) => drillPositions.includes(Number(pos))));
-    return <TeamSelectionModal athletes={typedAthletes} team1={editingTeam.team1 || {}} setTeam1={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, team1: t} : d)); setEditingTeam((prev: any) => ({...prev, team1: t})); }} team2={editingTeam.team2 || {}} setTeam2={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, team2: t} : d)); setEditingTeam((prev: any) => ({...prev, team2: t})); }} subs1={editingTeam.subs1 || {}} setSubs1={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, subs1: t} : d)); setEditingTeam((prev: any) => ({...prev, subs1: t})); }} subs2={editingTeam.subs2 || {}} setSubs2={(t: any) => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, subs2: t} : d)); setEditingTeam((prev: any) => ({...prev, subs2: t})); }} onClearAll={() => { const empty = {team1:{},team2:{},subs1:{},subs2:{}}; setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, ...empty} : d)); setEditingTeam((prev: any) => ({...prev, ...empty})); }} onBack={() => { setDrills(typedDrills.map(d => d.id === editingTeam.id ? {...d, team1: stripToPos(d.team1), team2: stripToPos(d.team2), subs1: stripToPos(d.subs1), subs2: stripToPos(d.subs2)} : d)); setEditingTeam(null); }} positions={drillPositions} teamStructure={typedTeamStructure} title="Edit Team" />;
+    return <TeamSelectionModal athletes={typedAthletes}
+      team1={editingTeam.team1 || {}} setTeam1={(t: any) => { setDayDrills(dayDrills.map(d => d.id === editingTeam.id ? {...d, team1: t} : d)); setEditingTeam((prev: any) => ({...prev, team1: t})); }}
+      team2={editingTeam.team2 || {}} setTeam2={(t: any) => { setDayDrills(dayDrills.map(d => d.id === editingTeam.id ? {...d, team2: t} : d)); setEditingTeam((prev: any) => ({...prev, team2: t})); }}
+      subs1={editingTeam.subs1 || {}} setSubs1={(t: any) => { setDayDrills(dayDrills.map(d => d.id === editingTeam.id ? {...d, subs1: t} : d)); setEditingTeam((prev: any) => ({...prev, subs1: t})); }}
+      subs2={editingTeam.subs2 || {}} setSubs2={(t: any) => { setDayDrills(dayDrills.map(d => d.id === editingTeam.id ? {...d, subs2: t} : d)); setEditingTeam((prev: any) => ({...prev, subs2: t})); }}
+      onClearAll={() => { const empty = {team1:{},team2:{},subs1:{},subs2:{}}; setDayDrills(dayDrills.map(d => d.id === editingTeam.id ? {...d, ...empty} : d)); setEditingTeam((prev: any) => ({...prev, ...empty})); }}
+      onBack={() => { setDayDrills(dayDrills.map(d => d.id === editingTeam.id ? {...d, team1: stripToPos(d.team1), team2: stripToPos(d.team2), subs1: stripToPos(d.subs1), subs2: stripToPos(d.subs2)} : d)); setEditingTeam(null); }}
+      positions={drillPositions} teamStructure={typedTeamStructure} title="Edit Team" />;
   }
+
+  const totMins = totalMinutes(dayDrills);
 
   return (
     <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6">
       {showSaveSuccess && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-[13px] font-medium">✓ Session plan saved</div>}
 
-      <div className="bg-white rounded-lg border border-slate-200 p-3 mb-3">
-        <div className="flex items-center gap-3">
-          <input type="date" value={selectedDate} onChange={e => onDateChange(e.target.value)}
-            className="flex-1 h-8 px-3 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500" />
-          {isToday && <span className="px-2 py-1 bg-green-50 text-green-700 border border-green-200 text-[11px] rounded font-medium">Today</span>}
+      {/* Week selector */}
+      <div className="bg-white rounded-lg border border-slate-200 p-3 mb-3 flex items-center gap-3">
+        <input type="date" value={weekDates[0]}
+          onChange={e => onDateChange(e.target.value)}
+          className="flex-1 h-8 px-3 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+        <span className="text-[12px] text-slate-400 whitespace-nowrap">{fmtWC(weekDates[0])}</span>
+      </div>
+
+      {/* Day tabs */}
+      <div className="bg-white rounded-lg border border-slate-200 mb-3 overflow-hidden">
+        <div className="grid grid-cols-7 divide-x divide-slate-100">
+          {weekDates.map((date, i) => {
+            const dayTotal = totalMinutes(weekDrills[date] || []);
+            const isActive = date === activeDay;
+            const isToday = date === today;
+            return (
+              <button key={date} onClick={() => setActiveDay(date)}
+                className={`flex flex-col items-center py-2.5 px-1 transition-colors ${isActive ? 'bg-slate-900 text-white' : 'hover:bg-slate-50 text-slate-600'}`}>
+                <span className={`text-[10px] font-semibold ${isActive ? 'text-white/60' : 'text-slate-400'}`}>{DAY_LABELS[i]}</span>
+                <span className={`text-[15px] font-bold leading-tight ${isToday && !isActive ? 'text-blue-600' : ''}`}>{fmtDayNum(date)}</span>
+                {dayTotal > 0 && (
+                  <span className={`text-[9px] mt-0.5 font-medium ${isActive ? 'text-white/70' : 'text-slate-400'}`}>{fmtTime(dayTotal)}</span>
+                )}
+                {(weekDrills[date] || []).length > 0 && dayTotal === 0 && (
+                  <span className={`w-1 h-1 rounded-full mt-1 ${isActive ? 'bg-white/60' : 'bg-slate-300'}`} />
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 
+      {/* Default team button */}
       <button onClick={() => { setTempDefaultTeam(defaultTeam); setEditingDefaultTeam(true); }}
-        className="w-full mb-3 h-10 bg-white border border-dashed border-slate-300 text-slate-500 rounded-lg hover:border-slate-400 hover:text-slate-700 text-[13px] font-medium flex items-center justify-center gap-2 transition-colors">
+        className="w-full mb-3 h-9 bg-white border border-dashed border-slate-300 text-slate-500 rounded-lg hover:border-slate-400 hover:text-slate-700 text-[12px] font-medium flex items-center justify-center gap-2 transition-colors">
         <Users className="w-3.5 h-3.5" />Edit Default Team
       </button>
 
+      {/* Drill list */}
       <div className="space-y-2 mb-24">
-        {typedDrills.length === 0 ? (
+        {dayDrills.length === 0 ? (
           <div className="bg-white rounded-lg border border-slate-200 p-10 text-center">
             <p className="text-slate-400 text-[13px]">No drills for this day</p>
-            <p className="text-slate-300 text-[11px] mt-1">Add a drill below to get started</p>
+            <p className="text-slate-300 text-[11px] mt-1">Add a drill or break below to get started</p>
           </div>
         ) : (
-          typedDrills.map(drill => (
-            <div key={drill.id} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-              <button onClick={() => setExpandedDrill(expandedDrill === drill.id ? null : drill.id)}
+          dayDrills.map(drill => (
+            <div key={drill.id} className={`bg-white rounded-lg border overflow-hidden ${drill.isBreak ? 'border-slate-200' : 'border-slate-200'}`}>
+              <button onClick={() => !drill.isBreak && setExpandedDrill(expandedDrill === drill.id ? null : drill.id)}
                 className="w-full px-4 py-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
-                <div className="text-left">
-                  <h3 className="text-[13px] font-medium text-slate-900">{drill.name}</h3>
-                  <p className="text-[11px] text-slate-400 mt-0.5">{drill.type}</p>
+                <div className="text-left flex items-center gap-2">
+                  {drill.isBreak && <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 rounded px-1.5 py-0.5 uppercase tracking-wider">Break</span>}
+                  <div>
+                    <h3 className="text-[13px] font-medium text-slate-900">{drill.name}</h3>
+                    {!drill.isBreak && <p className="text-[11px] text-slate-400 mt-0.5">{drill.type}</p>}
+                  </div>
                 </div>
-                {expandedDrill === drill.id ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                <div className="flex items-center gap-2">
+                  {drill.duration > 0 && (
+                    <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 rounded px-2 py-0.5">{drill.duration}m</span>
+                  )}
+                  {!drill.isBreak && (expandedDrill === drill.id ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />)}
+                  <button onClick={e => { e.stopPropagation(); setDayDrills(dayDrills.filter(d => d.id !== drill.id)); }}
+                    className="p-1 text-slate-300 hover:text-red-500 transition-colors">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </button>
-              {expandedDrill === drill.id && (
+              {!drill.isBreak && expandedDrill === drill.id && (
                 <div className="px-4 pb-4 border-t border-slate-100 bg-slate-50 pt-3 space-y-2 text-[13px]">
                   <p><span className="text-slate-400 text-[11px]">Intensity</span> <span className="text-slate-700 ml-1">{drill.intensity}</span></p>
                   {drill.notes && <p><span className="text-slate-400 text-[11px]">Notes</span> <span className="text-slate-700 ml-1">{drill.notes}</span></p>}
-                  {/* Read-only team grid — only shows positions that have at least one player assigned */}
+                  {/* Read-only team grid */}
                   {(() => {
                     const getName = (id: any) => typedAthletes.find(a => a.id === id)?.name || '';
-                    // Only include positions where at least one slot (t1/t2/s1/s2) has a real assignment
-                    const assignedPositions = typedTeamStructure
-                      .map(p => p.number)
-                      .filter(pos =>
-                        drill.team1?.[pos] || drill.team2?.[pos] ||
-                        drill.subs1?.[pos] || drill.subs2?.[pos]
-                      )
-                      .sort((a, b) => a - b);
+                    const assignedPositions = typedTeamStructure.map(p => p.number).filter(pos => drill.team1?.[pos] || drill.team2?.[pos] || drill.subs1?.[pos] || drill.subs2?.[pos]).sort((a, b) => a - b);
                     if (assignedPositions.length === 0) return null;
                     return (
                       <div className="mt-2 overflow-x-auto">
@@ -1746,10 +1869,8 @@ const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, 
                           <div className="text-center text-slate-400 pb-1">Sub</div>
                           <div className="text-center text-slate-400 pb-1">Team 2</div>
                           {assignedPositions.map(pos => {
-                            const t1 = getName(drill.team1?.[pos]);
-                            const t2 = getName(drill.team2?.[pos]);
-                            const s1 = getName(drill.subs1?.[pos]);
-                            const s2 = getName(drill.subs2?.[pos]);
+                            const t1 = getName(drill.team1?.[pos]); const t2 = getName(drill.team2?.[pos]);
+                            const s1 = getName(drill.subs1?.[pos]); const s2 = getName(drill.subs2?.[pos]);
                             return (
                               <React.Fragment key={pos}>
                                 <div className={`p-1 rounded truncate ${t1 ? 'bg-slate-100 text-slate-700' : 'bg-transparent text-slate-300'}`}>{t1 || '–'}</div>
@@ -1769,27 +1890,38 @@ const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, 
                       className="flex-1 h-8 bg-slate-900 text-white rounded text-[12px] font-medium flex items-center justify-center gap-1.5 hover:bg-slate-700 transition-colors">
                       <Users className="w-3.5 h-3.5" />Edit Team
                     </button>
-                    <button onClick={() => setDrills(typedDrills.filter(d => d.id !== drill.id))}
-                      className="h-8 px-3 bg-red-50 text-red-600 border border-red-100 rounded text-[12px] hover:bg-red-100 transition-colors">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
                   </div>
                 </div>
               )}
             </div>
           ))
         )}
+        {/* Total session time */}
+        {totMins > 0 && (
+          <div className="flex items-center justify-between px-4 py-2 bg-slate-50 rounded-lg border border-slate-200">
+            <span className="text-[12px] text-slate-500 font-medium">Total session time</span>
+            <span className="text-[14px] font-bold text-slate-800">{fmtTime(totMins)}</span>
+          </div>
+        )}
       </div>
 
+      {/* Bottom bar */}
       <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t border-slate-200 p-4">
         <div className="max-w-md md:max-w-lg mx-auto flex gap-2">
           <button onClick={() => navigateTo('add-drill')}
             className="flex-1 h-10 bg-blue-600 text-white rounded-lg text-[13px] font-medium flex items-center justify-center gap-1.5 hover:bg-blue-700 transition-colors">
             <Plus className="w-3.5 h-3.5" />Add Drill
           </button>
-          <button onClick={handleSave} disabled={typedDrills.length === 0}
-            className={`flex-1 h-10 rounded-lg text-[13px] font-medium transition-colors ${typedDrills.length > 0 ? 'bg-slate-900 text-white hover:bg-slate-700' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>
-            Save
+          <button onClick={() => {
+              const breakDrill: Drill = { id: String(Date.now()), name: 'Break', type: '', intensity: '', notes: '', duration: 15, isBreak: true, team1: {}, team2: {}, subs1: {}, subs2: {} };
+              setDayDrills([...dayDrills, breakDrill]);
+            }}
+            className="h-10 px-4 bg-slate-100 text-slate-600 rounded-lg text-[13px] font-medium flex items-center gap-1.5 hover:bg-slate-200 transition-colors">
+            <Plus className="w-3.5 h-3.5" />Break
+          </button>
+          <button onClick={handleSaveDay} disabled={savingDay === activeDay}
+            className={`flex-1 h-10 rounded-lg text-[13px] font-medium transition-colors ${savingDay === activeDay ? 'bg-slate-100 text-slate-400' : 'bg-slate-900 text-white hover:bg-slate-700'}`}>
+            {savingDay === activeDay ? 'Saving…' : 'Save'}
           </button>
         </div>
       </div>
@@ -1797,7 +1929,8 @@ const SessionPlanPage = ({ drills, setDrills, navigateTo, athletes, drillTypes, 
   );
 };
 
-const AddDrillPage = ({ drills, setDrills, navigateTo, drillTypes, defaultTeam, athletes, teamStructure }: any) => {
+
+const AddDrillPage = ({ drills, setDrills, weekDrills, setWeekDrills, selectedDate, navigateTo, drillTypes, defaultTeam, athletes, teamStructure }: any) => {
   const typedDrills: Drill[] = drills;
   const typedDrillTypes: DrillType[] = drillTypes;
   const typedAthletes: Athlete[] = athletes;
@@ -1806,6 +1939,7 @@ const AddDrillPage = ({ drills, setDrills, navigateTo, drillTypes, defaultTeam, 
   const [type, setType] = useState(typedDrillTypes[0]?.name || '');
   const [notes, setNotes] = useState('');
   const [intensity, setIntensity] = useState('Low');
+  const [duration, setDuration] = useState<number>(0);
   const [team1, setTeam1] = useState({...defaultTeam.team1});
   const [team2, setTeam2] = useState({...defaultTeam.team2});
   const [subs1, setSubs1] = useState({...defaultTeam.subs1});
@@ -1825,22 +1959,28 @@ const AddDrillPage = ({ drills, setDrills, navigateTo, drillTypes, defaultTeam, 
   const handleSave = () => {
     if (!name.trim()) { setNameError(true); return; }
     const resolvedType = type || typedDrillTypes[0]?.name || 'General';
-    // Strip team objects to only the positions relevant to this drill type,
-    // so the accordion grid never shows unrelated default-team slots.
     const drillPositions = getPositionsForDrillType();
     const stripToPositions = (obj: Record<string, any>) =>
       Object.fromEntries(Object.entries(obj).filter(([pos]) => drillPositions.includes(Number(pos))));
-    setDrills([...drills, {
+    const newDrill: Drill = {
       id: String(Date.now()),
       name: name.trim(),
       type: resolvedType,
       notes,
       intensity,
+      duration,
+      isBreak: false,
       team1: stripToPositions(team1),
       team2: stripToPositions(team2),
       subs1: stripToPositions(subs1),
       subs2: stripToPositions(subs2),
-    }]);
+    };
+    // Add to weekDrills for the selected day
+    if (setWeekDrills && selectedDate) {
+      setWeekDrills((prev: any) => ({ ...prev, [selectedDate]: [...(prev[selectedDate] || []), newDrill] }));
+    } else {
+      setDrills([...drills, newDrill]);
+    }
     navigateTo('session-plan');
   };
 
@@ -1918,6 +2058,23 @@ const AddDrillPage = ({ drills, setDrills, navigateTo, drillTypes, defaultTeam, 
           <label className="block text-[11px] font-medium text-slate-500 mb-1.5">Notes</label>
           <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional notes…"
             className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-900 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none" rows={3} />
+        </div>
+        <div>
+          <label className="block text-[11px] font-medium text-slate-500 mb-1.5">Duration (minutes)</label>
+          <div className="flex items-center gap-2">
+            <input type="number" min="0" max="300" step="5" value={duration || ''}
+              onChange={e => setDuration(Math.max(0, parseInt(e.target.value) || 0))}
+              placeholder="0"
+              className="w-28 h-9 px-3 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-900 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+            <div className="flex gap-1">
+              {[10, 15, 20, 30, 45, 60].map(m => (
+                <button key={m} type="button" onClick={() => setDuration(m)}
+                  className={`h-7 px-2 rounded text-[11px] font-medium transition-colors ${duration === m ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                  {m}m
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
         <div>
           <label className="block text-[11px] font-medium text-slate-500 mb-1.5">Team</label>
@@ -2282,22 +2439,20 @@ const AvailabilityReportTab = ({ athletes, availabilityRecords, seasonDates, tea
           </div>
         </div>
 
-        {/* Period average summary strip */}
+        {/* Period average: available % headline only */}
         {periodAverages && (
-          <div className="grid grid-cols-3 gap-3 mb-4">
-            {[
-              { label: 'Avg Available',   value: periodAverages.available,   bar: 'bg-green-500', text: 'text-green-700', bg: 'bg-green-50',  border: 'border-green-100' },
-              { label: 'Avg Modified',    value: periodAverages.modified,    bar: 'bg-amber-500', text: 'text-amber-700', bg: 'bg-amber-50',  border: 'border-amber-100' },
-              { label: 'Avg Unavailable', value: periodAverages.unavailable, bar: 'bg-red-500',   text: 'text-red-700',   bg: 'bg-red-50',    border: 'border-red-100'   },
-            ].map(k => (
-              <div key={k.label} className={`rounded-lg border ${k.bg} ${k.border} px-3 py-2.5 flex items-center justify-between`}>
-                <div>
-                  <div className={`text-xl font-bold leading-none ${k.text}`}>{k.value}%</div>
-                  <div className="text-[10px] text-slate-400 mt-1">{k.label}</div>
-                </div>
-                <div className={`w-1 h-6 rounded-sm ${k.bar}`} />
-              </div>
-            ))}
+          <div className="flex items-center gap-4 mb-4 p-3 bg-green-50 border border-green-100 rounded-lg">
+            <div>
+              <div className="text-3xl font-bold text-green-700 leading-none">{periodAverages.available}%</div>
+              <div className="text-[11px] text-green-600 mt-1 font-medium">Avg Available</div>
+            </div>
+            <div className="flex-1 h-2 bg-green-100 rounded-full overflow-hidden">
+              <div className="h-full bg-green-500 rounded-full" style={{ width: periodAverages.available + '%' }} />
+            </div>
+            <div className="text-right text-[11px] text-slate-400">
+              <div>{chartData.length} days</div>
+              <div>{filteredAthleteIds.length} athletes</div>
+            </div>
           </div>
         )}
 
@@ -2327,7 +2482,7 @@ const AvailabilityReportTab = ({ athletes, availabilityRecords, seasonDates, tea
             {chartData.length <= 60 && showUnavailable && (chartData as any[]).map((d: any, i) => <circle key={'u'+i} cx={pad.left + (i / Math.max(chartData.length - 1, 1)) * iW} cy={pad.top + iH - (d.unavailable / 100) * iH} r="4" fill="#ef4444" />)}
           </svg>
         )}
-        <p className="text-xs text-slate-400 text-center mt-2">{chartData.length} days · {filteredAthleteIds.length} athletes</p>
+
       </div>
     </>
   );
