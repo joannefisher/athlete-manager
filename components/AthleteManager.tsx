@@ -1870,7 +1870,7 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
         </button>
         <button onClick={() => setShowSummary(true)}
           className="h-9 px-3 bg-white border border-slate-200 text-slate-600 rounded-lg text-[12px] font-medium flex items-center gap-1.5 hover:bg-slate-50 hover:border-slate-300 transition-colors whitespace-nowrap">
-          <Users className="w-3.5 h-3.5" />Summary
+          <Users className="w-3.5 h-3.5" />Drill Availability
         </button>
         <button onClick={() => { setTempDefaultTeam(defaultTeam); setEditingDefaultTeam(true); }}
           className="h-9 px-3 bg-white border border-dashed border-slate-300 text-slate-500 rounded-lg text-[12px] font-medium flex items-center gap-1.5 hover:border-slate-400 hover:text-slate-700 transition-colors whitespace-nowrap">
@@ -2137,7 +2137,7 @@ const SessionPlayerSummary = ({ dayDrills, athletes, onClose }: any) => {
   return (
     <div className="max-w-md md:max-w-5xl mx-auto p-4 md:p-6 pb-24">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-[15px] font-semibold text-slate-900">Session Player Summary</h2>
+        <h2 className="text-[15px] font-semibold text-slate-900">Drill Availability</h2>
         <button onClick={onClose} className="h-8 px-4 bg-white border border-slate-200 text-slate-600 rounded-lg text-[12px] font-medium hover:bg-slate-50 transition-colors">← Back</button>
       </div>
 
