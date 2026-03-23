@@ -1355,10 +1355,8 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
                             <div key={inj.id} className="flex items-start gap-1.5 p-1.5 bg-red-50 border border-red-100 rounded text-[11px] text-red-700">
                               <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0 text-red-400" />
                               <span className="flex-1">{inj.bodyPart}{inj.notes ? ` — ${inj.notes}` : ''}{inj.returnDate ? <span className="text-slate-400 ml-1">ETR {fmtDate(inj.returnDate)}</span> : <span className="text-red-500 font-medium ml-1">Season</span>}</span>
-                              {canAddInjury(role) && <>
-                                <button onClick={() => openEditInjury(a.id, inj)} className="p-0.5 hover:bg-red-100 rounded flex-shrink-0"><Edit2 className="w-2.5 h-2.5 text-red-500" /></button>
-                                <button onClick={() => removeInjury(a.id, inj.id)} className="p-0.5 hover:bg-red-100 rounded flex-shrink-0"><X className="w-2.5 h-2.5 text-red-400" /></button>
-                              </>}
+                              <button onClick={() => openEditInjury(a.id, inj)} className="p-0.5 hover:bg-red-100 rounded flex-shrink-0"><Edit2 className="w-2.5 h-2.5 text-red-500" /></button>
+                              <button onClick={() => removeInjury(a.id, inj.id)} className="p-0.5 hover:bg-red-100 rounded flex-shrink-0"><X className="w-2.5 h-2.5 text-red-400" /></button>
                             </div>
                           ))}
                           {a.notes && a.isPublic && (
@@ -1373,19 +1371,15 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
                             </div>
                           )}
                           <div className="flex gap-1 flex-wrap">
-                            {canAddInjury(role) && (
-                              <button onClick={() => openAddInjury(a.id)}
-                                className="flex items-center gap-1 px-2 h-6 bg-red-50 text-red-600 border border-red-100 rounded text-[10px] font-medium hover:bg-red-100 transition-colors">
-                                <Plus className="w-2.5 h-2.5" />Injury
-                              </button>
-                            )}
-                            {canAddPrivateNote(role) && !(a.isPublic && !canEditPublicNote(role)) && (
-                              <button onClick={() => openNoteModal(a)}
-                                className={`flex items-center gap-1 px-2 h-6 rounded text-[10px] font-medium transition-colors border ${a.notes ? 'bg-blue-50 text-blue-600 border-blue-100 hover:bg-blue-100' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}>
-                                <MessageSquare className="w-2.5 h-2.5" />
-                                {a.notes ? (a.isPublic ? 'Edit Note' : 'Edit Private Note') : 'Add Note'}
-                              </button>
-                            )}
+                            <button onClick={() => openAddInjury(a.id)}
+                              className="flex items-center gap-1 px-2 h-6 bg-red-50 text-red-600 border border-red-100 rounded text-[10px] font-medium hover:bg-red-100 transition-colors">
+                              <Plus className="w-2.5 h-2.5" />Injury
+                            </button>
+                            <button onClick={() => openNoteModal(a)}
+                              className={`flex items-center gap-1 px-2 h-6 rounded text-[10px] font-medium transition-colors border ${a.notes ? 'bg-blue-50 text-blue-600 border-blue-100 hover:bg-blue-100' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}>
+                              <MessageSquare className="w-2.5 h-2.5" />
+                              {a.notes ? (a.isPublic ? 'Edit Note' : 'Edit Private Note') : 'Add Note'}
+                            </button>
                           </div>
                         </div>
                       </td>
