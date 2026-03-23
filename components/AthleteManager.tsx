@@ -143,6 +143,143 @@ const StatusSelect = ({ value, onChange, className = '' }: { value: string; onCh
   );
 };
 
+// ── Login Screen ─────────────────────────────────────────────────────────────
+const LoginScreen = () => {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [mode, setMode] = useState<'signin' | 'reset'>('signin');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+
+  const handleSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) setError(error.message);
+    setLoading(false);
+  };
+
+  const handleReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/auth/callback`,
+    });
+    if (error) setError(error.message);
+    else setMessage('Check your email for a password reset link.');
+    setLoading(false);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+      <div className="w-full max-w-sm">
+        {/* Logo / app name */}
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-12 h-12 bg-blue-600 rounded-xl mb-4">
+            <Users className="w-6 h-6 text-white" />
+          </div>
+          <h1 className="text-2xl font-bold text-white">Athlete Manager</h1>
+          <p className="text-slate-400 text-sm mt-1">Sign in to your account</p>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-2xl p-6">
+          {mode === 'signin' ? (
+            <form onSubmit={handleSignIn} className="space-y-4">
+              <div>
+                <label className="block text-[12px] font-medium text-slate-600 mb-1.5">Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  required
+                  autoComplete="email"
+                  placeholder="you@club.com"
+                  className="w-full h-10 px-3 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-[12px] font-medium text-slate-600 mb-1.5">Password</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  required
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                  className="w-full h-10 px-3 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              {error && (
+                <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-100 rounded-lg">
+                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                  <p className="text-[12px] text-red-700">{error}</p>
+                </div>
+              )}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full h-10 bg-blue-600 text-white rounded-lg text-[13px] font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {loading ? 'Signing in…' : 'Sign in'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setMode('reset'); setError(''); }}
+                className="w-full text-center text-[12px] text-slate-400 hover:text-slate-600 transition-colors">
+                Forgot password?
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleReset} className="space-y-4">
+              <div>
+                <button type="button" onClick={() => { setMode('signin'); setMessage(''); setError(''); }}
+                  className="flex items-center gap-1.5 text-[12px] text-slate-500 hover:text-slate-700 mb-4 transition-colors">
+                  <ArrowLeft className="w-3.5 h-3.5" />Back to sign in
+                </button>
+                <label className="block text-[12px] font-medium text-slate-600 mb-1.5">Email address</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  required
+                  placeholder="you@club.com"
+                  className="w-full h-10 px-3 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              {error && (
+                <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-100 rounded-lg">
+                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                  <p className="text-[12px] text-red-700">{error}</p>
+                </div>
+              )}
+              {message && (
+                <div className="p-3 bg-green-50 border border-green-100 rounded-lg">
+                  <p className="text-[12px] text-green-700">{message}</p>
+                </div>
+              )}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full h-10 bg-slate-900 text-white rounded-lg text-[13px] font-semibold hover:bg-slate-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                Send reset link
+              </button>
+            </form>
+          )}
+        </div>
+
+        <p className="text-center text-[11px] text-slate-500 mt-6">
+          Contact your administrator to create an account
+        </p>
+      </div>
+    </div>
+  );
+};
+
+
 const AthleteManager = () => {
   const [currentPage, setCurrentPage] = useState('home');
   const [showMenu, setShowMenu] = useState(false);
@@ -786,15 +923,47 @@ const AthleteManager = () => {
     await loadWeekDrills(getWeekDates(newDate));
   };
 
-  const [role, setRole] = useState<Role>('Admin');
-  const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
+  const [role, setRole] = useState<Role>('Coach'); // default until profile loads
+  const [clubId, setClubId] = useState<string | null>(null);
+  const [authUser, setAuthUser] = useState<any>(null);
+  const [authLoading, setAuthLoading] = useState(true);
 
+  // Load real role + club from user_profiles on auth change
   useEffect(() => {
-    if (!roleDropdownOpen) return;
-    const close = () => setRoleDropdownOpen(false);
-    document.addEventListener('click', close);
-    return () => document.removeEventListener('click', close);
-  }, [roleDropdownOpen]);
+    const loadProfile = async (userId: string) => {
+      const { data } = await supabase
+        .from('user_profiles')
+        .select('club_id, role, full_name')
+        .eq('id', userId)
+        .single();
+      if (data) {
+        setRole(data.role as Role);
+        setClubId(data.club_id);
+      }
+      setAuthLoading(false);
+    };
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setAuthUser(session.user);
+        loadProfile(session.user.id);
+      } else {
+        setAuthLoading(false);
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setAuthUser(session.user);
+        loadProfile(session.user.id);
+      } else {
+        setAuthUser(null);
+        setAuthLoading(false);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   const navigateTo = (page: string) => { setCurrentPage(page); setShowMenu(false); };
   const getPageTitle = () => ({ home: 'Home', availability: 'Availability', 'session-plan': 'Session Plan', 'add-drill': 'Create Drill', 'athlete-profile': 'Athlete Profile', setup: 'Setup', reporting: 'Reporting' }[currentPage] || 'Team');
@@ -815,35 +984,53 @@ const AthleteManager = () => {
   const allowedPages = ROLE_ACCESS[role];
   const effectivePage = allowedPages.includes(currentPage) ? currentPage : allowedPages[0];
 
-  const RoleDropdown = ({ dark = false }: { dark?: boolean }) => {
+  const UserInfo = ({ dark = false }: { dark?: boolean }) => {
+    const handleSignOut = async () => {
+      await supabase.auth.signOut();
+      setAuthUser(null);
+    };
+    const email = authUser?.email || '';
+    const initials = email ? email[0].toUpperCase() : '?';
     if (!dark) {
       return (
-        <select value={role} onChange={e => { const r = e.target.value as Role; setRole(r); setCurrentPage(ROLE_ACCESS[r][0]); }}
-          className="text-xs border border-slate-200 rounded px-2 py-1.5 bg-white text-slate-700 font-medium focus:ring-2 focus:ring-blue-500">
-          {(['Admin', 'S&C', 'Physio', 'Coach'] as Role[]).map(r => <option key={r} value={r}>{r}</option>)}
-        </select>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-slate-500">{role}</span>
+          <button onClick={handleSignOut}
+            className="text-xs border border-slate-200 rounded px-2 py-1.5 bg-white text-slate-600 hover:bg-slate-50 transition-colors">
+            Sign out
+          </button>
+        </div>
       );
     }
     return (
-      <div className="relative">
-        <button onClick={() => setRoleDropdownOpen(o => !o)}
-          className="w-full flex items-center justify-between px-2.5 py-1.5 bg-white/[0.07] border border-white/10 rounded text-[12px] text-white/65 cursor-pointer">
-          {role}
-          <ChevronDown className={`w-3 h-3 text-white/30 transition-transform ${roleDropdownOpen ? 'rotate-180' : ''}`} />
-        </button>
-        {roleDropdownOpen && (
-          <div className="absolute bottom-full left-0 right-0 mb-1 bg-slate-800 border border-white/10 rounded shadow-xl overflow-hidden z-50">
-            {(['Admin', 'S&C', 'Physio', 'Coach'] as Role[]).map(r => (
-              <button key={r} onClick={() => { setRole(r); setCurrentPage(ROLE_ACCESS[r][0]); setRoleDropdownOpen(false); }}
-                className={`w-full text-left px-3 py-2 text-[12px] transition-colors ${role === r ? 'bg-white/10 text-white' : 'text-white/55 hover:bg-white/[0.06] hover:text-white/80'}`}>
-                {r}
-              </button>
-            ))}
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2 px-2.5 py-1.5">
+          <div className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-[11px] font-semibold text-white shrink-0">{initials}</div>
+          <div className="min-w-0">
+            <p className="text-[11px] text-white/70 truncate">{email}</p>
+            <p className="text-[10px] text-white/40">{role}</p>
           </div>
-        )}
+        </div>
+        <button onClick={handleSignOut}
+          className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[12px] text-white/50 hover:text-white/80 hover:bg-white/[0.06] rounded transition-colors">
+          <X className="w-3 h-3" />Sign out
+        </button>
       </div>
     );
   };
+
+  // Auth gate — show login screen if no session
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-white/30 animate-spin" />
+      </div>
+    );
+  }
+
+  if (!authUser) {
+    return <LoginScreen />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
@@ -882,7 +1069,7 @@ const AthleteManager = () => {
         {/* Role */}
         <div className="p-3 border-t border-white/[0.06]">
           <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] mb-2">Viewing as</p>
-          <RoleDropdown dark={true} />
+          <UserInfo dark={true} />
         </div>
       </aside>
 
@@ -894,7 +1081,7 @@ const AthleteManager = () => {
           <div className="flex items-center justify-between max-w-md mx-auto">
             <button onClick={() => setShowMenu(!showMenu)} className="p-1.5 hover:bg-slate-100 rounded-lg"><Menu className="w-5 h-5 text-slate-600" /></button>
             <h1 className="text-[15px] font-semibold text-slate-900">{getPageTitle()}</h1>
-            <RoleDropdown dark={false} />
+            <UserInfo dark={false} />
           </div>
         </header>
 
@@ -928,7 +1115,7 @@ const AthleteManager = () => {
               </div>
               <div className="p-3 border-t border-white/[0.06]">
                 <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] mb-2">Viewing as</p>
-                <RoleDropdown dark={true} />
+                <UserInfo dark={true} />
               </div>
             </div>
           </div>
