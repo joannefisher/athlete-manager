@@ -984,7 +984,7 @@ const InjuryDisplay = ({ athlete }: { athlete: Athlete }) => {
   );
 };
 
-const HomePage = ({ athletes, navigateTo, setSelectedAthleteId, teamStructure }: { athletes: Athlete[], navigateTo: (page: string) => void, setSelectedAthleteId: (id: string | null) => void, teamStructure: TeamPosition[] }) => {
+const HomePage = ({ athletes, navigateTo, setSelectedAthleteId, teamStructure, role }: { athletes: Athlete[], navigateTo: (page: string) => void, setSelectedAthleteId: (id: string | null) => void, teamStructure: TeamPosition[], role: Role }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [availableOnly, setAvailableOnly] = useState(false);
   const [selectedGroups, setSelectedGroups] = useState<string[]>(['Forward', 'Back']);
