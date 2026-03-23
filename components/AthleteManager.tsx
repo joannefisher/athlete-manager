@@ -1010,6 +1010,7 @@ const HomePage = ({ athletes, navigateTo, setSelectedAthleteId, teamStructure }:
     setSelectedPositionNames(prev => prev.includes(posName) ? prev.filter(n => n !== posName) : [...prev, posName]);
   };
 
+  const getSurname = (n: string) => { const p = n.trim().split(' '); return p.length > 1 ? p[p.length - 1].toLowerCase() : n.toLowerCase(); };
   const filtered = athletes.filter(a => {
     if (!a.name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
     if (availableOnly && a.status === 'Unavailable') return false;
@@ -1020,7 +1021,7 @@ const HomePage = ({ athletes, navigateTo, setSelectedAthleteId, teamStructure }:
       if (selectedGroups.length < 2 && !groups.some(g => selectedGroups.includes(g as string))) return false;
     }
     return true;
-  });
+  }).sort((a, b) => getSurname(a.name).localeCompare(getSurname(b.name)));
 
   const getStatusDotColor = (s: string) => s === 'Available' ? 'bg-green-500' : s === 'Modified' ? 'bg-amber-500' : 'bg-red-500';
 
@@ -1562,7 +1563,8 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
     setTimeout(() => setShowSaveSuccess(false), 2000);
   };
 
-  const filteredAthletes = displayAthletes.filter(a => a.name.toLowerCase().includes(searchTerm.toLowerCase()));
+  const getSurnameAv = (n: string) => { const p = n.trim().split(' '); return p.length > 1 ? p[p.length - 1].toLowerCase() : n.toLowerCase(); };
+  const filteredAthletes = displayAthletes.filter(a => a.name.toLowerCase().includes(searchTerm.toLowerCase())).sort((a, b) => getSurnameAv(a.name).localeCompare(getSurnameAv(b.name)));
 
   if (showEOD) {
     return (
@@ -1717,6 +1719,8 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [savingDay, setSavingDay] = useState<string | null>(null);
   const [showSummary, setShowSummary] = useState(false);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [tempDefaultTeam, setTempDefaultTeam] = useState(defaultTeam);
 
   // Week state
@@ -1786,11 +1790,34 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
 
   const totMins = totalMinutes(dayDrills);
 
+  // Drag handlers
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    setDragIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(index));
+  };
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverIndex(index);
+  };
+  const handleDrop = (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    if (dragIndex === null || dragIndex === dropIndex) { setDragIndex(null); setDragOverIndex(null); return; }
+    const next = [...dayDrills];
+    const [moved] = next.splice(dragIndex, 1);
+    next.splice(dropIndex, 0, moved);
+    setDayDrills(next);
+    setDragIndex(null);
+    setDragOverIndex(null);
+  };
+  const handleDragEnd = () => { setDragIndex(null); setDragOverIndex(null); };
+
   return (
     <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6">
       {showSaveSuccess && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-[13px] font-medium">✓ Session plan saved</div>}
 
-      {/* Week selector — picks specific date, jumps to that week AND that day */}
+      {/* Week selector */}
       <div className="bg-white rounded-lg border border-slate-200 p-3 mb-3 flex items-center gap-3">
         <input type="date" value={activeDay}
           onChange={e => {
@@ -1826,45 +1853,82 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
         </div>
       </div>
 
-      {/* Default team button */}
-      <button onClick={() => { setTempDefaultTeam(defaultTeam); setEditingDefaultTeam(true); }}
-        className="w-full mb-3 h-9 bg-white border border-dashed border-slate-300 text-slate-500 rounded-lg hover:border-slate-400 hover:text-slate-700 text-[12px] font-medium flex items-center justify-center gap-2 transition-colors">
-        <Users className="w-3.5 h-3.5" />Edit Default Team
-      </button>
+      {/* Toolbar: action buttons inline above drill list */}
+      <div className="flex gap-2 mb-3">
+        <button onClick={() => navigateTo('add-drill')}
+          className="flex-1 h-9 bg-white border border-slate-200 text-slate-700 rounded-lg text-[12px] font-medium flex items-center justify-center gap-1.5 hover:bg-slate-50 hover:border-slate-300 transition-colors">
+          <Plus className="w-3.5 h-3.5" />Add Drill
+        </button>
+        <button onClick={() => {
+            const breakDrill: Drill = { id: String(Date.now()), name: 'Break', type: 'Break', intensity: '', notes: '', duration: 0, isBreak: true, team1: {}, team2: {}, subs1: {}, subs2: {} };
+            setDayDrills([...dayDrills, breakDrill]);
+          }}
+          className="h-9 px-3 bg-white border border-slate-200 text-slate-600 rounded-lg text-[12px] font-medium flex items-center gap-1.5 hover:bg-slate-50 hover:border-slate-300 transition-colors">
+          <Plus className="w-3.5 h-3.5" />Break
+        </button>
+        <button onClick={() => setShowSummary(true)}
+          className="h-9 px-3 bg-white border border-slate-200 text-slate-600 rounded-lg text-[12px] font-medium flex items-center gap-1.5 hover:bg-slate-50 hover:border-slate-300 transition-colors whitespace-nowrap">
+          <Users className="w-3.5 h-3.5" />Summary
+        </button>
+        <button onClick={() => { setTempDefaultTeam(defaultTeam); setEditingDefaultTeam(true); }}
+          className="h-9 px-3 bg-white border border-dashed border-slate-300 text-slate-500 rounded-lg text-[12px] font-medium flex items-center gap-1.5 hover:border-slate-400 hover:text-slate-700 transition-colors whitespace-nowrap">
+          <Users className="w-3.5 h-3.5" />Default Team
+        </button>
+      </div>
 
       {/* Drill list */}
-      <div className="space-y-2 mb-24">
+      <div className="space-y-1.5 mb-24">
         {dayDrills.length === 0 ? (
           <div className="bg-white rounded-lg border border-slate-200 p-10 text-center">
             <p className="text-slate-400 text-[13px]">No drills for this day</p>
-            <p className="text-slate-300 text-[11px] mt-1">Add a drill or break below to get started</p>
+            <p className="text-slate-300 text-[11px] mt-1">Add a drill or break to get started</p>
           </div>
         ) : (
-          dayDrills.map(drill => (
-            <div key={drill.id} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-              {/* Unified row: [label/expand area flex-1] | [dur input] [min] [chevron or spacer] [trash] */}
-              <div className="h-12 px-4 flex items-center gap-3">
+          dayDrills.map((drill, index) => (
+            <div key={drill.id}
+              draggable
+              onDragStart={e => handleDragStart(e, index)}
+              onDragOver={e => handleDragOver(e, index)}
+              onDrop={e => handleDrop(e, index)}
+              onDragEnd={handleDragEnd}
+              className={`bg-white rounded-lg border overflow-hidden transition-all ${
+                dragOverIndex === index && dragIndex !== index
+                  ? 'border-blue-400 shadow-md scale-[1.01]'
+                  : dragIndex === index
+                  ? 'border-slate-300 opacity-50'
+                  : 'border-slate-200'
+              }`}>
+              {/* Unified row: [drag handle] [label] | [dur input] [min] [chevron] [trash] */}
+              <div className="h-12 flex items-center gap-2 pr-3">
+                {/* Drag handle */}
+                <div className="w-7 h-full flex items-center justify-center cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 transition-colors shrink-0 border-r border-slate-100">
+                  <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor">
+                    <circle cx="2" cy="3" r="1.5"/><circle cx="8" cy="3" r="1.5"/>
+                    <circle cx="2" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/>
+                    <circle cx="2" cy="13" r="1.5"/><circle cx="8" cy="13" r="1.5"/>
+                  </svg>
+                </div>
                 {/* Left: label */}
                 {drill.isBreak ? (
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-1 min-w-0 pl-1">
                     <span className="text-[9px] font-bold text-slate-400 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 uppercase tracking-widest shrink-0">Break</span>
                     <span className="text-[13px] font-medium text-slate-500 truncate">{drill.name}</span>
                   </div>
                 ) : (
                   <button onClick={() => setExpandedDrill(expandedDrill === drill.id ? null : drill.id)}
-                    className="flex-1 text-left min-w-0 py-1">
+                    className="flex-1 text-left min-w-0 py-1 pl-1">
                     <p className="text-[13px] font-medium text-slate-900 truncate leading-none">{drill.name}</p>
                     <p className="text-[11px] text-slate-400 mt-0.5 truncate">{drill.type}{drill.intensity ? ` · ${drill.intensity}` : ''}</p>
                   </button>
                 )}
-                {/* Right: fixed-width columns — all rows identical */}
+                {/* Right: fixed-width columns */}
                 {!drill.isBreak && <>
                   <input type="number" min="0" max="300" step="5"
                     value={drill.duration || ''}
                     onChange={e => setDayDrills(dayDrills.map(d => d.id === drill.id ? {...d, duration: Math.max(0, parseInt(e.target.value) || 0)} : d))}
                     placeholder="0"
                     className="w-14 h-8 px-0 text-[13px] text-center border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 shrink-0" />
-                  <span className="text-[11px] text-slate-400 w-6 shrink-0">min</span>
+                  <span className="text-[11px] text-slate-400 w-5 shrink-0">min</span>
                   <button onClick={() => setExpandedDrill(expandedDrill === drill.id ? null : drill.id)}
                     className="w-6 flex items-center justify-center text-slate-300 hover:text-slate-600 transition-colors shrink-0">
                     {expandedDrill === drill.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -1929,27 +1993,11 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
         )}
       </div>
 
-      {/* Bottom bar */}
+      {/* Bottom bar — Save only */}
       <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t border-slate-200 p-3">
-        <div className="max-w-md md:max-w-lg mx-auto flex gap-2">
-          <button onClick={() => navigateTo('add-drill')}
-            className="flex-1 h-10 bg-white border border-slate-200 text-slate-700 rounded-lg text-[13px] font-medium flex items-center justify-center gap-1.5 hover:bg-slate-50 hover:border-slate-300 transition-colors">
-            <Plus className="w-3.5 h-3.5" />Add Drill
-          </button>
-
-          <button onClick={() => {
-              const breakDrill: Drill = { id: String(Date.now()), name: 'Break', type: 'Break', intensity: '', notes: '', duration: 0, isBreak: true, team1: {}, team2: {}, subs1: {}, subs2: {} };
-              setDayDrills([...dayDrills, breakDrill]);
-            }}
-            className="h-10 px-4 bg-white border border-slate-200 text-slate-600 rounded-lg text-[13px] font-medium flex items-center gap-1.5 hover:bg-slate-50 hover:border-slate-300 transition-colors">
-            <Plus className="w-3.5 h-3.5" />Break
-          </button>
-          <button onClick={() => setShowSummary(true)}
-            className="h-10 px-3 bg-white border border-slate-200 text-slate-600 rounded-lg text-[12px] font-medium flex items-center gap-1.5 hover:bg-slate-50 hover:border-slate-300 transition-colors whitespace-nowrap">
-            <Users className="w-3.5 h-3.5" />Summary
-          </button>
+        <div className="max-w-md md:max-w-lg mx-auto">
           <button onClick={handleSaveDay} disabled={savingDay === activeDay}
-            className={`flex-1 h-10 rounded-lg text-[13px] font-semibold transition-colors ${savingDay === activeDay ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-slate-700'}`}>
+            className={`w-full h-10 rounded-lg text-[13px] font-semibold transition-colors ${savingDay === activeDay ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-slate-700'}`}>
             {savingDay === activeDay ? 'Saving…' : 'Save'}
           </button>
         </div>
