@@ -10,10 +10,17 @@ type Role = 'Admin' | 'S&C' | 'Physio' | 'Coach';
 
 const ROLE_ACCESS: Record<Role, string[]> = {
   'Admin':  ['home', 'availability', 'athlete-profile', 'session-plan', 'add-drill', 'reporting', 'setup'],
-  'S&C':    ['availability', 'athlete-profile', 'reporting'],
-  'Physio': ['availability', 'athlete-profile', 'reporting'],
+  'S&C':    ['home', 'availability', 'athlete-profile', 'session-plan', 'reporting'],
+  'Physio': ['home', 'availability', 'athlete-profile', 'session-plan', 'reporting'],
   'Coach':  ['home', 'session-plan', 'add-drill', 'reporting'],
 };
+// Derived permission helpers used by pages
+const canEdit  = (role: Role) => role === 'Admin' || role === 'Coach';
+const canAddInjury = (role: Role) => role === 'Admin' || role === 'Physio';
+const canAddPrivateNote = (role: Role) => role === 'Admin' || role === 'Physio' || role === 'S&C';
+const canAddPublicNote  = (role: Role) => role === 'Admin';
+const canEditPublicNote = (role: Role) => role === 'Admin';
+const isAdmin = (role: Role) => role === 'Admin';
 
 // Type definitions
 interface TeamPosition {
@@ -929,11 +936,11 @@ const AthleteManager = () => {
 
         {/* Page content */}
         <div className="flex-1">
-          {effectivePage === 'home' && <HomePage athletes={athletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} teamStructure={teamStructure} />}
-          {effectivePage === 'availability' && <AvailabilityPage athletes={athletes} setAthletes={setAthletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} selectedDate={selectedDate} setSelectedDate={setSelectedDate} availabilityRecords={availabilityRecords} teamStructure={teamStructure} onSave={saveAvailability} onSaveEOD={saveEndOfDayReport} saving={saving} fetchAllData={fetchAllData} />}
-          {effectivePage === 'session-plan' && <SessionPlanPage drills={drills} setDrills={setDrills} weekDrills={weekDrills} setWeekDrills={setWeekDrills} navigateTo={navigateTo} athletes={athletes} drillTypes={drillTypes} teamStructure={teamStructure} defaultTeam={defaultTeam} onSaveDefaultTeam={saveDefaultTeam} selectedDate={selectedDate} onDateChange={handleDateChange} onSaveSessionPlan={saveSessionPlan} saving={saving} getWeekDates={getWeekDates} />}
+          {effectivePage === 'home' && <HomePage athletes={athletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} teamStructure={teamStructure} role={role} />}
+          {effectivePage === 'availability' && <AvailabilityPage athletes={athletes} setAthletes={setAthletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} selectedDate={selectedDate} setSelectedDate={setSelectedDate} availabilityRecords={availabilityRecords} teamStructure={teamStructure} onSave={saveAvailability} onSaveEOD={saveEndOfDayReport} saving={saving} fetchAllData={fetchAllData} role={role} />}
+          {effectivePage === 'session-plan' && <SessionPlanPage drills={drills} setDrills={setDrills} weekDrills={weekDrills} setWeekDrills={setWeekDrills} navigateTo={navigateTo} athletes={athletes} drillTypes={drillTypes} teamStructure={teamStructure} defaultTeam={defaultTeam} onSaveDefaultTeam={saveDefaultTeam} selectedDate={selectedDate} onDateChange={handleDateChange} onSaveSessionPlan={saveSessionPlan} saving={saving} getWeekDates={getWeekDates} role={role} />}
           {effectivePage === 'add-drill' && <AddDrillPage drills={drills} setDrills={setDrills} weekDrills={weekDrills} setWeekDrills={setWeekDrills} selectedDate={selectedDate} navigateTo={navigateTo} drillTypes={drillTypes} defaultTeam={defaultTeam} athletes={athletes} teamStructure={teamStructure} />}
-          {effectivePage === 'athlete-profile' && <AthleteProfilePage athletes={athletes} athleteId={selectedAthleteId} navigateTo={navigateTo} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} onSave={saveAthlete} onDelete={deleteAthlete} saving={saving} />}
+          {effectivePage === 'athlete-profile' && <AthleteProfilePage athletes={athletes} athleteId={selectedAthleteId} navigateTo={navigateTo} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} onSave={saveAthlete} onDelete={deleteAthlete} saving={saving} role={role} />}
           {effectivePage === 'reporting' && <ReportingPage athletes={athletes} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} />}
 
           {effectivePage === 'setup' && <SetupPage drillTypes={drillTypes} seasonDates={seasonDates} teamStructure={teamStructure} onSaveDrillType={saveDrillType} onDeleteDrillType={deleteDrillType} onSaveSeasonDate={saveSeasonDate} onDeleteSeasonDate={deleteSeasonDate} onSaveTeamStructure={saveTeamStructure} onDeleteTeamStructure={deleteTeamStructurePosition} saving={saving} />}
@@ -1348,8 +1355,10 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
                             <div key={inj.id} className="flex items-start gap-1.5 p-1.5 bg-red-50 border border-red-100 rounded text-[11px] text-red-700">
                               <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0 text-red-400" />
                               <span className="flex-1">{inj.bodyPart}{inj.notes ? ` — ${inj.notes}` : ''}{inj.returnDate ? <span className="text-slate-400 ml-1">ETR {fmtDate(inj.returnDate)}</span> : <span className="text-red-500 font-medium ml-1">Season</span>}</span>
-                              <button onClick={() => openEditInjury(a.id, inj)} className="p-0.5 hover:bg-red-100 rounded flex-shrink-0"><Edit2 className="w-2.5 h-2.5 text-red-500" /></button>
-                              <button onClick={() => removeInjury(a.id, inj.id)} className="p-0.5 hover:bg-red-100 rounded flex-shrink-0"><X className="w-2.5 h-2.5 text-red-400" /></button>
+                              {canAddInjury(role) && <>
+                                <button onClick={() => openEditInjury(a.id, inj)} className="p-0.5 hover:bg-red-100 rounded flex-shrink-0"><Edit2 className="w-2.5 h-2.5 text-red-500" /></button>
+                                <button onClick={() => removeInjury(a.id, inj.id)} className="p-0.5 hover:bg-red-100 rounded flex-shrink-0"><X className="w-2.5 h-2.5 text-red-400" /></button>
+                              </>}
                             </div>
                           ))}
                           {a.notes && a.isPublic && (
@@ -1364,15 +1373,19 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
                             </div>
                           )}
                           <div className="flex gap-1 flex-wrap">
-                            <button onClick={() => openAddInjury(a.id)}
-                              className="flex items-center gap-1 px-2 h-6 bg-red-50 text-red-600 border border-red-100 rounded text-[10px] font-medium hover:bg-red-100 transition-colors">
-                              <Plus className="w-2.5 h-2.5" />Injury
-                            </button>
-                            <button onClick={() => openNoteModal(a)}
-                              className={`flex items-center gap-1 px-2 h-6 rounded text-[10px] font-medium transition-colors border ${a.notes ? 'bg-blue-50 text-blue-600 border-blue-100 hover:bg-blue-100' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}>
-                              <MessageSquare className="w-2.5 h-2.5" />
-                              {a.notes ? (a.isPublic ? 'Edit Note' : 'Edit Private Note') : 'Add Note'}
-                            </button>
+                            {canAddInjury(role) && (
+                              <button onClick={() => openAddInjury(a.id)}
+                                className="flex items-center gap-1 px-2 h-6 bg-red-50 text-red-600 border border-red-100 rounded text-[10px] font-medium hover:bg-red-100 transition-colors">
+                                <Plus className="w-2.5 h-2.5" />Injury
+                              </button>
+                            )}
+                            {canAddPrivateNote(role) && !(a.isPublic && !canEditPublicNote(role)) && (
+                              <button onClick={() => openNoteModal(a)}
+                                className={`flex items-center gap-1 px-2 h-6 rounded text-[10px] font-medium transition-colors border ${a.notes ? 'bg-blue-50 text-blue-600 border-blue-100 hover:bg-blue-100' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}>
+                                <MessageSquare className="w-2.5 h-2.5" />
+                                {a.notes ? (a.isPublic ? 'Edit Note' : 'Edit Private Note') : 'Add Note'}
+                              </button>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -1478,7 +1491,7 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
   );
 };
 
-const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthleteId, selectedDate, setSelectedDate, availabilityRecords, teamStructure, onSave, onSaveEOD, saving, fetchAllData }: any) => {
+const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthleteId, selectedDate, setSelectedDate, availabilityRecords, teamStructure, onSave, onSaveEOD, saving, fetchAllData, role }: any) => {
   const typedAthletes: Athlete[] = athletes;
   const typedTeamStructure: TeamPosition[] = teamStructure;
   const [searchTerm, setSearchTerm] = useState('');
@@ -1591,34 +1604,44 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
             <input type="text" placeholder="Search athletes…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
               className="w-full pl-8 pr-3 h-8 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500" />
           </div>
-          <button onClick={async () => { const { data, error } = await supabase.from('athletes').insert({ name: 'New Athlete', status: 'Available', notes: '', is_public: false, avatar: 'NA', photo_url: '' }).select().single(); if (!error && data) { await fetchAllData(); setSelectedAthleteId(data.id); navigateTo('athlete-profile'); } }}
-            className="h-8 px-3 bg-slate-900 text-white rounded text-[12px] font-medium flex items-center gap-1.5 hover:bg-slate-700 transition-colors">
-            <Plus className="w-3.5 h-3.5" />Add
-          </button>
+          {isAdmin(role) && (
+            <button onClick={async () => { const { data, error } = await supabase.from('athletes').insert({ name: 'New Athlete', status: 'Available', notes: '', is_public: false, avatar: 'NA', photo_url: '' }).select().single(); if (!error && data) { await fetchAllData(); setSelectedAthleteId(data.id); navigateTo('athlete-profile'); } }}
+              className="h-8 px-3 bg-slate-900 text-white rounded text-[12px] font-medium flex items-center gap-1.5 hover:bg-slate-700 transition-colors">
+              <Plus className="w-3.5 h-3.5" />Add
+            </button>
+          )}
         </div>
         <div className="flex gap-2 px-2.5 pb-2.5">
-          <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
-            className="flex-1 h-8 px-3 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500" />
-          <button onClick={async () => {
-              setEodLoading(true);
-              try {
-                const { data } = await supabase.from('eod_reports').select('*').eq('date', selectedDate);
-                setSavedEodData(data && data.length > 0 ? data : null);
-              } catch { setSavedEodData(null); }
-              setEodLoading(false);
-              setShowEOD(true);
-            }}
-            disabled={eodLoading}
-            className="h-8 px-3 bg-white border border-amber-300 text-amber-700 rounded text-[12px] font-medium flex items-center gap-1.5 hover:bg-amber-50 transition-colors whitespace-nowrap disabled:opacity-60">
-            {eodLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-            End of Day
-          </button>
+          {isAdmin(role) ? (
+            <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
+              className="flex-1 h-8 px-3 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          ) : (
+            <div className="flex-1 h-8 px-3 flex items-center text-[13px] text-slate-500 bg-slate-50 border border-slate-200 rounded">
+              {new Date(todayStr + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
+            </div>
+          )}
+          {isAdmin(role) && (
+            <button onClick={async () => {
+                setEodLoading(true);
+                try {
+                  const { data } = await supabase.from('eod_reports').select('*').eq('date', selectedDate);
+                  setSavedEodData(data && data.length > 0 ? data : null);
+                } catch { setSavedEodData(null); }
+                setEodLoading(false);
+                setShowEOD(true);
+              }}
+              disabled={eodLoading}
+              className="h-8 px-3 bg-white border border-amber-300 text-amber-700 rounded text-[12px] font-medium flex items-center gap-1.5 hover:bg-amber-50 transition-colors whitespace-nowrap disabled:opacity-60">
+              {eodLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+              End of Day
+            </button>
+          )}
         </div>
       </div>
 
       {showSaveSuccess && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-[13px] font-medium">✓ Saved</div>}
 
-      <div className="pb-24">
+      <div className="pb-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
           {filteredAthletes.map(athlete => (
             <div key={athlete.id} className="bg-white rounded-lg border border-slate-200 p-3.5">
@@ -1635,16 +1658,16 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
                 </div>
                 <StatusSelect value={athlete.status} onChange={async val => {
                     if (selectedDate === todayStr) {
-                      // Today: update athletes state and DB directly
                       setAthletes(typedAthletes.map(a => a.id === athlete.id ? { ...a, status: val } : a));
                       await supabase.from('athletes').update({ status: val }).eq('id', athlete.id);
+                      // Auto-save availability_record for today
+                      await supabase.from('availability_records').upsert({ date: todayStr, athlete_id: athlete.id, status: val, note: athlete.notes || '' }, { onConflict: 'date,athlete_id' });
                     } else {
-                      // Another date: update the overlay map only (save writes availability_records)
-                      setDateRecordsMap(prev => ({
-                        ...prev,
-                        [athlete.id]: { status: val, note: prev[athlete.id]?.note ?? athlete.notes ?? '' }
-                      }));
+                      setDateRecordsMap(prev => ({ ...prev, [athlete.id]: { status: val, note: prev[athlete.id]?.note ?? athlete.notes ?? '' } }));
+                      await supabase.from('availability_records').upsert({ date: selectedDate, athlete_id: athlete.id, status: val, note: athlete.notes || '' }, { onConflict: 'date,athlete_id' });
                     }
+                    setShowSaveSuccess(true);
+                    setTimeout(() => setShowSaveSuccess(false), 1200);
                   }} />
               </div>
               {/* Group tag — matches Home page */}
@@ -1654,14 +1677,23 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
                 </div>
               )}
               <InjuryDisplay athlete={athlete} />
-              {/* Note — inline if present, subtle add button if not */}
-              {athlete.notes ? (
-                <button onClick={() => { setSelectedAthlete(athlete); setTempNotes(athlete.notes); setTempIsPublic(athlete.isPublic); setShowNotesModal(true); }}
-                  className="mt-2 w-full text-left p-2 bg-blue-50 border border-blue-100 rounded flex items-start gap-1.5 hover:bg-blue-100 transition-colors">
-                  <MessageSquare className="w-3 h-3 mt-0.5 flex-shrink-0 text-blue-400" />
-                  <span className="text-[11px] text-blue-700 leading-snug">{athlete.notes}</span>
-                </button>
-              ) : (
+              {/* Notes — visibility + editability governed by role */}
+              {athlete.notes && (athlete.isPublic || canAddPrivateNote(role)) && (
+                canEditPublicNote(role) || (!athlete.isPublic && canAddPrivateNote(role)) ? (
+                  <button onClick={() => { setSelectedAthlete(athlete); setTempNotes(athlete.notes); setTempIsPublic(athlete.isPublic); setShowNotesModal(true); }}
+                    className={`mt-2 w-full text-left p-2 rounded flex items-start gap-1.5 transition-colors ${athlete.isPublic ? 'bg-blue-50 border border-blue-100 hover:bg-blue-100' : 'bg-slate-50 border border-slate-200 hover:bg-slate-100'}`}>
+                    <MessageSquare className={`w-3 h-3 mt-0.5 flex-shrink-0 ${athlete.isPublic ? 'text-blue-400' : 'text-slate-400'}`} />
+                    <span className={`text-[11px] leading-snug ${athlete.isPublic ? 'text-blue-700' : 'text-slate-600'}`}>{athlete.notes}</span>
+                    {!athlete.isPublic && <span className="ml-auto text-[9px] text-slate-400 shrink-0">Private</span>}
+                  </button>
+                ) : (
+                  <div className={`mt-2 w-full p-2 rounded flex items-start gap-1.5 ${athlete.isPublic ? 'bg-blue-50 border border-blue-100' : 'bg-slate-50 border border-slate-200'}`}>
+                    <MessageSquare className={`w-3 h-3 mt-0.5 flex-shrink-0 ${athlete.isPublic ? 'text-blue-400' : 'text-slate-400'}`} />
+                    <span className={`text-[11px] leading-snug ${athlete.isPublic ? 'text-blue-700' : 'text-slate-600'}`}>{athlete.notes}</span>
+                  </div>
+                )
+              )}
+              {canAddPrivateNote(role) && !athlete.notes && (
                 <button onClick={() => { setSelectedAthlete(athlete); setTempNotes(''); setTempIsPublic(false); setShowNotesModal(true); }}
                   className="mt-2 flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-600 transition-colors">
                   <MessageSquare className="w-3 h-3" />Add note
@@ -1672,12 +1704,7 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
         </div>
       </div>
 
-      {/* Bottom bar */}
-      <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t border-slate-200 p-4">
-        <div className="max-w-md md:max-w-lg mx-auto">
-          <button onClick={handleSave} className="w-full h-10 bg-slate-900 text-white rounded-lg text-[13px] font-semibold hover:bg-slate-700 transition-colors">Save</button>
-        </div>
-      </div>
+{/* No manual Save button — status changes auto-save */}
 
       {/* Notes modal */}
       {showNotesModal && selectedAthlete && (
@@ -1690,13 +1717,20 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
             <div className="p-4 space-y-3">
               <textarea value={tempNotes} onChange={e => setTempNotes(e.target.value)} placeholder="Add a note…"
                 className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none text-slate-900" rows={4} />
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={tempIsPublic} onChange={e => setTempIsPublic(e.target.checked)} className="w-3.5 h-3.5 accent-blue-600" />
-                <span className="text-[12px] text-slate-600">Public note</span>
-              </label>
+              {canAddPublicNote(role) ? (
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={tempIsPublic} onChange={e => setTempIsPublic(e.target.checked)} className="w-3.5 h-3.5 accent-blue-600" />
+                  <span className="text-[12px] text-slate-600">Public note (visible to all roles)</span>
+                </label>
+              ) : (
+                <p className="text-[11px] text-slate-400 flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-slate-300 inline-block" />
+                  This note is private — only visible to {role} roles
+                </p>
+              )}
             </div>
             <div className="flex gap-2 px-4 pb-4">
-              <button onClick={() => { setAthletes(typedAthletes.map(a => a.id === selectedAthlete.id ? { ...a, notes: tempNotes, isPublic: tempIsPublic } : a)); setShowNotesModal(false); }}
+              <button onClick={() => { const pub = canAddPublicNote(role) ? tempIsPublic : false; setAthletes(typedAthletes.map(a => a.id === selectedAthlete.id ? { ...a, notes: tempNotes, isPublic: pub } : a)); setShowNotesModal(false); }}
                 className="flex-1 h-9 bg-slate-900 text-white rounded-lg text-[13px] font-medium hover:bg-slate-700 transition-colors">Save</button>
               <button onClick={() => setShowNotesModal(false)}
                 className="flex-1 h-9 bg-slate-100 text-slate-700 rounded-lg text-[13px] hover:bg-slate-200 transition-colors">Cancel</button>
@@ -1708,10 +1742,11 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
   );
 };
 
-const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigateTo, athletes, drillTypes, teamStructure, defaultTeam, onSaveDefaultTeam, selectedDate, onDateChange, onSaveSessionPlan, saving, getWeekDates }: any) => {
+const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigateTo, athletes, drillTypes, teamStructure, defaultTeam, onSaveDefaultTeam, selectedDate, onDateChange, onSaveSessionPlan, saving, getWeekDates, role }: any) => {
   const typedAthletes: Athlete[] = athletes;
   const typedDrillTypes: DrillType[] = drillTypes;
   const typedTeamStructure: TeamPosition[] = teamStructure;
+  const canEditSession = canEdit(role);
 
   const [expandedDrill, setExpandedDrill] = useState<string | null>(null);
   const [editingTeam, setEditingTeam] = useState<Drill | null>(null);
@@ -1857,25 +1892,29 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
 
       {/* Toolbar: action buttons inline above drill list */}
       <div className="flex gap-2 mb-3">
-        <button onClick={() => navigateTo('add-drill')}
-          className="flex-1 h-9 bg-white border border-slate-200 text-slate-700 rounded-lg text-[12px] font-medium flex items-center justify-center gap-1.5 hover:bg-slate-50 hover:border-slate-300 transition-colors">
-          <Plus className="w-3.5 h-3.5" />Add Drill
-        </button>
-        <button onClick={() => {
-            const breakDrill: Drill = { id: String(Date.now()), name: 'Break', type: 'Break', intensity: '', notes: '', duration: 0, isBreak: true, team1: {}, team2: {}, subs1: {}, subs2: {} };
-            setDayDrills([...dayDrills, breakDrill]);
-          }}
-          className="h-9 px-3 bg-white border border-slate-200 text-slate-600 rounded-lg text-[12px] font-medium flex items-center gap-1.5 hover:bg-slate-50 hover:border-slate-300 transition-colors">
-          <Plus className="w-3.5 h-3.5" />Break
-        </button>
+        {canEditSession && <>
+          <button onClick={() => navigateTo('add-drill')}
+            className="flex-1 h-9 bg-white border border-slate-200 text-slate-700 rounded-lg text-[12px] font-medium flex items-center justify-center gap-1.5 hover:bg-slate-50 hover:border-slate-300 transition-colors">
+            <Plus className="w-3.5 h-3.5" />Add Drill
+          </button>
+          <button onClick={() => {
+              const breakDrill: Drill = { id: String(Date.now()), name: 'Break', type: 'Break', intensity: '', notes: '', duration: 0, isBreak: true, team1: {}, team2: {}, subs1: {}, subs2: {} };
+              setDayDrills([...dayDrills, breakDrill]);
+            }}
+            className="h-9 px-3 bg-white border border-slate-200 text-slate-600 rounded-lg text-[12px] font-medium flex items-center gap-1.5 hover:bg-slate-50 hover:border-slate-300 transition-colors">
+            <Plus className="w-3.5 h-3.5" />Break
+          </button>
+        </>}
         <button onClick={() => setShowSummary(true)}
-          className="h-9 px-3 bg-white border border-slate-200 text-slate-600 rounded-lg text-[12px] font-medium flex items-center gap-1.5 hover:bg-slate-50 hover:border-slate-300 transition-colors whitespace-nowrap">
+          className="flex-1 h-9 bg-white border border-slate-200 text-slate-600 rounded-lg text-[12px] font-medium flex items-center justify-center gap-1.5 hover:bg-slate-50 hover:border-slate-300 transition-colors whitespace-nowrap">
           <Users className="w-3.5 h-3.5" />Drill Availability
         </button>
-        <button onClick={() => { setTempDefaultTeam(defaultTeam); setEditingDefaultTeam(true); }}
-          className="h-9 px-3 bg-white border border-dashed border-slate-300 text-slate-500 rounded-lg text-[12px] font-medium flex items-center gap-1.5 hover:border-slate-400 hover:text-slate-700 transition-colors whitespace-nowrap">
-          <Users className="w-3.5 h-3.5" />Default Team
-        </button>
+        {canEditSession && (
+          <button onClick={() => { setTempDefaultTeam(defaultTeam); setEditingDefaultTeam(true); }}
+            className="h-9 px-3 bg-white border border-dashed border-slate-300 text-slate-500 rounded-lg text-[12px] font-medium flex items-center gap-1.5 hover:border-slate-400 hover:text-slate-700 transition-colors whitespace-nowrap">
+            <Users className="w-3.5 h-3.5" />Default Team
+          </button>
+        )}
       </div>
 
       {/* Drill list */}
@@ -1925,21 +1964,27 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
                 )}
                 {/* Right: fixed-width columns */}
                 {!drill.isBreak && <>
-                  <input type="number" min="0" max="300" step="5"
-                    value={drill.duration || ''}
-                    onChange={e => setDayDrills(dayDrills.map(d => d.id === drill.id ? {...d, duration: Math.max(0, parseInt(e.target.value) || 0)} : d))}
-                    placeholder="0"
-                    className="w-14 h-8 px-0 text-[13px] text-center border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 shrink-0" />
-                  <span className="text-[11px] text-slate-400 w-5 shrink-0">min</span>
+                  {canEditSession ? (
+                    <input type="number" min="0" max="300" step="5"
+                      value={drill.duration || ''}
+                      onChange={e => setDayDrills(dayDrills.map(d => d.id === drill.id ? {...d, duration: Math.max(0, parseInt(e.target.value) || 0)} : d))}
+                      placeholder="0"
+                      className="w-14 h-8 px-0 text-[13px] text-center border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 shrink-0" />
+                  ) : (
+                    <span className="w-14 h-8 flex items-center justify-center text-[13px] text-slate-500 font-medium shrink-0">{drill.duration ? `${drill.duration}m` : '–'}</span>
+                  )}
+                  <span className="text-[11px] text-slate-400 w-5 shrink-0">{canEditSession ? 'min' : ''}</span>
                   <button onClick={() => setExpandedDrill(expandedDrill === drill.id ? null : drill.id)}
                     className="w-6 flex items-center justify-center text-slate-300 hover:text-slate-600 transition-colors shrink-0">
                     {expandedDrill === drill.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                   </button>
                 </>}
-                <button onClick={() => setDayDrills(dayDrills.filter(d => d.id !== drill.id))}
-                  className="w-6 flex items-center justify-center text-slate-300 hover:text-red-400 transition-colors shrink-0">
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                {canEditSession && (
+                  <button onClick={() => setDayDrills(dayDrills.filter(d => d.id !== drill.id))}
+                    className="w-6 flex items-center justify-center text-slate-300 hover:text-red-400 transition-colors shrink-0">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
               {!drill.isBreak && expandedDrill === drill.id && (
                 <div className="border-t border-slate-100 bg-slate-50">
@@ -2033,16 +2078,18 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
                           </div>
                         );
                       })()}
-                      <div className="flex gap-2 pt-1">
-                        <button onClick={() => { setEditingDrillId(drill.id); setEditDrillData({ name: drill.name, type: drill.type, intensity: drill.intensity, notes: drill.notes }); }}
-                          className="flex-1 h-8 bg-white border border-slate-200 text-slate-700 rounded-lg text-[12px] font-medium flex items-center justify-center gap-1.5 hover:bg-slate-50 transition-colors">
-                          <Edit2 className="w-3.5 h-3.5" />Edit Drill
-                        </button>
-                        <button onClick={() => setEditingTeam(drill)}
-                          className="flex-1 h-8 bg-slate-900 text-white rounded-lg text-[12px] font-medium flex items-center justify-center gap-1.5 hover:bg-slate-700 transition-colors">
-                          <Users className="w-3.5 h-3.5" />Edit Team
-                        </button>
-                      </div>
+                      {canEditSession && (
+                        <div className="flex gap-2 pt-1">
+                          <button onClick={() => { setEditingDrillId(drill.id); setEditDrillData({ name: drill.name, type: drill.type, intensity: drill.intensity, notes: drill.notes }); }}
+                            className="flex-1 h-8 bg-white border border-slate-200 text-slate-700 rounded-lg text-[12px] font-medium flex items-center justify-center gap-1.5 hover:bg-slate-50 transition-colors">
+                            <Edit2 className="w-3.5 h-3.5" />Edit Drill
+                          </button>
+                          <button onClick={() => setEditingTeam(drill)}
+                            className="flex-1 h-8 bg-slate-900 text-white rounded-lg text-[12px] font-medium flex items-center justify-center gap-1.5 hover:bg-slate-700 transition-colors">
+                            <Users className="w-3.5 h-3.5" />Edit Team
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2059,15 +2106,17 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
         )}
       </div>
 
-      {/* Bottom bar — Save only */}
-      <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t border-slate-200 p-3">
-        <div className="max-w-md md:max-w-lg mx-auto">
-          <button onClick={handleSaveDay} disabled={savingDay === activeDay}
-            className={`w-full h-10 rounded-lg text-[13px] font-semibold transition-colors ${savingDay === activeDay ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-slate-700'}`}>
-            {savingDay === activeDay ? 'Saving…' : 'Save'}
-          </button>
+      {/* Bottom bar — Save only for editors */}
+      {canEditSession && (
+        <div className="fixed bottom-0 left-0 md:left-52 right-0 bg-white border-t border-slate-200 p-3">
+          <div className="max-w-md md:max-w-lg mx-auto">
+            <button onClick={handleSaveDay} disabled={savingDay === activeDay}
+              className={`w-full h-10 rounded-lg text-[13px] font-semibold transition-colors ${savingDay === activeDay ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-slate-700'}`}>
+              {savingDay === activeDay ? 'Saving…' : 'Save'}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
@@ -2142,12 +2191,15 @@ const SessionPlayerSummary = ({ dayDrills, athletes, onClose }: any) => {
       </div>
 
       <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-[12px]">
-            <thead>
+        {/* overflow-auto + max-height enables BOTH axes to scroll while keeping
+            the header row (sticky top-0) and player column (sticky left-0) fixed.
+            The corner <th> carries z-20 so it sits above both axes. */}
+        <div className="overflow-auto max-h-[calc(100vh-220px)]">
+          <table className="border-collapse text-[12px]" style={{minWidth:'100%'}}>
+            <thead className="sticky top-0 z-10">
               <tr className="bg-slate-50 border-b border-slate-200">
-                {/* Player column header */}
-                <th className="sticky left-0 z-10 bg-slate-50 border-r border-slate-200 px-3 py-2.5 text-left min-w-[140px]">
+                {/* Corner cell — sticky on BOTH axes */}
+                <th className="sticky left-0 z-20 bg-slate-50 border-r border-slate-200 px-3 py-2.5 text-left min-w-[150px]">
                   <button
                     onClick={() => setSortKey(null)}
                     className={`flex items-center gap-1 font-semibold transition-colors ${sortKey === null ? 'text-blue-600' : 'text-slate-600 hover:text-slate-900'}`}>
@@ -2155,13 +2207,13 @@ const SessionPlayerSummary = ({ dayDrills, athletes, onClose }: any) => {
                     <span className="text-[10px] opacity-60">↕</span>
                   </button>
                 </th>
-                {/* Drill column headers */}
+                {/* Drill column headers — sticky top only */}
                 {drills.map(drill => (
-                  <th key={drill.id} className="px-2 py-2.5 text-center min-w-[90px] border-r border-slate-100 last:border-r-0">
+                  <th key={drill.id} className="bg-slate-50 px-2 py-2.5 text-center min-w-[100px] border-r border-slate-100 last:border-r-0">
                     <button
                       onClick={() => setSortKey(sortKey === drill.id ? null : drill.id)}
                       className={`w-full font-semibold leading-tight transition-colors ${sortKey === drill.id ? 'text-blue-600' : 'text-slate-600 hover:text-slate-900'}`}>
-                      <span className="block truncate max-w-[80px] mx-auto" title={drill.name}>{drill.name}</span>
+                      <span className="block truncate max-w-[88px] mx-auto" title={drill.name}>{drill.name}</span>
                       <span className={`text-[10px] font-normal opacity-60 ${sortKey === drill.id ? 'text-blue-500' : 'text-slate-400'}`}>{drill.type}</span>
                       {sortKey === drill.id && <span className="block text-[9px] text-blue-500 mt-0.5">sorted ↕</span>}
                     </button>
@@ -2171,9 +2223,9 @@ const SessionPlayerSummary = ({ dayDrills, athletes, onClose }: any) => {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {sortedAthletes.map((athlete: any, rowIdx: number) => (
-                <tr key={athlete.id} className={rowIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
-                  {/* Player name */}
-                  <td className="sticky left-0 z-10 bg-inherit border-r border-slate-200 px-3 py-2 font-medium text-slate-800 whitespace-nowrap">
+                <tr key={athlete.id} className={rowIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}>
+                  {/* Player name — sticky left, explicit bg to cover scrolling content */}
+                  <td className={`sticky left-0 z-10 border-r border-slate-200 px-3 py-2 font-medium text-slate-800 whitespace-nowrap ${rowIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}>
                     <div className="flex items-center gap-2">
                       {athlete.photo
                         ? <img src={athlete.photo} alt="" className="w-5 h-5 rounded object-cover shrink-0" />
@@ -3623,7 +3675,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
   );
 };
 
-const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecords, seasonDates, teamStructure, onSave, onDelete, saving }: any) => {
+const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecords, seasonDates, teamStructure, onSave, onDelete, saving, role }: any) => {
   const athlete = athletes.find(a => a.id === athleteId);
   const [name, setName] = useState(athlete?.name || '');
   const [positionNumbers, setPositionNumbers] = useState(athlete?.positionNumbers || []);
