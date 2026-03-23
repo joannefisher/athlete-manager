@@ -931,15 +931,31 @@ const AthleteManager = () => {
   // Load real role + club from user_profiles on auth change
   useEffect(() => {
     const loadProfile = async (userId: string) => {
-      const { data } = await supabase
-        .from('user_profiles')
-        .select('club_id, role, full_name')
-        .eq('id', userId)
-        .single();
-      if (data) {
-        setRole(data.role as Role);
-        setClubId(data.club_id);
+      const validRoles: Role[] = ['Admin', 'S&C', 'Physio', 'Coach'];
+
+      // Retry up to 3 times — session can race on first load
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const { data, error } = await supabase
+          .from('user_profiles')
+          .select('club_id, role, full_name')
+          .eq('id', userId)
+          .maybeSingle();
+
+        if (data) {
+          const loadedRole = validRoles.includes(data.role as Role)
+            ? (data.role as Role)
+            : 'Coach';
+          setRole(loadedRole);
+          setClubId(data.club_id);
+          setAuthLoading(false);
+          return;
+        }
+
+        if (error) console.error('[loadProfile] attempt', attempt + 1, error);
+        if (attempt < 2) await new Promise(r => setTimeout(r, 600));
       }
+
+      console.warn('[loadProfile] no profile found for', userId);
       setAuthLoading(false);
     };
 
@@ -1130,7 +1146,7 @@ const AthleteManager = () => {
           {effectivePage === 'athlete-profile' && <AthleteProfilePage athletes={athletes} athleteId={selectedAthleteId} navigateTo={navigateTo} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} onSave={saveAthlete} onDelete={deleteAthlete} saving={saving} role={role} />}
           {effectivePage === 'reporting' && <ReportingPage athletes={athletes} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} />}
 
-          {effectivePage === 'setup' && <SetupPage drillTypes={drillTypes} seasonDates={seasonDates} teamStructure={teamStructure} onSaveDrillType={saveDrillType} onDeleteDrillType={deleteDrillType} onSaveSeasonDate={saveSeasonDate} onDeleteSeasonDate={deleteSeasonDate} onSaveTeamStructure={saveTeamStructure} onDeleteTeamStructure={deleteTeamStructurePosition} saving={saving} />}
+          {effectivePage === 'setup' && <SetupPage drillTypes={drillTypes} seasonDates={seasonDates} teamStructure={teamStructure} onSaveDrillType={saveDrillType} onDeleteDrillType={deleteDrillType} onSaveSeasonDate={saveSeasonDate} onDeleteSeasonDate={deleteSeasonDate} onSaveTeamStructure={saveTeamStructure} onDeleteTeamStructure={deleteTeamStructurePosition} saving={saving} clubId={clubId} currentUserId={authUser?.id} />}
         </div>
       </div>
     </div>
@@ -2841,6 +2857,101 @@ const ReportingPage = ({ athletes, availabilityRecords, seasonDates, teamStructu
       {activeTab === 'injury' && (
         <InjuryReportTab athletes={athletes} teamStructure={teamStructure} seasonDates={seasonDates} availabilityRecords={availabilityRecords} />
       )}
+      {/* ── User Management ─────────────────────────────────────────────── */}
+      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+        <button onClick={() => setExpanded(expanded === 'users' ? null : 'users')} className="w-full p-4 flex justify-between items-center hover:bg-slate-50">
+          <div>
+            <h3 className="font-semibold text-sm text-left">Users</h3>
+            <p className="text-xs text-slate-500">{users.length > 0 ? `${users.length} members` : 'Manage club members'}</p>
+          </div>
+          {expanded === 'users' ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+        </button>
+
+        {expanded === 'users' && (
+          <div className="border-t divide-y divide-slate-100">
+
+            {/* Existing users list */}
+            {usersLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+              </div>
+            ) : users.length === 0 ? (
+              <div className="py-6 text-center text-slate-400 text-sm">No users found</div>
+            ) : (
+              users.map(user => (
+                <div key={user.id} className="flex items-center gap-3 px-4 py-3">
+                  {/* Avatar */}
+                  <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-[11px] font-semibold text-slate-600 shrink-0">
+                    {(user.full_name || user.email || '?')[0].toUpperCase()}
+                  </div>
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-medium text-slate-900 truncate">{user.full_name || '—'}</p>
+                    <p className="text-[11px] text-slate-400 truncate">{user.email}</p>
+                  </div>
+                  {/* Role selector */}
+                  <select
+                    value={user.role}
+                    onChange={e => updateUserRole(user.id, e.target.value as Role)}
+                    disabled={user.id === currentUserId}
+                    className="h-7 px-2 text-[11px] border border-slate-200 rounded-lg bg-slate-50 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-40 disabled:cursor-not-allowed">
+                    {(['Admin', 'Coach', 'Physio', 'S&C'] as Role[]).map(r => (
+                      <option key={r} value={r}>{r}</option>
+                    ))}
+                  </select>
+                  {/* You badge / remove button */}
+                  {user.id === currentUserId ? (
+                    <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded shrink-0">You</span>
+                  ) : (
+                    <button onClick={() => removeUser(user.id)}
+                      className="p-1 text-slate-300 hover:text-red-500 transition-colors shrink-0">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))
+            )}
+
+            {/* Invite new user */}
+            <div className="p-4 bg-slate-50">
+              <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-3">Invite new member</p>
+              <div className="space-y-2">
+                <input type="text" placeholder="Full name" value={inviteName}
+                  onChange={e => setInviteName(e.target.value)}
+                  className="w-full h-8 px-3 text-[12px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                <input type="email" placeholder="Email address" value={inviteEmail}
+                  onChange={e => { setInviteEmail(e.target.value); setInviteError(''); }}
+                  className="w-full h-8 px-3 text-[12px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                <div className="flex gap-2">
+                  <select value={inviteRole} onChange={e => setInviteRole(e.target.value as Role)}
+                    className="flex-1 h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    {(['Admin', 'Coach', 'Physio', 'S&C'] as Role[]).map(r => (
+                      <option key={r} value={r}>{r}</option>
+                    ))}
+                  </select>
+                  <button onClick={inviteUser} disabled={inviting}
+                    className="h-8 px-4 bg-slate-900 text-white rounded-lg text-[12px] font-medium hover:bg-slate-700 transition-colors disabled:opacity-50 flex items-center gap-1.5">
+                    {inviting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                    {inviting ? 'Sending…' : 'Invite'}
+                  </button>
+                </div>
+                {inviteError && (
+                  <div className="flex items-center gap-1.5 text-[11px] text-red-600">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    {inviteError}
+                  </div>
+                )}
+                {inviteSuccess && (
+                  <p className="text-[11px] text-green-600 flex items-center gap-1.5">
+                    <Check className="w-3 h-3" />{inviteSuccess}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
     </div>
   );
 };
@@ -3626,7 +3737,7 @@ const InjuryReportTab = ({ athletes, teamStructure, seasonDates, availabilityRec
 
 
 
-const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, onDeleteDrillType, onSaveSeasonDate, onDeleteSeasonDate, onSaveTeamStructure, onDeleteTeamStructure, saving }: any) => {
+const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, onDeleteDrillType, onSaveSeasonDate, onDeleteSeasonDate, onSaveTeamStructure, onDeleteTeamStructure, saving, clubId, currentUserId }: any) => {
   const [expanded, setExpanded] = useState<string | null>('teamStructure');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editData, setEditData] = useState<any>({});
@@ -3636,6 +3747,79 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
   const [localDrillTypes, setLocalDrillTypes] = useState(drillTypes);
   const [localSeasonDates, setLocalSeasonDates] = useState(seasonDates);
   const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+
+  // ── User management state ───────────────────────────────────────────────────
+  const [users, setUsers] = useState<any[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<Role>('Coach');
+  const [inviteName, setInviteName] = useState('');
+  const [inviting, setInviting] = useState(false);
+  const [inviteError, setInviteError] = useState('');
+  const [inviteSuccess, setInviteSuccess] = useState('');
+
+  const loadUsers = async () => {
+    if (!clubId) return;
+    setUsersLoading(true);
+    // Join user_profiles with auth.users via RPC or direct query
+    // user_profiles is accessible; auth.users emails need a view or RPC
+    const { data, error } = await supabase
+      .from('user_profiles')
+      .select('id, role, full_name, created_at')
+      .eq('club_id', clubId)
+      .order('full_name');
+    if (data) {
+      // Fetch emails separately from auth.users via a Postgres function
+      const { data: emailData } = await supabase.rpc('get_user_emails', { club_uuid: clubId });
+      const emailMap: Record<string, string> = {};
+      (emailData || []).forEach((r: any) => { emailMap[r.id] = r.email; });
+      setUsers(data.map((u: any) => ({ ...u, email: emailMap[u.id] || '—' })));
+    }
+    setUsersLoading(false);
+  };
+
+  const updateUserRole = async (userId: string, newRole: Role) => {
+    const { error } = await supabase
+      .from('user_profiles')
+      .update({ role: newRole })
+      .eq('id', userId)
+      .eq('club_id', clubId);
+    if (!error) setUsers(users.map(u => u.id === userId ? { ...u, role: newRole } : u));
+  };
+
+  const removeUser = async (userId: string) => {
+    if (!confirm('Remove this user from the club? They will lose access immediately.')) return;
+    await supabase.from('user_profiles').delete().eq('id', userId).eq('club_id', clubId);
+    setUsers(users.filter(u => u.id !== userId));
+  };
+
+  const inviteUser = async () => {
+    if (!inviteEmail.trim()) { setInviteError('Email is required'); return; }
+    setInviting(true);
+    setInviteError('');
+    setInviteSuccess('');
+    // Call an Edge Function or use Supabase admin invite via RPC
+    const { error } = await supabase.rpc('invite_user_to_club', {
+      invite_email: inviteEmail.trim(),
+      invite_role: inviteRole,
+      invite_name: inviteName.trim(),
+      club_uuid: clubId,
+    });
+    if (error) {
+      setInviteError(error.message);
+    } else {
+      setInviteSuccess(`Invite sent to ${inviteEmail}`);
+      setInviteEmail('');
+      setInviteName('');
+      setInviteRole('Coach');
+      loadUsers();
+    }
+    setInviting(false);
+  };
+
+  React.useEffect(() => {
+    if (expanded === 'users') loadUsers();
+  }, [expanded, clubId]);
 
   // Sync local state with props
   React.useEffect(() => { setLocalTeamStructure(teamStructure); }, [teamStructure]);
