@@ -1716,6 +1716,7 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
   const [editingDefaultTeam, setEditingDefaultTeam] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [savingDay, setSavingDay] = useState<string | null>(null);
+  const [showSummary, setShowSummary] = useState(false);
   const [tempDefaultTeam, setTempDefaultTeam] = useState(defaultTeam);
 
   // Week state
@@ -1761,6 +1762,10 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
     const mon = new Date(d + 'T00:00:00');
     return 'w/c ' + mon.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
   };
+
+  if (showSummary) {
+    return <SessionPlayerSummary dayDrills={dayDrills} athletes={typedAthletes} onClose={() => setShowSummary(false)} />;
+  }
 
   if (editingDefaultTeam) {
     return <TeamSelectionModal athletes={typedAthletes} team1={tempDefaultTeam.team1} setTeam1={(t: any) => setTempDefaultTeam((prev: any) => ({...prev, team1: t}))} team2={tempDefaultTeam.team2} setTeam2={(t: any) => setTempDefaultTeam((prev: any) => ({...prev, team2: t}))} subs1={tempDefaultTeam.subs1} setSubs1={(t: any) => setTempDefaultTeam((prev: any) => ({...prev, subs1: t}))} subs2={tempDefaultTeam.subs2} setSubs2={(t: any) => setTempDefaultTeam((prev: any) => ({...prev, subs2: t}))} onClearAll={() => setTempDefaultTeam({ team1: {}, team2: {}, subs1: {}, subs2: {} })} onBack={handleSaveDefaultTeam} positions={typedTeamStructure.map(p => p.number)} teamStructure={typedTeamStructure} title="Edit Default Team" />;
@@ -1932,10 +1937,162 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
             <Plus className="w-3.5 h-3.5" />Add Drill
           </button>
 
+          <button onClick={() => {
+              const breakDrill: Drill = { id: String(Date.now()), name: 'Break', type: 'Break', intensity: '', notes: '', duration: 0, isBreak: true, team1: {}, team2: {}, subs1: {}, subs2: {} };
+              setDayDrills([...dayDrills, breakDrill]);
+            }}
+            className="h-10 px-4 bg-white border border-slate-200 text-slate-600 rounded-lg text-[13px] font-medium flex items-center gap-1.5 hover:bg-slate-50 hover:border-slate-300 transition-colors">
+            <Plus className="w-3.5 h-3.5" />Break
+          </button>
+          <button onClick={() => setShowSummary(true)}
+            className="h-10 px-3 bg-white border border-slate-200 text-slate-600 rounded-lg text-[12px] font-medium flex items-center gap-1.5 hover:bg-slate-50 hover:border-slate-300 transition-colors whitespace-nowrap">
+            <Users className="w-3.5 h-3.5" />Summary
+          </button>
           <button onClick={handleSaveDay} disabled={savingDay === activeDay}
             className={`flex-1 h-10 rounded-lg text-[13px] font-semibold transition-colors ${savingDay === activeDay ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-slate-700'}`}>
             {savingDay === activeDay ? 'Saving…' : 'Save'}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
+// ── Session Player Summary grid ─────────────────────────────────────────────
+const SessionPlayerSummary = ({ dayDrills, athletes, onClose }: any) => {
+  const [sortKey, setSortKey] = useState<string | null>(null); // null = surname, drillId = drill sort
+
+  // Only non-break drills
+  const drills: Drill[] = dayDrills.filter((d: Drill) => !d.isBreak);
+
+  // Collect all athlete IDs that appear in at least one drill
+  const getAthleteIdsForDrill = (drill: Drill): Set<string> => {
+    const ids = new Set<string>();
+    [drill.team1, drill.team2, drill.subs1, drill.subs2].forEach(slot =>
+      Object.values(slot || {}).forEach(id => { if (id) ids.add(id as string); })
+    );
+    return ids;
+  };
+
+  const allIds = useMemo(() => {
+    const s = new Set<string>();
+    drills.forEach(d => getAthleteIdsForDrill(d).forEach(id => s.add(id)));
+    return s;
+  }, [dayDrills]);
+
+  const involvedAthletes = useMemo(() =>
+    athletes.filter((a: any) => allIds.has(a.id)),
+    [athletes, allIds]
+  );
+
+  const getSurname = (name: string) => {
+    const parts = name.trim().split(' ');
+    return parts.length > 1 ? parts[parts.length - 1] : name;
+  };
+
+  const sortedAthletes = useMemo(() => {
+    const list = [...involvedAthletes];
+    if (sortKey === null) {
+      // Alphabetical by surname
+      return list.sort((a: any, b: any) => getSurname(a.name).localeCompare(getSurname(b.name)));
+    }
+    // Sort by drill: in-drill first, then not
+    const drill = drills.find(d => d.id === sortKey);
+    if (!drill) return list;
+    const inDrill = getAthleteIdsForDrill(drill);
+    return list.sort((a: any, b: any) => {
+      const aIn = inDrill.has(a.id) ? 0 : 1;
+      const bIn = inDrill.has(b.id) ? 0 : 1;
+      if (aIn !== bIn) return aIn - bIn;
+      return getSurname(a.name).localeCompare(getSurname(b.name));
+    });
+  }, [involvedAthletes, sortKey, dayDrills]);
+
+  if (drills.length === 0) {
+    return (
+      <div className="max-w-md md:max-w-5xl mx-auto p-4 md:p-6">
+        <div className="bg-white rounded-lg border border-slate-200 p-8 text-center">
+          <p className="text-slate-400 text-[13px]">No drills with players assigned for this day</p>
+          <button onClick={onClose} className="mt-4 h-9 px-5 bg-slate-900 text-white rounded-lg text-[13px] font-medium hover:bg-slate-700 transition-colors">Back</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-md md:max-w-5xl mx-auto p-4 md:p-6 pb-24">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-[15px] font-semibold text-slate-900">Session Player Summary</h2>
+        <button onClick={onClose} className="h-8 px-4 bg-white border border-slate-200 text-slate-600 rounded-lg text-[12px] font-medium hover:bg-slate-50 transition-colors">← Back</button>
+      </div>
+
+      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-[12px]">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                {/* Player column header */}
+                <th className="sticky left-0 z-10 bg-slate-50 border-r border-slate-200 px-3 py-2.5 text-left min-w-[140px]">
+                  <button
+                    onClick={() => setSortKey(null)}
+                    className={`flex items-center gap-1 font-semibold transition-colors ${sortKey === null ? 'text-blue-600' : 'text-slate-600 hover:text-slate-900'}`}>
+                    Player
+                    <span className="text-[10px] opacity-60">↕</span>
+                  </button>
+                </th>
+                {/* Drill column headers */}
+                {drills.map(drill => (
+                  <th key={drill.id} className="px-2 py-2.5 text-center min-w-[90px] border-r border-slate-100 last:border-r-0">
+                    <button
+                      onClick={() => setSortKey(sortKey === drill.id ? null : drill.id)}
+                      className={`w-full font-semibold leading-tight transition-colors ${sortKey === drill.id ? 'text-blue-600' : 'text-slate-600 hover:text-slate-900'}`}>
+                      <span className="block truncate max-w-[80px] mx-auto" title={drill.name}>{drill.name}</span>
+                      <span className={`text-[10px] font-normal opacity-60 ${sortKey === drill.id ? 'text-blue-500' : 'text-slate-400'}`}>{drill.type}</span>
+                      {sortKey === drill.id && <span className="block text-[9px] text-blue-500 mt-0.5">sorted ↕</span>}
+                    </button>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {sortedAthletes.map((athlete: any, rowIdx: number) => (
+                <tr key={athlete.id} className={rowIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
+                  {/* Player name */}
+                  <td className="sticky left-0 z-10 bg-inherit border-r border-slate-200 px-3 py-2 font-medium text-slate-800 whitespace-nowrap">
+                    <div className="flex items-center gap-2">
+                      {athlete.photo
+                        ? <img src={athlete.photo} alt="" className="w-5 h-5 rounded object-cover shrink-0" />
+                        : <div className="w-5 h-5 bg-slate-200 rounded flex items-center justify-center text-[8px] font-bold text-slate-500 shrink-0">{athlete.avatar}</div>
+                      }
+                      {athlete.name}
+                    </div>
+                  </td>
+                  {/* Drill cells */}
+                  {drills.map(drill => {
+                    const inDrill = getAthleteIdsForDrill(drill).has(athlete.id);
+                    return (
+                      <td key={drill.id} className="px-2 py-2 text-center border-r border-slate-100 last:border-r-0">
+                        <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-[11px] font-semibold ${inDrill ? 'bg-green-100 text-green-700' : 'bg-red-50 text-red-400'}`}>
+                          {inDrill ? '✓' : '✗'}
+                        </span>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {/* Legend */}
+        <div className="flex items-center gap-4 px-4 py-2.5 border-t border-slate-100 bg-slate-50">
+          <span className="flex items-center gap-1.5 text-[11px] text-slate-500">
+            <span className="w-4 h-4 rounded-full bg-green-100 flex items-center justify-center text-[9px] text-green-700 font-bold">✓</span>In drill
+          </span>
+          <span className="flex items-center gap-1.5 text-[11px] text-slate-500">
+            <span className="w-4 h-4 rounded-full bg-red-50 flex items-center justify-center text-[9px] text-red-400 font-bold">✗</span>Not in drill
+          </span>
+          <span className="ml-auto text-[11px] text-slate-400">{sortedAthletes.length} players · {drills.length} drills</span>
         </div>
       </div>
     </div>
