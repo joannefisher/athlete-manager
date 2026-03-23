@@ -942,16 +942,19 @@ const AthleteManager = () => {
           .maybeSingle();
 
         if (data) {
-          const loadedRole = validRoles.includes(data.role as Role)
-            ? (data.role as Role)
+          // Trim whitespace — catches accidental spaces in DB value
+          const rawRole = (data.role || '').trim();
+          const loadedRole = validRoles.includes(rawRole as Role)
+            ? (rawRole as Role)
             : 'Coach';
+          console.log('[loadProfile] raw role from DB:', JSON.stringify(rawRole), '→', loadedRole);
           setRole(loadedRole);
           setClubId(data.club_id);
           setAuthLoading(false);
           return;
         }
 
-        if (error) console.error('[loadProfile] attempt', attempt + 1, error);
+        if (error) console.error('[loadProfile] attempt', attempt + 1, error.message, error.code);
         if (attempt < 2) await new Promise(r => setTimeout(r, 600));
       }
 
@@ -2857,100 +2860,7 @@ const ReportingPage = ({ athletes, availabilityRecords, seasonDates, teamStructu
       {activeTab === 'injury' && (
         <InjuryReportTab athletes={athletes} teamStructure={teamStructure} seasonDates={seasonDates} availabilityRecords={availabilityRecords} />
       )}
-      {/* ── User Management ─────────────────────────────────────────────── */}
-      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-        <button onClick={() => setExpanded(expanded === 'users' ? null : 'users')} className="w-full p-4 flex justify-between items-center hover:bg-slate-50">
-          <div>
-            <h3 className="font-semibold text-sm text-left">Users</h3>
-            <p className="text-xs text-slate-500">{users.length > 0 ? `${users.length} members` : 'Manage club members'}</p>
-          </div>
-          {expanded === 'users' ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-        </button>
 
-        {expanded === 'users' && (
-          <div className="border-t divide-y divide-slate-100">
-
-            {/* Existing users list */}
-            {usersLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
-              </div>
-            ) : users.length === 0 ? (
-              <div className="py-6 text-center text-slate-400 text-sm">No users found</div>
-            ) : (
-              users.map(user => (
-                <div key={user.id} className="flex items-center gap-3 px-4 py-3">
-                  {/* Avatar */}
-                  <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-[11px] font-semibold text-slate-600 shrink-0">
-                    {(user.full_name || user.email || '?')[0].toUpperCase()}
-                  </div>
-                  {/* Info */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[13px] font-medium text-slate-900 truncate">{user.full_name || '—'}</p>
-                    <p className="text-[11px] text-slate-400 truncate">{user.email}</p>
-                  </div>
-                  {/* Role selector */}
-                  <select
-                    value={user.role}
-                    onChange={e => updateUserRole(user.id, e.target.value as Role)}
-                    disabled={user.id === currentUserId}
-                    className="h-7 px-2 text-[11px] border border-slate-200 rounded-lg bg-slate-50 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-40 disabled:cursor-not-allowed">
-                    {(['Admin', 'Coach', 'Physio', 'S&C'] as Role[]).map(r => (
-                      <option key={r} value={r}>{r}</option>
-                    ))}
-                  </select>
-                  {/* You badge / remove button */}
-                  {user.id === currentUserId ? (
-                    <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded shrink-0">You</span>
-                  ) : (
-                    <button onClick={() => removeUser(user.id)}
-                      className="p-1 text-slate-300 hover:text-red-500 transition-colors shrink-0">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              ))
-            )}
-
-            {/* Invite new user */}
-            <div className="p-4 bg-slate-50">
-              <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-3">Invite new member</p>
-              <div className="space-y-2">
-                <input type="text" placeholder="Full name" value={inviteName}
-                  onChange={e => setInviteName(e.target.value)}
-                  className="w-full h-8 px-3 text-[12px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                <input type="email" placeholder="Email address" value={inviteEmail}
-                  onChange={e => { setInviteEmail(e.target.value); setInviteError(''); }}
-                  className="w-full h-8 px-3 text-[12px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                <div className="flex gap-2">
-                  <select value={inviteRole} onChange={e => setInviteRole(e.target.value as Role)}
-                    className="flex-1 h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
-                    {(['Admin', 'Coach', 'Physio', 'S&C'] as Role[]).map(r => (
-                      <option key={r} value={r}>{r}</option>
-                    ))}
-                  </select>
-                  <button onClick={inviteUser} disabled={inviting}
-                    className="h-8 px-4 bg-slate-900 text-white rounded-lg text-[12px] font-medium hover:bg-slate-700 transition-colors disabled:opacity-50 flex items-center gap-1.5">
-                    {inviting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
-                    {inviting ? 'Sending…' : 'Invite'}
-                  </button>
-                </div>
-                {inviteError && (
-                  <div className="flex items-center gap-1.5 text-[11px] text-red-600">
-                    <AlertCircle className="w-3 h-3 shrink-0" />
-                    {inviteError}
-                  </div>
-                )}
-                {inviteSuccess && (
-                  <p className="text-[11px] text-green-600 flex items-center gap-1.5">
-                    <Check className="w-3 h-3" />{inviteSuccess}
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
 
     </div>
   );
@@ -4033,6 +3943,101 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                 <div className="flex gap-2"><button onClick={() => { if (newData.title && newData.fromDate && newData.toDate) { let upd = seasonDates; if (newData.isDefault) upd = seasonDates.map(s => ({...s, isDefault: false})); const newSd = {id: String(Date.now()), ...newData}; onSaveSeasonDate(newSd); setLocalSeasonDates([...upd, newSd]); setNewData({}); setShowAdd(null); }}} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Add</button><button onClick={() => { setShowAdd(null); setNewData({}); }} className="flex-1 px-2 py-1 bg-slate-100 rounded text-xs">Cancel</button></div>
               </div>
             ) : <div className="p-3"><button onClick={() => setShowAdd('seasonDate')} className="w-full px-4 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium"><Plus className="w-4 h-4 inline mr-1" />Add Time Period</button></div>}
+          </div>
+        )}
+      </div>
+
+      {/* ── User Management ─────────────────────────────────────────────── */}
+      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+        <button onClick={() => setExpanded(expanded === 'users' ? null : 'users')} className="w-full p-4 flex justify-between items-center hover:bg-slate-50">
+          <div>
+            <h3 className="font-semibold text-sm text-left">Users</h3>
+            <p className="text-xs text-slate-500">{users.length > 0 ? `${users.length} members` : 'Manage club members'}</p>
+          </div>
+          {expanded === 'users' ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+        </button>
+
+        {expanded === 'users' && (
+          <div className="border-t divide-y divide-slate-100">
+
+            {/* Existing users list */}
+            {usersLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+              </div>
+            ) : users.length === 0 ? (
+              <div className="py-6 text-center text-slate-400 text-sm">No users found</div>
+            ) : (
+              users.map(user => (
+                <div key={user.id} className="flex items-center gap-3 px-4 py-3">
+                  {/* Avatar */}
+                  <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-[11px] font-semibold text-slate-600 shrink-0">
+                    {(user.full_name || user.email || '?')[0].toUpperCase()}
+                  </div>
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-medium text-slate-900 truncate">{user.full_name || '—'}</p>
+                    <p className="text-[11px] text-slate-400 truncate">{user.email}</p>
+                  </div>
+                  {/* Role selector */}
+                  <select
+                    value={user.role}
+                    onChange={e => updateUserRole(user.id, e.target.value as Role)}
+                    disabled={user.id === currentUserId}
+                    className="h-7 px-2 text-[11px] border border-slate-200 rounded-lg bg-slate-50 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-40 disabled:cursor-not-allowed">
+                    {(['Admin', 'Coach', 'Physio', 'S&C'] as Role[]).map(r => (
+                      <option key={r} value={r}>{r}</option>
+                    ))}
+                  </select>
+                  {/* You badge / remove button */}
+                  {user.id === currentUserId ? (
+                    <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded shrink-0">You</span>
+                  ) : (
+                    <button onClick={() => removeUser(user.id)}
+                      className="p-1 text-slate-300 hover:text-red-500 transition-colors shrink-0">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))
+            )}
+
+            {/* Invite new user */}
+            <div className="p-4 bg-slate-50">
+              <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-3">Invite new member</p>
+              <div className="space-y-2">
+                <input type="text" placeholder="Full name" value={inviteName}
+                  onChange={e => setInviteName(e.target.value)}
+                  className="w-full h-8 px-3 text-[12px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                <input type="email" placeholder="Email address" value={inviteEmail}
+                  onChange={e => { setInviteEmail(e.target.value); setInviteError(''); }}
+                  className="w-full h-8 px-3 text-[12px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                <div className="flex gap-2">
+                  <select value={inviteRole} onChange={e => setInviteRole(e.target.value as Role)}
+                    className="flex-1 h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    {(['Admin', 'Coach', 'Physio', 'S&C'] as Role[]).map(r => (
+                      <option key={r} value={r}>{r}</option>
+                    ))}
+                  </select>
+                  <button onClick={inviteUser} disabled={inviting}
+                    className="h-8 px-4 bg-slate-900 text-white rounded-lg text-[12px] font-medium hover:bg-slate-700 transition-colors disabled:opacity-50 flex items-center gap-1.5">
+                    {inviting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                    {inviting ? 'Sending…' : 'Invite'}
+                  </button>
+                </div>
+                {inviteError && (
+                  <div className="flex items-center gap-1.5 text-[11px] text-red-600">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    {inviteError}
+                  </div>
+                )}
+                {inviteSuccess && (
+                  <p className="text-[11px] text-green-600 flex items-center gap-1.5">
+                    <Check className="w-3 h-3" />{inviteSuccess}
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
         )}
       </div>
