@@ -118,7 +118,7 @@ const StatusSelect = ({ value, onChange, className = '' }: { value: string; onCh
   const s = STATUS_STYLES[value] || STATUS_STYLES['Available'];
   return (
     <div className={`relative inline-flex items-center ${className}`}>
-      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 absolute left-2 pointer-events-none z-10 ${s.dot}`} />
+      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none z-10 ${s.dot}`} />
       <select
         value={value}
         onChange={e => onChange(e.target.value)}
@@ -1719,6 +1719,8 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [savingDay, setSavingDay] = useState<string | null>(null);
   const [showSummary, setShowSummary] = useState(false);
+  const [editingDrillId, setEditingDrillId] = useState<string | null>(null);
+  const [editDrillData, setEditDrillData] = useState<any>({});
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [tempDefaultTeam, setTempDefaultTeam] = useState(defaultTeam);
@@ -1940,45 +1942,109 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
                 </button>
               </div>
               {!drill.isBreak && expandedDrill === drill.id && (
-                <div className="px-4 pb-4 border-t border-slate-100 bg-slate-50 pt-3 space-y-2 text-[13px]">
-                  <p><span className="text-slate-400 text-[11px]">Intensity</span> <span className="text-slate-700 ml-1">{drill.intensity}</span></p>
-                  {drill.notes && <p><span className="text-slate-400 text-[11px]">Notes</span> <span className="text-slate-700 ml-1">{drill.notes}</span></p>}
-                  {/* Read-only team grid */}
-                  {(() => {
-                    const getName = (id: any) => typedAthletes.find(a => a.id === id)?.name || '';
-                    const assignedPositions = typedTeamStructure.map(p => p.number).filter(pos => drill.team1?.[pos] || drill.team2?.[pos] || drill.subs1?.[pos] || drill.subs2?.[pos]).sort((a, b) => a - b);
-                    if (assignedPositions.length === 0) return null;
-                    return (
-                      <div className="mt-2 overflow-x-auto">
-                        <div className="grid grid-cols-5 gap-1 min-w-[340px] text-[10px]">
-                          <div className="text-center text-slate-400 pb-1">Team 1</div>
-                          <div className="text-center text-slate-400 pb-1">Sub</div>
-                          <div className="text-center text-slate-400 pb-1"></div>
-                          <div className="text-center text-slate-400 pb-1">Sub</div>
-                          <div className="text-center text-slate-400 pb-1">Team 2</div>
-                          {assignedPositions.map(pos => {
-                            const t1 = getName(drill.team1?.[pos]); const t2 = getName(drill.team2?.[pos]);
-                            const s1 = getName(drill.subs1?.[pos]); const s2 = getName(drill.subs2?.[pos]);
-                            return (
-                              <React.Fragment key={pos}>
-                                <div className={`p-1 rounded truncate ${t1 ? 'bg-slate-100 text-slate-700' : 'bg-transparent text-slate-300'}`}>{t1 || '–'}</div>
-                                <div className={`p-1 rounded truncate ${s1 ? 'bg-slate-100 text-slate-500' : 'text-slate-200'}`}>{s1 || '–'}</div>
-                                <div className="flex items-center justify-center text-slate-300">{pos}</div>
-                                <div className={`p-1 rounded truncate ${s2 ? 'bg-slate-100 text-slate-500' : 'text-slate-200'}`}>{s2 || '–'}</div>
-                                <div className={`p-1 rounded truncate ${t2 ? 'bg-slate-100 text-slate-700' : 'bg-transparent text-slate-300'}`}>{t2 || '–'}</div>
-                              </React.Fragment>
-                            );
-                          })}
+                <div className="border-t border-slate-100 bg-slate-50">
+                  {editingDrillId === drill.id ? (
+                    /* ── Inline edit form ── */
+                    <div className="px-4 pt-3 pb-4 space-y-3">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="col-span-2">
+                          <label className="block text-[10px] font-medium text-slate-500 mb-1">Name</label>
+                          <input type="text" value={editDrillData.name ?? drill.name}
+                            onChange={e => setEditDrillData({...editDrillData, name: e.target.value})}
+                            className="w-full h-8 px-3 text-[13px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-medium text-slate-500 mb-1">Type</label>
+                          <select value={editDrillData.type ?? drill.type}
+                            onChange={e => setEditDrillData({...editDrillData, type: e.target.value})}
+                            className="w-full h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            {typedDrillTypes.map(dt => <option key={dt.id}>{dt.name}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-medium text-slate-500 mb-1">Intensity</label>
+                          <select value={editDrillData.intensity ?? drill.intensity}
+                            onChange={e => setEditDrillData({...editDrillData, intensity: e.target.value})}
+                            className="w-full h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            <option>Low</option><option>Medium</option><option>High</option>
+                          </select>
                         </div>
                       </div>
-                    );
-                  })()}
-                  <div className="flex gap-2 pt-1">
-                    <button onClick={() => setEditingTeam(drill)}
-                      className="flex-1 h-8 bg-slate-900 text-white rounded text-[12px] font-medium flex items-center justify-center gap-1.5 hover:bg-slate-700 transition-colors">
-                      <Users className="w-3.5 h-3.5" />Edit Team
-                    </button>
-                  </div>
+                      <div>
+                        <label className="block text-[10px] font-medium text-slate-500 mb-1">Notes</label>
+                        <textarea value={editDrillData.notes ?? drill.notes}
+                          onChange={e => setEditDrillData({...editDrillData, notes: e.target.value})}
+                          rows={2}
+                          className="w-full px-3 py-1.5 text-[12px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none" />
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={() => {
+                            setDayDrills(dayDrills.map(d => d.id === drill.id ? {
+                              ...d,
+                              name: editDrillData.name ?? d.name,
+                              type: editDrillData.type ?? d.type,
+                              intensity: editDrillData.intensity ?? d.intensity,
+                              notes: editDrillData.notes ?? d.notes,
+                            } : d));
+                            setEditingDrillId(null);
+                            setEditDrillData({});
+                          }}
+                          className="flex-1 h-8 bg-slate-900 text-white rounded-lg text-[12px] font-semibold hover:bg-slate-700 transition-colors">
+                          Save
+                        </button>
+                        <button onClick={() => { setEditingDrillId(null); setEditDrillData({}); }}
+                          className="h-8 px-4 bg-white border border-slate-200 text-slate-600 rounded-lg text-[12px] hover:bg-slate-50 transition-colors">
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* ── Read-only detail view ── */
+                    <div className="px-4 pt-3 pb-4 space-y-2 text-[13px]">
+                      <p><span className="text-slate-400 text-[11px]">Intensity</span> <span className="text-slate-700 ml-1">{drill.intensity}</span></p>
+                      {drill.notes && <p><span className="text-slate-400 text-[11px]">Notes</span> <span className="text-slate-700 ml-1">{drill.notes}</span></p>}
+                      {/* Read-only team grid */}
+                      {(() => {
+                        const getName = (id: any) => typedAthletes.find(a => a.id === id)?.name || '';
+                        const assignedPositions = typedTeamStructure.map(p => p.number).filter(pos => drill.team1?.[pos] || drill.team2?.[pos] || drill.subs1?.[pos] || drill.subs2?.[pos]).sort((a, b) => a - b);
+                        if (assignedPositions.length === 0) return null;
+                        return (
+                          <div className="mt-2 overflow-x-auto">
+                            <div className="grid grid-cols-5 gap-1 min-w-[340px] text-[10px]">
+                              <div className="text-center text-slate-400 pb-1">Team 1</div>
+                              <div className="text-center text-slate-400 pb-1">Sub</div>
+                              <div className="text-center text-slate-400 pb-1"></div>
+                              <div className="text-center text-slate-400 pb-1">Sub</div>
+                              <div className="text-center text-slate-400 pb-1">Team 2</div>
+                              {assignedPositions.map(pos => {
+                                const t1 = getName(drill.team1?.[pos]); const t2 = getName(drill.team2?.[pos]);
+                                const s1 = getName(drill.subs1?.[pos]); const s2 = getName(drill.subs2?.[pos]);
+                                return (
+                                  <React.Fragment key={pos}>
+                                    <div className={`p-1 rounded truncate ${t1 ? 'bg-slate-100 text-slate-700' : 'bg-transparent text-slate-300'}`}>{t1 || '–'}</div>
+                                    <div className={`p-1 rounded truncate ${s1 ? 'bg-slate-100 text-slate-500' : 'text-slate-200'}`}>{s1 || '–'}</div>
+                                    <div className="flex items-center justify-center text-slate-300">{pos}</div>
+                                    <div className={`p-1 rounded truncate ${s2 ? 'bg-slate-100 text-slate-500' : 'text-slate-200'}`}>{s2 || '–'}</div>
+                                    <div className={`p-1 rounded truncate ${t2 ? 'bg-slate-100 text-slate-700' : 'bg-transparent text-slate-300'}`}>{t2 || '–'}</div>
+                                  </React.Fragment>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                      <div className="flex gap-2 pt-1">
+                        <button onClick={() => { setEditingDrillId(drill.id); setEditDrillData({ name: drill.name, type: drill.type, intensity: drill.intensity, notes: drill.notes }); }}
+                          className="flex-1 h-8 bg-white border border-slate-200 text-slate-700 rounded-lg text-[12px] font-medium flex items-center justify-center gap-1.5 hover:bg-slate-50 transition-colors">
+                          <Edit2 className="w-3.5 h-3.5" />Edit Drill
+                        </button>
+                        <button onClick={() => setEditingTeam(drill)}
+                          className="flex-1 h-8 bg-slate-900 text-white rounded-lg text-[12px] font-medium flex items-center justify-center gap-1.5 hover:bg-slate-700 transition-colors">
+                          <Users className="w-3.5 h-3.5" />Edit Team
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
