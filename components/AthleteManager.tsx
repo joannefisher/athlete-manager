@@ -1614,7 +1614,7 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
               {new Date(todayStr + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
             </div>
           )}
-          {isAdmin(role) && (
+          {(isAdmin(role) || role === 'Physio') && (
             <button onClick={async () => {
                 setEodLoading(true);
                 try {
