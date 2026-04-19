@@ -479,7 +479,7 @@ const AthleteManager = () => {
     }));
     const map: Record<string, Drill[]> = {};
     results.forEach(r => { map[r.date] = r.drills; });
-    setWeekDrills(map);
+    setWeekDrills(prev => ({ ...prev, ...map }));
     return map;
   };
 
@@ -921,9 +921,14 @@ const AthleteManager = () => {
   };
 
   const handleDateChange = async (newDate: string) => {
+    const oldWeekStart = getWeekDates(selectedDate)[0];
+    const newWeekStart = getWeekDates(newDate)[0];
     setSelectedDate(newDate);
-    // Load all 7 days of the containing week
-    await loadWeekDrills(getWeekDates(newDate));
+    // Only hit the DB when moving to a different week — same-week day changes
+    // must NOT reload or they'll overwrite any unsaved in-memory drills.
+    if (newWeekStart !== oldWeekStart) {
+      await loadWeekDrills(getWeekDates(newDate));
+    }
   };
 
   const [role, setRole] = useState<Role>('Coach'); // default until profile loads
