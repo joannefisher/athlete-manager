@@ -994,6 +994,21 @@ const AthleteManager = () => {
   const navigateTo = (page: string) => { setCurrentPage(page); setShowMenu(false); };
   const getPageTitle = () => ({ home: 'Home', availability: 'Availability', 'session-plan': 'Session Plan', 'add-drill': 'Create Drill', 'athlete-profile': 'Athlete Profile', setup: 'Setup', reporting: 'Reporting' }[currentPage] || 'Team');
 
+  // ── Unsaved session-plan guard ───────────────────────────────────────────────
+  const [sessionPlanDirty, setSessionPlanDirty] = useState(false);
+  const [pendingNavPage, setPendingNavPage] = useState<string | null>(null);
+
+  // Use this instead of navigateTo everywhere in the shell nav buttons
+  const guardedNavigateTo = (page: string) => {
+    // 'add-drill' is a sub-page of session-plan — always allow
+    if (page === 'add-drill') { navigateTo(page); return; }
+    if (effectivePage === 'session-plan' && sessionPlanDirty && page !== 'session-plan') {
+      setPendingNavPage(page);
+    } else {
+      navigateTo(page);
+    }
+  };
+
   // loading is now an overlay so the app shell stays visible
 
   const allNavItems = [
@@ -1099,7 +1114,7 @@ const AthleteManager = () => {
         <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto pt-3">
           <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] px-2.5 pb-2">Menu</p>
           {navItems.map(({ page, Icon, label }) => (
-            <button key={page} onClick={() => navigateTo(page)}
+            <button key={page} onClick={() => guardedNavigateTo(page)}
               className={`w-full text-left px-2.5 py-2 rounded flex items-center gap-2.5 text-[13px] transition-colors relative ${effectivePage === page ? 'bg-white/[0.08] text-slate-100 font-medium' : 'text-white/40 hover:bg-white/[0.06] hover:text-white/70'}`}>
               {effectivePage === page && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-blue-500 rounded-r" />}
               <Icon className="w-3.5 h-3.5 shrink-0" strokeWidth={effectivePage === page ? 2 : 1.8} />{label}
@@ -1156,7 +1171,7 @@ const AthleteManager = () => {
               </div>
               <div className="p-2 flex-1">
                 {navItems.map(({ page, Icon, label }) => (
-                  <button key={page} onClick={() => navigateTo(page)}
+                  <button key={page} onClick={() => guardedNavigateTo(page)}
                     className={`w-full text-left px-2.5 py-2.5 rounded flex items-center gap-2.5 text-[13px] ${effectivePage === page ? 'bg-white/[0.08] text-slate-100 font-medium' : 'text-white/40 hover:bg-white/[0.06]'}`}>
                     <Icon className="w-3.5 h-3.5 shrink-0" />{label}
                   </button>
@@ -1174,13 +1189,49 @@ const AthleteManager = () => {
         <div className="flex-1">
           {effectivePage === 'home' && <HomePage athletes={athletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} teamStructure={teamStructure} role={effectiveRole} />}
           {effectivePage === 'availability' && <AvailabilityPage athletes={athletes} setAthletes={setAthletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} selectedDate={selectedDate} setSelectedDate={setSelectedDate} availabilityRecords={availabilityRecords} teamStructure={teamStructure} onSave={saveAvailability} onSaveEOD={saveEndOfDayReport} saving={saving} fetchAllData={fetchAllData} role={effectiveRole} />}
-          {effectivePage === 'session-plan' && <SessionPlanPage drills={drills} setDrills={setDrills} weekDrills={weekDrills} setWeekDrills={setWeekDrills} navigateTo={navigateTo} athletes={athletes} drillTypes={drillTypes} teamStructure={teamStructure} defaultTeam={defaultTeam} onSaveDefaultTeam={saveDefaultTeam} selectedDate={selectedDate} onDateChange={handleDateChange} onSaveSessionPlan={saveSessionPlan} saving={saving} getWeekDates={getWeekDates} role={effectiveRole} />}
+          {effectivePage === 'session-plan' && <SessionPlanPage drills={drills} setDrills={setDrills} weekDrills={weekDrills} setWeekDrills={setWeekDrills} navigateTo={navigateTo} athletes={athletes} drillTypes={drillTypes} teamStructure={teamStructure} defaultTeam={defaultTeam} onSaveDefaultTeam={saveDefaultTeam} selectedDate={selectedDate} onDateChange={handleDateChange} onSaveSessionPlan={saveSessionPlan} saving={saving} getWeekDates={getWeekDates} role={effectiveRole} onMarkDirty={setSessionPlanDirty} />}
           {effectivePage === 'add-drill' && <AddDrillPage drills={drills} setDrills={setDrills} weekDrills={weekDrills} setWeekDrills={setWeekDrills} selectedDate={selectedDate} navigateTo={navigateTo} drillTypes={drillTypes} defaultTeam={defaultTeam} athletes={athletes} teamStructure={teamStructure} />}
           {effectivePage === 'athlete-profile' && <AthleteProfilePage athletes={athletes} athleteId={selectedAthleteId} navigateTo={navigateTo} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} onSave={saveAthlete} onDelete={deleteAthlete} saving={saving} role={effectiveRole} />}
           {effectivePage === 'reporting' && <ReportingPage athletes={athletes} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} />}
           {effectivePage === 'setup' && <SetupPage drillTypes={drillTypes} seasonDates={seasonDates} teamStructure={teamStructure} onSaveDrillType={saveDrillType} onDeleteDrillType={deleteDrillType} onSaveSeasonDate={saveSeasonDate} onDeleteSeasonDate={deleteSeasonDate} onSaveTeamStructure={saveTeamStructure} onDeleteTeamStructure={deleteTeamStructurePosition} saving={saving} clubId={clubId} currentUserId={authUser?.id} />}
         </div>
       </div>
+
+      {/* ── Unsaved session plan changes modal ─────────────────────────────── */}
+      {pendingNavPage && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full p-6">
+            <h3 className="text-[15px] font-semibold text-slate-900 mb-1">Unsaved changes</h3>
+            <p className="text-[13px] text-slate-500 mb-5">You have unsaved changes to the session plan. Do you want to save before leaving?</p>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={async () => {
+                  await saveSessionPlan(selectedDate, weekDrills[selectedDate] || []);
+                  setSessionPlanDirty(false);
+                  setPendingNavPage(null);
+                  navigateTo(pendingNavPage);
+                }}
+                className="w-full h-10 bg-slate-900 text-white rounded-lg text-[13px] font-semibold hover:bg-slate-700 transition-colors">
+                Save and leave
+              </button>
+              <button
+                onClick={() => {
+                  setSessionPlanDirty(false);
+                  setPendingNavPage(null);
+                  navigateTo(pendingNavPage);
+                }}
+                className="w-full h-10 bg-red-50 text-red-600 border border-red-200 rounded-lg text-[13px] font-medium hover:bg-red-100 transition-colors">
+                Discard changes
+              </button>
+              <button
+                onClick={() => setPendingNavPage(null)}
+                className="w-full h-10 bg-slate-100 text-slate-600 rounded-lg text-[13px] hover:bg-slate-200 transition-colors">
+                Keep editing
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -2070,7 +2121,7 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
   );
 };
 
-const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigateTo, athletes, drillTypes, teamStructure, defaultTeam, onSaveDefaultTeam, selectedDate, onDateChange, onSaveSessionPlan, saving, getWeekDates, role }: any) => {
+const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigateTo, athletes, drillTypes, teamStructure, defaultTeam, onSaveDefaultTeam, selectedDate, onDateChange, onSaveSessionPlan, saving, getWeekDates, role, onMarkDirty }: any) => {
   const typedAthletes: Athlete[] = athletes;
   const typedDrillTypes: DrillType[] = drillTypes;
   const typedTeamStructure: TeamPosition[] = teamStructure;
@@ -2099,11 +2150,14 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
   useEffect(() => {
     if (!weekDates.includes(activeDay)) setActiveDay(selectedDate);
   }, [weekDates.join(',')]);
+  // Clear dirty when week changes (saves were committed or user moved week)
+  useEffect(() => { onMarkDirty?.(false); }, [weekDates.join(',')]);
 
   // Per-day drills from weekDrills map — fall back to empty array
   const dayDrills: Drill[] = weekDrills[activeDay] || [];
   const setDayDrills = (newDrills: Drill[]) => {
     setWeekDrills((prev: any) => ({ ...prev, [activeDay]: newDrills }));
+    onMarkDirty?.(true);
   };
 
   const getPositionsForDrill = (drill: Drill) => typedDrillTypes.find(dt => dt.name === drill.type)?.positions || typedTeamStructure.map(p => p.number);
@@ -2112,6 +2166,7 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
     setSavingDay(activeDay);
     try {
       await onSaveSessionPlan(activeDay, dayDrills);
+      onMarkDirty?.(false);
       setShowSaveSuccess(true);
       setTimeout(() => setShowSaveSuccess(false), 2000);
     } finally {
