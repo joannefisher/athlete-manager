@@ -351,6 +351,7 @@ const AthleteManager = () => {
           status: todayRec ? todayRec.status : a.status,
           notes: todayRec ? todayRec.note : a.notes,
           isPublic: a.is_public, avatar: a.avatar, photo: a.photo_url,
+          defaultPosition: a.default_position ?? null,
           positionNumbers: (allPositions || []).filter((p: any) => p.athlete_id === a.id).map((p: any) => p.position_number),
           injuries: (allInjuries || []).filter((i: any) => i.athlete_id === a.id).map((i: any) => ({
             id: i.id, bodyPart: i.body_part, startDate: i.start_date,
@@ -501,7 +502,8 @@ const AthleteManager = () => {
         notes: athlete.notes,
         is_public: athlete.isPublic,
         avatar: athlete.avatar,
-        photo_url: athlete.photo
+        photo_url: athlete.photo,
+        default_position: athlete.defaultPosition ?? null
       };
 
       let athleteId = athlete.id;
@@ -925,6 +927,9 @@ const AthleteManager = () => {
   };
 
   const [role, setRole] = useState<Role>('Coach'); // default until profile loads
+  const [viewingAs, setViewingAs] = useState<Role>('Coach'); // admin can impersonate other roles
+  // effectiveRole is what drives nav/page access/permissions — admin can switch it
+  const effectiveRole: Role = role === 'Admin' ? viewingAs : role;
   const [clubId, setClubId] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -950,6 +955,7 @@ const AthleteManager = () => {
             : 'Coach';
           console.log('[loadProfile] raw role from DB:', JSON.stringify(rawRole), '→', loadedRole);
           setRole(loadedRole);
+          setViewingAs(loadedRole);
           setClubId(data.club_id);
           setAuthLoading(false);
           return;
@@ -998,10 +1004,10 @@ const AthleteManager = () => {
 
     { page: 'setup', Icon: Settings, label: 'Setup' },
   ];
-  const navItems = allNavItems.filter(item => ROLE_ACCESS[role].includes(item.page));
+  const navItems = allNavItems.filter(item => ROLE_ACCESS[effectiveRole].includes(item.page));
 
   // If current page not accessible for role, redirect to first allowed page
-  const allowedPages = ROLE_ACCESS[role];
+  const allowedPages = ROLE_ACCESS[effectiveRole];
   const effectivePage = allowedPages.includes(currentPage) ? currentPage : allowedPages[0];
 
   const UserInfo = ({ dark = false }: { dark?: boolean }) => {
@@ -1014,7 +1020,7 @@ const AthleteManager = () => {
     if (!dark) {
       return (
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-slate-500">{role}</span>
+          <span className="text-[11px] text-slate-500">{effectiveRole}</span>
           <button onClick={handleSignOut}
             className="text-xs border border-slate-200 rounded px-2 py-1.5 bg-white text-slate-600 hover:bg-slate-50 transition-colors">
             Sign out
@@ -1028,9 +1034,23 @@ const AthleteManager = () => {
           <div className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-[11px] font-semibold text-white shrink-0">{initials}</div>
           <div className="min-w-0">
             <p className="text-[11px] text-white/70 truncate">{email}</p>
-            <p className="text-[10px] text-white/40">{role}</p>
+            <p className="text-[10px] text-white/40">{effectiveRole}</p>
           </div>
         </div>
+        {/* Admin-only: viewing as role switcher */}
+        {role === 'Admin' && (
+          <div className="px-2.5 pb-1">
+            <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] mb-1">View as</p>
+            <select
+              value={viewingAs}
+              onChange={e => { setViewingAs(e.target.value as Role); navigateTo('home'); }}
+              className="w-full h-7 px-2 text-[11px] bg-white/10 text-white/80 border border-white/20 rounded focus:outline-none">
+              {(['Admin', 'S&C', 'Physio', 'Coach'] as Role[]).map(r => (
+                <option key={r} value={r} style={{ background: '#1e293b' }}>{r}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <button onClick={handleSignOut}
           className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[12px] text-white/50 hover:text-white/80 hover:bg-white/[0.06] rounded transition-colors">
           <X className="w-3 h-3" />Sign out
@@ -1111,6 +1131,15 @@ const AthleteManager = () => {
             <h2 className="text-[15px] font-semibold text-slate-900 leading-none">{getPageTitle()}</h2>
             <p className="text-[11px] text-slate-400 mt-1 font-light">{new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
           </div>
+          {role === 'Admin' && (
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-400">Viewing as</span>
+              <select value={viewingAs} onChange={e => { setViewingAs(e.target.value as Role); navigateTo('home'); }}
+                className="h-7 px-2 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                {(['Admin', 'S&C', 'Physio', 'Coach'] as Role[]).map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </div>
+          )}
         </div>
 
         {/* Mobile slide-out menu */}
@@ -1143,13 +1172,12 @@ const AthleteManager = () => {
 
         {/* Page content */}
         <div className="flex-1">
-          {effectivePage === 'home' && <HomePage athletes={athletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} teamStructure={teamStructure} role={role} />}
-          {effectivePage === 'availability' && <AvailabilityPage athletes={athletes} setAthletes={setAthletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} selectedDate={selectedDate} setSelectedDate={setSelectedDate} availabilityRecords={availabilityRecords} teamStructure={teamStructure} onSave={saveAvailability} onSaveEOD={saveEndOfDayReport} saving={saving} fetchAllData={fetchAllData} role={role} />}
-          {effectivePage === 'session-plan' && <SessionPlanPage drills={drills} setDrills={setDrills} weekDrills={weekDrills} setWeekDrills={setWeekDrills} navigateTo={navigateTo} athletes={athletes} drillTypes={drillTypes} teamStructure={teamStructure} defaultTeam={defaultTeam} onSaveDefaultTeam={saveDefaultTeam} selectedDate={selectedDate} onDateChange={handleDateChange} onSaveSessionPlan={saveSessionPlan} saving={saving} getWeekDates={getWeekDates} role={role} />}
+          {effectivePage === 'home' && <HomePage athletes={athletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} teamStructure={teamStructure} role={effectiveRole} />}
+          {effectivePage === 'availability' && <AvailabilityPage athletes={athletes} setAthletes={setAthletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} selectedDate={selectedDate} setSelectedDate={setSelectedDate} availabilityRecords={availabilityRecords} teamStructure={teamStructure} onSave={saveAvailability} onSaveEOD={saveEndOfDayReport} saving={saving} fetchAllData={fetchAllData} role={effectiveRole} />}
+          {effectivePage === 'session-plan' && <SessionPlanPage drills={drills} setDrills={setDrills} weekDrills={weekDrills} setWeekDrills={setWeekDrills} navigateTo={navigateTo} athletes={athletes} drillTypes={drillTypes} teamStructure={teamStructure} defaultTeam={defaultTeam} onSaveDefaultTeam={saveDefaultTeam} selectedDate={selectedDate} onDateChange={handleDateChange} onSaveSessionPlan={saveSessionPlan} saving={saving} getWeekDates={getWeekDates} role={effectiveRole} />}
           {effectivePage === 'add-drill' && <AddDrillPage drills={drills} setDrills={setDrills} weekDrills={weekDrills} setWeekDrills={setWeekDrills} selectedDate={selectedDate} navigateTo={navigateTo} drillTypes={drillTypes} defaultTeam={defaultTeam} athletes={athletes} teamStructure={teamStructure} />}
-          {effectivePage === 'athlete-profile' && <AthleteProfilePage athletes={athletes} athleteId={selectedAthleteId} navigateTo={navigateTo} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} onSave={saveAthlete} onDelete={deleteAthlete} saving={saving} role={role} />}
+          {effectivePage === 'athlete-profile' && <AthleteProfilePage athletes={athletes} athleteId={selectedAthleteId} navigateTo={navigateTo} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} onSave={saveAthlete} onDelete={deleteAthlete} saving={saving} role={effectiveRole} />}
           {effectivePage === 'reporting' && <ReportingPage athletes={athletes} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} />}
-
           {effectivePage === 'setup' && <SetupPage drillTypes={drillTypes} seasonDates={seasonDates} teamStructure={teamStructure} onSaveDrillType={saveDrillType} onDeleteDrillType={deleteDrillType} onSaveSeasonDate={saveSeasonDate} onDeleteSeasonDate={deleteSeasonDate} onSaveTeamStructure={saveTeamStructure} onDeleteTeamStructure={deleteTeamStructurePosition} saving={saving} clubId={clubId} currentUserId={authUser?.id} />}
         </div>
       </div>
@@ -1190,6 +1218,45 @@ const InjuryDisplay = ({ athlete }: { athlete: Athlete }) => {
     </div>
   );
 };
+
+// ── buildPositionGroups — shared helper for Availability + EOD screens ────────
+// Groups athletes by defaultPosition (falls back to lowest positionNumber).
+// Order: Forwards first (asc by position number), then Backs, then Other.
+// Within each position: Available → Modified → Unavailable → surname alpha.
+function buildPositionGroups(athletes: Athlete[], teamStructure: TeamPosition[]) {
+  const STATUS_ORDER: Record<string, number> = { Available: 0, Modified: 1, Unavailable: 2 };
+  const getSurname = (name: string) => { const p = name.trim().split(' '); return p.length > 1 ? p[p.length - 1].toLowerCase() : name.toLowerCase(); };
+
+  const posMap = new Map<string, { posName: string; posNum: number; group: string; athletes: Athlete[] }>();
+
+  for (const a of athletes) {
+    const defNum = a.defaultPosition;
+    let posName = 'Unassigned', posNum = 9999, group = 'Other';
+    if (defNum) {
+      const p = teamStructure.find(p => p.number === defNum);
+      if (p) { posName = p.name; posNum = p.number; group = p.group; }
+    } else if (a.positionNumbers?.length) {
+      const minNum = Math.min(...a.positionNumbers);
+      const p = teamStructure.find(p => p.number === minNum);
+      if (p) { posName = p.name; posNum = p.number; group = p.group; }
+    }
+    if (!posMap.has(posName)) posMap.set(posName, { posName, posNum, group, athletes: [] });
+    posMap.get(posName)!.athletes.push(a);
+  }
+
+  for (const pg of posMap.values()) {
+    pg.athletes.sort((a, b) => {
+      const so = (STATUS_ORDER[a.status] ?? 3) - (STATUS_ORDER[b.status] ?? 3);
+      return so !== 0 ? so : getSurname(a.name).localeCompare(getSurname(b.name));
+    });
+  }
+
+  const groupOrder: Record<string, number> = { Forward: 0, Back: 1, Other: 2 };
+  return Array.from(posMap.values()).sort((a, b) => {
+    const go = (groupOrder[a.group] ?? 2) - (groupOrder[b.group] ?? 2);
+    return go !== 0 ? go : a.posNum - b.posNum;
+  });
+}
 
 const HomePage = ({ athletes, navigateTo, setSelectedAthleteId, teamStructure, role }: { athletes: Athlete[], navigateTo: (page: string) => void, setSelectedAthleteId: (id: string | null) => void, teamStructure: TeamPosition[], role: Role }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -1327,7 +1394,29 @@ const HomePage = ({ athletes, navigateTo, setSelectedAthleteId, teamStructure, r
                 : <div className="w-8 h-8 bg-slate-100 rounded-md flex items-center justify-center text-[10px] font-semibold text-slate-500 flex-shrink-0">{a.avatar}</div>}
               <div className="flex-1 min-w-0">
                 <h3 className="text-[13px] font-medium text-slate-900 leading-none">{a.name}</h3>
-                <p className="text-[11px] text-slate-400 mt-1">{getPositionDisplay(a.positionNumbers, teamStructure)}</p>
+                <p className="text-[11px] mt-1">
+                  {(() => {
+                    const { positionNumbers, defaultPosition } = a;
+                    if (!positionNumbers?.length) return <span className="text-slate-400">-</span>;
+                    const seen = new Set<string>();
+                    const parts: { name: string; isDefault: boolean }[] = [];
+                    // Default position first
+                    if (defaultPosition) {
+                      const p = teamStructure.find((t: TeamPosition) => t.number === defaultPosition);
+                      if (p && !seen.has(p.name)) { seen.add(p.name); parts.push({ name: p.name, isDefault: true }); }
+                    }
+                    positionNumbers.forEach((num: number) => {
+                      const p = teamStructure.find((t: TeamPosition) => t.number === num);
+                      if (p && !seen.has(p.name)) { seen.add(p.name); parts.push({ name: p.name, isDefault: false }); }
+                    });
+                    return parts.map((p, i) => (
+                      <React.Fragment key={p.name}>
+                        {i > 0 && <span className="text-slate-300">, </span>}
+                        <span className={p.isDefault ? 'font-semibold text-slate-700' : 'text-slate-400'}>{p.name}</span>
+                      </React.Fragment>
+                    ));
+                  })()}
+                </p>
               </div>
               <div className="flex-shrink-0">
                 <StatusBadge status={a.status} size="xs" />
@@ -1451,23 +1540,8 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
     updateAthlete(athleteId, { injuries: (athlete.injuries || []).filter((i: any) => i.id !== injuryId) });
   };
 
-  // Sort order AND group membership are fixed at mount — status changes never re-order or re-group
-  const [rowMeta] = useState<{ id: string; initialStatus: string }[]>(() => {
-    const statusOrder: Record<string, number> = { 'Available': 0, 'Modified': 1, 'Unavailable': 2 };
-    return [...athletes]
-      .sort((a: any, b: any) => {
-        const so = (statusOrder[a.status] ?? 3) - (statusOrder[b.status] ?? 3);
-        return so !== 0 ? so : a.name.localeCompare(b.name);
-      })
-      .map((a: any) => ({ id: a.id, initialStatus: a.status }));
-  });
-  // Render in fixed order, live data from eodAthletes
-  const sorted = rowMeta
-    .map(m => {
-      const a = eodAthletes.find(x => x.id === m.id);
-      return a ? { athlete: a, initialStatus: m.initialStatus } : null;
-    })
-    .filter(Boolean) as { athlete: Athlete; initialStatus: string }[];
+  // Group by default position (Forwards first, then Backs) — fixed at mount so re-ordering doesn't happen on status change
+  const eodPositionGroups = useMemo(() => buildPositionGroups(eodAthletes, typedTeamStructure), []);
 
   const activeInjuries = (a: Athlete) => {
     if (!a.injuries) return [];
@@ -1509,88 +1583,99 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {sorted.map(({ athlete: a, initialStatus }, idx) => {
-                // showGroup uses INITIAL status so headers never move when status changes
-                const prevInitial = idx > 0 ? sorted[idx - 1].initialStatus : null;
-                const showGroup = !prevInitial || prevInitial !== initialStatus;
-                const groupCount = sorted.filter(x => x.initialStatus === initialStatus).length;
-                const injuries = activeInjuries(a);
-                const isModifiedOrUnavailable = a.status === 'Modified' || a.status === 'Unavailable';
-                // Status colour helpers — reflect LIVE status on the row/dot
-                const statusDot = a.status === 'Available' ? 'bg-green-500' : a.status === 'Modified' ? 'bg-amber-500' : 'bg-red-500';
-                const groupHeaderCls = initialStatus === 'Available' ? 'bg-green-50 text-green-700' : initialStatus === 'Modified' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700';
+              {eodPositionGroups.map(pg => {
+                const POS_GROUP_CLS: Record<string,string> = { Forward: 'bg-blue-50 text-blue-700', Back: 'bg-purple-50 text-purple-700', Other: 'bg-slate-50 text-slate-600' };
                 return (
-                  <React.Fragment key={a.id}>
-                    {showGroup && (
-                      <tr>
-                        <td colSpan={5} className={`px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${groupHeaderCls}`}>
-                          {initialStatus} ({groupCount})
-                        </td>
-                      </tr>
-                    )}
-                    <tr className="hover:bg-slate-50 transition-colors">
-                      {/* Name + live status dot */}
-                      <td className="px-3 py-2.5">
-                        <div className="flex items-center gap-2">
-                          <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDot}`} />
-                          <span className="text-[13px] font-medium text-slate-800 whitespace-nowrap">{a.name}</span>
-                        </div>
-                      </td>
-                      {/* Position */}
-                      <td className="px-3 py-2.5 text-[12px] text-slate-500 whitespace-nowrap">
-                        {getPositionDisplay(a.positionNumbers, typedTeamStructure)}
-                      </td>
-                      {/* Status — custom coloured dropdown */}
-                      <td className="px-3 py-2.5">
-                        <StatusSelect value={a.status} onChange={val => updateAthlete(a.id, { status: val })} />
-                      </td>
-                      {/* Selection — only for Modified (not Unavailable) */}
-                      <td className="px-3 py-2.5 hidden md:table-cell">
-                        {a.status === 'Modified' && (
-                          <select value={(a as any).selectionStatus || 'Available for Selection'}
-                            onChange={e => updateAthlete(a.id, { selectionStatus: e.target.value } as any)}
-                            className="h-7 px-2 text-[11px] rounded border border-slate-200 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white">
-                            <option>Available for Selection</option>
-                            <option>Unavailable for Selection</option>
-                          </select>
-                        )}
-                      </td>
-                      {/* Notes & Injuries */}
-                      <td className="px-3 py-2.5">
-                        <div className="space-y-1.5">
-                          {injuries.map((inj: any) => (
-                            <div key={inj.id} className="flex items-start gap-1.5 p-1.5 bg-red-50 border border-red-100 rounded text-[11px] text-red-700">
-                              <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0 text-red-400" />
-                              <span className="flex-1">{inj.bodyPart}{inj.notes ? ` — ${inj.notes}` : ''}{inj.returnDate ? <span className="text-slate-400 ml-1">ETR {fmtDate(inj.returnDate)}</span> : <span className="text-red-500 font-medium ml-1">Season</span>}</span>
-                              <button onClick={() => openEditInjury(a.id, inj)} className="p-0.5 hover:bg-red-100 rounded flex-shrink-0"><Edit2 className="w-2.5 h-2.5 text-red-500" /></button>
-                              <button onClick={() => removeInjury(a.id, inj.id)} className="p-0.5 hover:bg-red-100 rounded flex-shrink-0"><X className="w-2.5 h-2.5 text-red-400" /></button>
-                            </div>
-                          ))}
-                          {a.notes && a.isPublic && (
-                            <div className="flex items-start gap-1.5 p-1.5 bg-blue-50 border border-blue-100 rounded text-[11px] text-blue-700">
-                              <MessageSquare className="w-3 h-3 mt-0.5 flex-shrink-0 text-blue-400" />
-                              <span className="flex-1">{a.notes}</span>
-                            </div>
-                          )}
-                          {a.notes && !a.isPublic && (
-                            <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-[10px] text-slate-400 italic">
-                              <Lock className="w-2.5 h-2.5 flex-shrink-0" />Private note
-                            </div>
-                          )}
-                          <div className="flex gap-1 flex-wrap">
-                            <button onClick={() => openAddInjury(a.id)}
-                              className="flex items-center gap-1 px-2 h-6 bg-red-50 text-red-600 border border-red-100 rounded text-[10px] font-medium hover:bg-red-100 transition-colors">
-                              <Plus className="w-2.5 h-2.5" />Injury
-                            </button>
-                            <button onClick={() => openNoteModal(a)}
-                              className={`flex items-center gap-1 px-2 h-6 rounded text-[10px] font-medium transition-colors border ${a.notes ? 'bg-blue-50 text-blue-600 border-blue-100 hover:bg-blue-100' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}>
-                              <MessageSquare className="w-2.5 h-2.5" />
-                              {a.notes ? (a.isPublic ? 'Edit Note' : 'Edit Private Note') : 'Add Note'}
-                            </button>
-                          </div>
-                        </div>
+                  <React.Fragment key={pg.posName}>
+                    <tr>
+                      <td colSpan={5} className={`px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${POS_GROUP_CLS[pg.group] || 'bg-slate-50 text-slate-500'}`}>
+                        {pg.posName} ({pg.athletes.length})
                       </td>
                     </tr>
+                    {pg.athletes.map(baseAthlete => {
+                      const a = eodAthletes.find(x => x.id === baseAthlete.id) || baseAthlete;
+                      const injuries = activeInjuries(a);
+                      const statusDot = a.status === 'Available' ? 'bg-green-500' : a.status === 'Modified' ? 'bg-amber-500' : 'bg-red-500';
+                      // Build position display: default position bold, others normal
+                      const positionParts = (() => {
+                        const seen = new Set<string>();
+                        const parts: { name: string; isDefault: boolean }[] = [];
+                        (a.positionNumbers || []).forEach((num: number) => {
+                          const pos = typedTeamStructure.find(p => p.number === num);
+                          if (pos && !seen.has(pos.name)) {
+                            seen.add(pos.name);
+                            parts.push({ name: pos.name, isDefault: num === a.defaultPosition });
+                          }
+                        });
+                        return parts;
+                      })();
+                      return (
+                        <tr key={a.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="px-3 py-2.5">
+                            <div className="flex items-center gap-2">
+                              <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDot}`} />
+                              <span className="text-[13px] font-medium text-slate-800 whitespace-nowrap">{a.name}</span>
+                            </div>
+                          </td>
+                          {/* Position — default position bold */}
+                          <td className="px-3 py-2.5 whitespace-nowrap">
+                            {positionParts.length === 0 ? <span className="text-[12px] text-slate-400">-</span> :
+                              positionParts.map((p, i) => (
+                                <React.Fragment key={p.name}>
+                                  {i > 0 && <span className="text-[12px] text-slate-300">, </span>}
+                                  <span className={p.isDefault ? 'text-[12px] font-bold text-slate-800' : 'text-[12px] font-normal text-slate-500'}>{p.name}</span>
+                                </React.Fragment>
+                              ))
+                            }
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <StatusSelect value={a.status} onChange={val => updateAthlete(a.id, { status: val })} />
+                          </td>
+                          <td className="px-3 py-2.5 hidden md:table-cell">
+                            {a.status === 'Modified' && (
+                              <select value={(a as any).selectionStatus || 'Available for Selection'}
+                                onChange={e => updateAthlete(a.id, { selectionStatus: e.target.value } as any)}
+                                className="h-7 px-2 text-[11px] rounded border border-slate-200 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white">
+                                <option>Available for Selection</option>
+                                <option>Unavailable for Selection</option>
+                              </select>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <div className="space-y-1.5">
+                              {injuries.map((inj: any) => (
+                                <div key={inj.id} className="flex items-start gap-1.5 p-1.5 bg-red-50 border border-red-100 rounded text-[11px] text-red-700">
+                                  <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0 text-red-400" />
+                                  <span className="flex-1">{inj.bodyPart}{inj.notes ? ` — ${inj.notes}` : ''}{inj.returnDate ? <span className="text-slate-400 ml-1">ETR {fmtDate(inj.returnDate)}</span> : <span className="text-red-500 font-medium ml-1">Season</span>}</span>
+                                  <button onClick={() => openEditInjury(a.id, inj)} className="p-0.5 hover:bg-red-100 rounded flex-shrink-0"><Edit2 className="w-2.5 h-2.5 text-red-500" /></button>
+                                  <button onClick={() => removeInjury(a.id, inj.id)} className="p-0.5 hover:bg-red-100 rounded flex-shrink-0"><X className="w-2.5 h-2.5 text-red-400" /></button>
+                                </div>
+                              ))}
+                              {a.notes && a.isPublic && (
+                                <div className="flex items-start gap-1.5 p-1.5 bg-blue-50 border border-blue-100 rounded text-[11px] text-blue-700">
+                                  <MessageSquare className="w-3 h-3 mt-0.5 flex-shrink-0 text-blue-400" />
+                                  <span className="flex-1">{a.notes}</span>
+                                </div>
+                              )}
+                              {a.notes && !a.isPublic && (
+                                <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-[10px] text-slate-400 italic">
+                                  <Lock className="w-2.5 h-2.5 flex-shrink-0" />Private note
+                                </div>
+                              )}
+                              <div className="flex gap-1 flex-wrap">
+                                <button onClick={() => openAddInjury(a.id)} className="flex items-center gap-1 px-2 h-6 bg-red-50 text-red-600 border border-red-100 rounded text-[10px] font-medium hover:bg-red-100 transition-colors">
+                                  <Plus className="w-2.5 h-2.5" />Injury
+                                </button>
+                                <button onClick={() => openNoteModal(a)} className={`flex items-center gap-1 px-2 h-6 rounded text-[10px] font-medium transition-colors border ${a.notes ? 'bg-blue-50 text-blue-600 border-blue-100 hover:bg-blue-100' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}>
+                                  <MessageSquare className="w-2.5 h-2.5" />
+                                  {a.notes ? (a.isPublic ? 'Edit Note' : 'Edit Private Note') : 'Add Note'}
+                                </button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </React.Fragment>
                 );
               })}
@@ -1777,8 +1862,19 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
     setTimeout(() => setShowSaveSuccess(false), 2000);
   };
 
-  const getSurnameAv = (n: string) => { const p = n.trim().split(' '); return p.length > 1 ? p[p.length - 1].toLowerCase() : n.toLowerCase(); };
-  const filteredAthletes = displayAthletes.filter(a => a.name.toLowerCase().includes(searchTerm.toLowerCase())).sort((a, b) => getSurnameAv(a.name).localeCompare(getSurnameAv(b.name)));
+  const filteredAthletes = displayAthletes.filter(a => a.name.toLowerCase().includes(searchTerm.toLowerCase()));
+  const positionGroups = useMemo(() => buildPositionGroups(filteredAthletes, typedTeamStructure), [filteredAthletes, typedTeamStructure]);
+  const [openPositions, setOpenPositions] = useState<Set<string>>(new Set());
+  const [positionsInitialised, setPositionsInitialised] = useState(false);
+  useEffect(() => {
+    if (!positionsInitialised && positionGroups.length > 0) {
+      setOpenPositions(new Set(positionGroups.map(pg => pg.posName)));
+      setPositionsInitialised(true);
+    }
+  }, [positionGroups, positionsInitialised]);
+  const togglePosition = (posName: string) => setOpenPositions(prev => {
+    const n = new Set(prev); if (n.has(posName)) n.delete(posName); else n.add(posName); return n;
+  });
 
   if (showEOD) {
     return (
@@ -1842,67 +1938,98 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
 
       {showSaveSuccess && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-[13px] font-medium">✓ Saved</div>}
 
-      <div className="pb-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-          {filteredAthletes.map(athlete => (
-            <div key={athlete.id} className="bg-white rounded-lg border border-slate-200 p-3.5">
-              {/* Header row */}
-              <div className="flex items-center gap-3">
-                <div className="cursor-pointer flex-shrink-0" onClick={() => { setSelectedAthleteId(athlete.id); navigateTo('athlete-profile'); }}>
-                  {athlete.photo
-                    ? <img src={athlete.photo} alt="" className="w-8 h-8 rounded-md object-cover" />
-                    : <div className="w-8 h-8 bg-slate-100 rounded-md flex items-center justify-center text-[10px] font-semibold text-slate-500">{athlete.avatar}</div>}
-                </div>
-                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { setSelectedAthleteId(athlete.id); navigateTo('athlete-profile'); }}>
-                  <h3 className="text-[13px] font-medium text-slate-900 truncate leading-none">{athlete.name}</h3>
-                  <p className="text-[11px] text-slate-400 mt-1 truncate">{getPositionDisplay(athlete.positionNumbers, typedTeamStructure)}</p>
-                </div>
-                <StatusSelect value={athlete.status} onChange={async val => {
-                    if (selectedDate === todayStr) {
-                      setAthletes(typedAthletes.map(a => a.id === athlete.id ? { ...a, status: val } : a));
-                      await supabase.from('athletes').update({ status: val }).eq('id', athlete.id);
-                      // Auto-save availability_record for today
-                      await supabase.from('availability_records').upsert({ date: todayStr, athlete_id: athlete.id, status: val, note: athlete.notes || '' }, { onConflict: 'date,athlete_id' });
-                    } else {
-                      setDateRecordsMap(prev => ({ ...prev, [athlete.id]: { status: val, note: prev[athlete.id]?.note ?? athlete.notes ?? '' } }));
-                      await supabase.from('availability_records').upsert({ date: selectedDate, athlete_id: athlete.id, status: val, note: athlete.notes || '' }, { onConflict: 'date,athlete_id' });
-                    }
-                    setShowSaveSuccess(true);
-                    setTimeout(() => setShowSaveSuccess(false), 1200);
-                  }} />
-              </div>
-              {/* Group tag — matches Home page */}
-              {getPositionGroup(athlete.positionNumbers, typedTeamStructure) && (
-                <div className="mt-2">
-                  <span className="text-[10px] font-medium text-slate-400 bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5">{getPositionGroup(athlete.positionNumbers, typedTeamStructure)}</span>
-                </div>
-              )}
-              <InjuryDisplay athlete={athlete} />
-              {/* Notes — visibility + editability governed by role */}
-              {athlete.notes && (athlete.isPublic || canAddPrivateNote(role)) && (
-                canEditPublicNote(role) || (!athlete.isPublic && canAddPrivateNote(role)) ? (
-                  <button onClick={() => { setSelectedAthlete(athlete); setTempNotes(athlete.notes); setTempIsPublic(athlete.isPublic); setShowNotesModal(true); }}
-                    className={`mt-2 w-full text-left p-2 rounded flex items-start gap-1.5 transition-colors ${athlete.isPublic ? 'bg-blue-50 border border-blue-100 hover:bg-blue-100' : 'bg-slate-50 border border-slate-200 hover:bg-slate-100'}`}>
-                    <MessageSquare className={`w-3 h-3 mt-0.5 flex-shrink-0 ${athlete.isPublic ? 'text-blue-400' : 'text-slate-400'}`} />
-                    <span className={`text-[11px] leading-snug ${athlete.isPublic ? 'text-blue-700' : 'text-slate-600'}`}>{athlete.notes}</span>
-                    {!athlete.isPublic && <span className="ml-auto text-[9px] text-slate-400 shrink-0">Private</span>}
-                  </button>
-                ) : (
-                  <div className={`mt-2 w-full p-2 rounded flex items-start gap-1.5 ${athlete.isPublic ? 'bg-blue-50 border border-blue-100' : 'bg-slate-50 border border-slate-200'}`}>
-                    <MessageSquare className={`w-3 h-3 mt-0.5 flex-shrink-0 ${athlete.isPublic ? 'text-blue-400' : 'text-slate-400'}`} />
-                    <span className={`text-[11px] leading-snug ${athlete.isPublic ? 'text-blue-700' : 'text-slate-600'}`}>{athlete.notes}</span>
+      <div className="pb-4 space-y-1">
+        {(() => {
+          let lastGroup = '';
+          const GROUP_HEADER_CLS: Record<string, string> = { Forward: 'bg-blue-600 text-white', Back: 'bg-purple-600 text-white', Other: 'bg-slate-600 text-white' };
+          const GROUP_LABELS: Record<string, string> = { Forward: 'Forwards', Back: 'Backs', Other: 'Other' };
+          return positionGroups.map(pg => {
+            const showGroupDivider = pg.group !== lastGroup;
+            if (showGroupDivider) lastGroup = pg.group;
+            const isOpen = openPositions.has(pg.posName);
+            return (
+              <div key={pg.posName}>
+                {showGroupDivider && (
+                  <div className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-t-lg mt-2 first:mt-0 ${GROUP_HEADER_CLS[pg.group] || 'bg-slate-600 text-white'}`}>
+                    {GROUP_LABELS[pg.group] || pg.group}
                   </div>
-                )
-              )}
-              {canAddPrivateNote(role) && !athlete.notes && (
-                <button onClick={() => { setSelectedAthlete(athlete); setTempNotes(''); setTempIsPublic(false); setShowNotesModal(true); }}
-                  className="mt-2 flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-600 transition-colors">
-                  <MessageSquare className="w-3 h-3" />Add note
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
+                )}
+                <div className={`bg-white border border-slate-200 overflow-hidden ${showGroupDivider ? 'rounded-b-lg rounded-tr-lg' : 'rounded-lg'}`}>
+                  <button onClick={() => togglePosition(pg.posName)} className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-slate-50 transition-colors">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13px] font-semibold text-slate-800">{pg.posName}</span>
+                      <span className="text-[10px] text-slate-400">({pg.athletes.length})</span>
+                      <div className="flex items-center gap-1.5 ml-1">
+                        {(['Available', 'Modified', 'Unavailable'] as const).map(st => {
+                          const count = pg.athletes.filter(a => a.status === st).length;
+                          if (!count) return null;
+                          const dot = st === 'Available' ? 'bg-green-500' : st === 'Modified' ? 'bg-amber-500' : 'bg-red-500';
+                          return <span key={st} className="flex items-center gap-0.5"><span className={`w-1.5 h-1.5 rounded-full ${dot}`} /><span className="text-[10px] text-slate-400">{count}</span></span>;
+                        })}
+                      </div>
+                    </div>
+                    {isOpen ? <ChevronUp className="w-3.5 h-3.5 text-slate-400" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-400" />}
+                  </button>
+                  {isOpen && (
+                    <div className="border-t border-slate-100">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 p-2.5">
+                        {pg.athletes.map(athlete => (
+                          <div key={athlete.id} className="bg-white rounded-lg border border-slate-200 p-3">
+                            <div className="flex items-center gap-3">
+                              <div className="cursor-pointer flex-shrink-0" onClick={() => { setSelectedAthleteId(athlete.id); navigateTo('athlete-profile'); }}>
+                                {athlete.photo
+                                  ? <img src={athlete.photo} alt="" className="w-8 h-8 rounded-md object-cover" />
+                                  : <div className="w-8 h-8 bg-slate-100 rounded-md flex items-center justify-center text-[10px] font-semibold text-slate-500">{athlete.avatar}</div>}
+                              </div>
+                              <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { setSelectedAthleteId(athlete.id); navigateTo('athlete-profile'); }}>
+                                <h3 className="text-[13px] font-medium text-slate-900 truncate leading-none">{athlete.name}</h3>
+                                <p className="text-[11px] text-slate-400 mt-1 truncate">{getPositionDisplay(athlete.positionNumbers, typedTeamStructure)}</p>
+                              </div>
+                              <StatusSelect value={athlete.status} onChange={async val => {
+                                  if (selectedDate === todayStr) {
+                                    setAthletes(typedAthletes.map(a => a.id === athlete.id ? { ...a, status: val } : a));
+                                    await supabase.from('athletes').update({ status: val }).eq('id', athlete.id);
+                                    await supabase.from('availability_records').upsert({ date: todayStr, athlete_id: athlete.id, status: val, note: athlete.notes || '' }, { onConflict: 'date,athlete_id' });
+                                  } else {
+                                    setDateRecordsMap(prev => ({ ...prev, [athlete.id]: { status: val, note: prev[athlete.id]?.note ?? athlete.notes ?? '' } }));
+                                    await supabase.from('availability_records').upsert({ date: selectedDate, athlete_id: athlete.id, status: val, note: athlete.notes || '' }, { onConflict: 'date,athlete_id' });
+                                  }
+                                  setShowSaveSuccess(true);
+                                  setTimeout(() => setShowSaveSuccess(false), 1200);
+                                }} />
+                            </div>
+                            <InjuryDisplay athlete={athlete} />
+                            {athlete.notes && (athlete.isPublic || canAddPrivateNote(role)) && (
+                              canEditPublicNote(role) || (!athlete.isPublic && canAddPrivateNote(role)) ? (
+                                <button onClick={() => { setSelectedAthlete(athlete); setTempNotes(athlete.notes); setTempIsPublic(athlete.isPublic); setShowNotesModal(true); }}
+                                  className={`mt-2 w-full text-left p-2 rounded flex items-start gap-1.5 transition-colors ${athlete.isPublic ? 'bg-blue-50 border border-blue-100 hover:bg-blue-100' : 'bg-slate-50 border border-slate-200 hover:bg-slate-100'}`}>
+                                  <MessageSquare className={`w-3 h-3 mt-0.5 flex-shrink-0 ${athlete.isPublic ? 'text-blue-400' : 'text-slate-400'}`} />
+                                  <span className={`text-[11px] leading-snug ${athlete.isPublic ? 'text-blue-700' : 'text-slate-600'}`}>{athlete.notes}</span>
+                                  {!athlete.isPublic && <span className="ml-auto text-[9px] text-slate-400 shrink-0">Private</span>}
+                                </button>
+                              ) : (
+                                <div className={`mt-2 w-full p-2 rounded flex items-start gap-1.5 ${athlete.isPublic ? 'bg-blue-50 border border-blue-100' : 'bg-slate-50 border border-slate-200'}`}>
+                                  <MessageSquare className={`w-3 h-3 mt-0.5 flex-shrink-0 ${athlete.isPublic ? 'text-blue-400' : 'text-slate-400'}`} />
+                                  <span className={`text-[11px] leading-snug ${athlete.isPublic ? 'text-blue-700' : 'text-slate-600'}`}>{athlete.notes}</span>
+                                </div>
+                              )
+                            )}
+                            {canAddPrivateNote(role) && !athlete.notes && (
+                              <button onClick={() => { setSelectedAthlete(athlete); setTempNotes(''); setTempIsPublic(false); setShowNotesModal(true); }}
+                                className="mt-2 flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-600 transition-colors">
+                                <MessageSquare className="w-3 h-3" />Add note
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          });
+        })()}
       </div>
 
 {/* No manual Save button — status changes auto-save */}
@@ -1966,9 +2093,11 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
   const weekDates = useMemo(() => getWeekDates(selectedDate), [selectedDate]);
   const [activeDay, setActiveDay] = useState(selectedDate);
 
-  // Sync activeDay when week changes
+  // FIX: sync activeDay when selectedDate changes (e.g. navigating from AddDrillPage)
+  useEffect(() => { setActiveDay(selectedDate); }, [selectedDate]);
+  // Also reset to first day of new week if activeDay falls outside the new week
   useEffect(() => {
-    if (!weekDates.includes(activeDay)) setActiveDay(weekDates[0]);
+    if (!weekDates.includes(activeDay)) setActiveDay(selectedDate);
   }, [weekDates.join(',')]);
 
   // Per-day drills from weekDrills map — fall back to empty array
@@ -2971,7 +3100,17 @@ const AvailabilityReportTab = ({ athletes, availabilityRecords, seasonDates, tea
                 return <button key={pos.name} onClick={() => togglePositionName(pos.name)} className={`px-2 py-1 rounded text-xs ${allSelected ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>{pos.name}</button>;
               })}
             </div></div>
-            <div><p className="text-xs text-slate-500 mb-2">Athletes ({selectedAthleteIds.length}/{athletes.length})</p><div className="space-y-1 max-h-32 overflow-y-auto">{athletes.map((a: any) => <label key={a.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={selectedAthleteIds.includes(a.id)} onChange={() => setSelectedAthleteIds((p: any) => p.includes(a.id) ? p.filter((x: any) => x !== a.id) : [...p, a.id])} className="w-4 h-4" />{a.name}</label>)}</div></div>
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-slate-500">Athletes ({selectedAthleteIds.length}/{athletes.length})</p>
+                <div className="flex gap-2">
+                  <button onClick={() => setSelectedAthleteIds(athletes.map((a: any) => a.id))} className="text-[11px] text-blue-600 hover:text-blue-800 font-medium">Select All</button>
+                  <span className="text-[11px] text-slate-300">|</span>
+                  <button onClick={() => setSelectedAthleteIds([])} className="text-[11px] text-slate-500 hover:text-slate-700 font-medium">Clear All</button>
+                </div>
+              </div>
+              <div className="space-y-1 max-h-32 overflow-y-auto">{athletes.map((a: any) => <label key={a.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={selectedAthleteIds.includes(a.id)} onChange={() => setSelectedAthleteIds((p: any) => p.includes(a.id) ? p.filter((x: any) => x !== a.id) : [...p, a.id])} className="w-4 h-4" />{a.name}</label>)}</div>
+            </div>
           </div>
         )}
       </div>
@@ -3074,56 +3213,22 @@ const EODReportTab = ({ athletes, availabilityRecords, teamStructure }: any) => 
   }, [selectedDate, availabilityRecords, athletes]);
 
   // Available first, Modified second (sorted: available-for-selection first, then not), Unavailable last (sorted by ETR)
-  const byStatus = useMemo(() => {
-    const available = snapshot.filter((r: any) => r.status === 'Available')
-      .sort((a: any, b: any) => a.athlete.name.localeCompare(b.athlete.name));
+  // Build position groups for each status slice using buildPositionGroups
+  const eodReportGroups = useMemo(() => {
+    const synthAthletes = snapshot.map((row: any) => ({ ...row.athlete, status: row.status }));
+    return buildPositionGroups(synthAthletes, teamStructure);
+  }, [snapshot, teamStructure]);
 
-    const modified = snapshot.filter((r: any) => r.status === 'Modified')
-      .sort((a: any, b: any) => {
-        // Available for Selection first, then Unavailable for Selection
-        const aAvail = (a.selectionStatus !== 'Unavailable for Selection') ? 0 : 1;
-        const bAvail = (b.selectionStatus !== 'Unavailable for Selection') ? 0 : 1;
-        if (aAvail !== bAvail) return aAvail - bAvail;
-        return a.athlete.name.localeCompare(b.athlete.name);
-      });
-
-    const unavailable = snapshot.filter((r: any) => r.status === 'Unavailable')
-      .sort((a: any, b: any) => {
-        // Sort by soonest ETR first; no ETR (season-long) goes to end
-        const aEtr = a.injuries[0]?.returnDate || '9999-12-31';
-        const bEtr = b.injuries[0]?.returnDate || '9999-12-31';
-        if (aEtr !== bEtr) return aEtr < bEtr ? -1 : 1;
-        return a.athlete.name.localeCompare(b.athlete.name);
-      });
-
-    return { available, modified, unavailable };
+  // Map snapshot rows by athleteId for quick lookup
+  const snapshotMap = useMemo(() => {
+    const m = new Map<string, any>();
+    snapshot.forEach((row: any) => m.set(row.athlete.id, row));
+    return m;
   }, [snapshot]);
 
-  // Available: group by position group then position name (no position numbers shown)
-  const availableByGroup = useMemo(() => {
-    const groups: Record<string, { posName: string; posNumber: number; athletes: any[] }[]> = {};
-    byStatus.available.forEach((row: any) => {
-      const posNums = row.athlete.positionNumbers || [];
-      if (posNums.length === 0) {
-        if (!groups['Unassigned']) groups['Unassigned'] = [];
-        let pos = groups['Unassigned'].find((p: any) => p.posName === 'Unassigned');
-        if (!pos) { pos = { posName: 'Unassigned', posNumber: 999, athletes: [] }; groups['Unassigned'].push(pos); }
-        pos.athletes.push(row); return;
-      }
-      const primaryNum = Math.min(...posNums);
-      const posInfo = teamStructure.find((p: any) => p.number === primaryNum);
-      const group = posInfo?.group || 'Other';
-      const posName = posInfo?.name || `Position ${primaryNum}`;
-      if (!groups[group]) groups[group] = [];
-      let posEntry = groups[group].find((p: any) => p.posName === posName);
-      if (!posEntry) { posEntry = { posName, posNumber: primaryNum, athletes: [] }; groups[group].push(posEntry); }
-      posEntry.athletes.push(row);
-    });
-    Object.values(groups).forEach(g => g.sort((a: any, b: any) => a.posNumber - b.posNumber));
-    const ordered: { group: string; positions: { posName: string; posNumber: number; athletes: any[] }[] }[] = [];
-    ['Forward', 'Back', 'Other', 'Unassigned'].forEach(g => { if (groups[g]) ordered.push({ group: g, positions: groups[g] }); });
-    return ordered;
-  }, [byStatus.available, teamStructure]);
+  // Collapsible state: Available/Modified/Unavailable each independently open
+  const [openSections, setOpenSections] = useState<Set<string>>(new Set(['Available', 'Modified', 'Unavailable']));
+  const toggleSection = (key: string) => setOpenSections(prev => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; });
 
   if (eodDates.length === 0) {
     return (
@@ -3160,89 +3265,56 @@ const EODReportTab = ({ athletes, availabilityRecords, teamStructure }: any) => 
         </div>
       )}
 
-      {/* ── AVAILABLE — multi-column grid, grouped by position name ── */}
-      {byStatus.available.length > 0 && (
-        <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-3 bg-green-50 border-b border-green-100">
-            <div className="w-2 h-2 rounded-full bg-green-500" />
-            <h3 className="text-[13px] font-semibold text-green-700">Available</h3>
-            <span className="ml-auto text-[11px] text-green-400 font-medium">{byStatus.available.length} player{byStatus.available.length !== 1 ? 's' : ''}</span>
-          </div>
-          {availableByGroup.map(({ group, positions }: any) => (
-            <div key={group}>
-              {/* Position group header */}
-              <div className="px-4 py-1.5 bg-slate-50 border-b border-slate-100">
-                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{group}s</span>
-              </div>
-              {positions.map(({ posName, athletes: posAthletes }: any) => (
-                <div key={posName} className="border-b border-slate-50 last:border-b-0">
-                  {/* Position name header */}
-                  <div className="px-4 py-1 flex items-center gap-2 bg-white">
-                    <span className="text-[11px] font-semibold text-slate-600">{posName}</span>
-                    <span className="text-[10px] text-slate-300 font-medium">{posAthletes.length}</span>
-                  </div>
-                  {/* Multi-column grid of athletes */}
-                  <div className="px-3 pb-2 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1.5">
-                    {posAthletes.map((row: any) => (
-                      <EODAvailableCell key={row.athlete.id} row={row} fmtShort={fmtShort} />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
-      )}
+      {/* ── Collapsible Available / Modified / Unavailable accordions ── */}
+      {(['Available', 'Modified', 'Unavailable'] as const).map(status => {
+        const statusRows = snapshot.filter((r: any) => r.status === status);
+        if (!statusRows.length) return null;
+        const isOpen = openSections.has(status);
+        const headerBg = status === 'Available' ? 'bg-green-50 border-green-100' : status === 'Modified' ? 'bg-amber-50 border-amber-100' : 'bg-red-50 border-red-100';
+        const headerText = status === 'Available' ? 'text-green-700' : status === 'Modified' ? 'text-amber-700' : 'text-red-700';
+        const dotCls = status === 'Available' ? 'bg-green-500' : status === 'Modified' ? 'bg-amber-500' : 'bg-red-500';
+        const countText = status === 'Available' ? 'text-green-400' : status === 'Modified' ? 'text-amber-400' : 'text-red-400';
 
-      {/* ── MODIFIED — 2-col grid, selection-available first ── */}
-      {byStatus.modified.length > 0 && (
-        <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-3 bg-amber-50 border-b border-amber-100">
-            <div className="w-2 h-2 rounded-full bg-amber-500" />
-            <h3 className="text-[13px] font-semibold text-amber-700">Modified</h3>
-            <span className="ml-auto text-[11px] text-amber-400 font-medium">{byStatus.modified.length} player{byStatus.modified.length !== 1 ? 's' : ''}</span>
-          </div>
-          {(() => {
-            const forSel = byStatus.modified.filter((r: any) => r.selectionStatus !== 'Unavailable for Selection');
-            const notSel = byStatus.modified.filter((r: any) => r.selectionStatus === 'Unavailable for Selection');
-            const showSubHeaders = forSel.length > 0 && notSel.length > 0;
-            return (
+        // Build position groups just for this status slice
+        const statusAthletes = statusRows.map((r: any) => ({ ...r.athlete, status: r.status }));
+        const statusGroups = buildPositionGroups(statusAthletes, teamStructure);
+
+        return (
+          <div key={status} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+            {/* Accordion header */}
+            <button onClick={() => toggleSection(status)} className={`w-full flex items-center gap-2 px-4 py-3 border-b ${isOpen ? `${headerBg}` : 'border-slate-100'} transition-colors`}>
+              <div className={`w-2 h-2 rounded-full ${dotCls}`} />
+              <h3 className={`text-[13px] font-semibold flex-1 text-left ${isOpen ? headerText : 'text-slate-700'}`}>{status}</h3>
+              <span className={`text-[11px] font-medium ${isOpen ? countText : 'text-slate-400'}`}>{statusRows.length} player{statusRows.length !== 1 ? 's' : ''}</span>
+              {isOpen ? <ChevronUp className="w-4 h-4 opacity-40" /> : <ChevronDown className="w-4 h-4 opacity-40" />}
+            </button>
+
+            {isOpen && (
               <div className="p-3 space-y-3">
-                {showSubHeaders && forSel.length > 0 && (
-                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider px-1">Available for Selection</p>
-                )}
-                {forSel.length > 0 && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    {forSel.map((row: any) => <EODModifiedCard key={row.athlete.id} row={row} fmtShort={fmtShort} />)}
-                  </div>
-                )}
-                {showSubHeaders && notSel.length > 0 && (
-                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider px-1 pt-1">Not Available for Selection</p>
-                )}
-                {notSel.length > 0 && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    {notSel.map((row: any) => <EODModifiedCard key={row.athlete.id} row={row} fmtShort={fmtShort} />)}
-                  </div>
-                )}
+                {statusGroups.map(pg => {
+                  const POS_BG: Record<string,string> = { Forward: 'bg-blue-50 text-blue-700', Back: 'bg-purple-50 text-purple-700', Other: 'bg-slate-50 text-slate-600' };
+                  return (
+                    <div key={pg.posName}>
+                      <div className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-1 rounded mb-1.5 ${POS_BG[pg.group] || 'bg-slate-50 text-slate-500'}`}>
+                        {pg.posName} ({pg.athletes.length})
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+                        {pg.athletes.map(baseAth => {
+                          const row = snapshotMap.get(baseAth.id);
+                          if (!row) return null;
+                          if (status === 'Available') return <EODAvailableCell key={baseAth.id} row={row} fmtShort={fmtShort} />;
+                          if (status === 'Modified') return <EODModifiedCard key={baseAth.id} row={row} fmtShort={fmtShort} />;
+                          return <EODUnavailableRow key={baseAth.id} row={row} fmtShort={fmtShort} />;
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })()}
-        </div>
-      )}
-
-      {/* ── UNAVAILABLE — 2-col grid, ordered by soonest ETR ── */}
-      {byStatus.unavailable.length > 0 && (
-        <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-3 bg-red-50 border-b border-red-100">
-            <div className="w-2 h-2 rounded-full bg-red-500" />
-            <h3 className="text-[13px] font-semibold text-red-700">Unavailable</h3>
-            <span className="ml-auto text-[11px] text-red-400 font-medium">{byStatus.unavailable.length} player{byStatus.unavailable.length !== 1 ? 's' : ''}</span>
+            )}
           </div>
-          <div className="p-3 space-y-2">
-            {byStatus.unavailable.map((row: any) => <EODUnavailableRow key={row.athlete.id} row={row} fmtShort={fmtShort} />)}
-          </div>
-        </div>
-      )}
+        );
+      })}
     </div>
   );
 };
@@ -4063,9 +4135,10 @@ const [photo, setPhoto] = useState(athlete?.photo || '');
 
   const genAvatar = (n: string) => { if (!n) return ''; const p = n.trim().split(' '); return p.length >= 2 ? p[0][0].toUpperCase() + p[p.length-1][0].toUpperCase() : n.substring(0,2).toUpperCase(); };
   const isNew = athlete?.name === 'New Athlete' && !athlete?.positionNumbers?.length;
-  const handleSave = async () => { 
-await onSave({...athlete, name, positionNumbers, defaultPosition, photo, avatar: genAvatar(name), injuries});
-    setShowSaveSuccess(true); 
+  const handleSave = async () => {
+    const validDefault = defaultPosition && positionNumbers.includes(defaultPosition) ? defaultPosition : null;
+    await onSave({...athlete, name, positionNumbers, defaultPosition: validDefault, photo, avatar: genAvatar(name), injuries});
+    setShowSaveSuccess(true);
     setTimeout(() => { setShowSaveSuccess(false); navigateTo('availability'); }, 1000);
   };
 
@@ -4115,7 +4188,7 @@ await onSave({...athlete, name, positionNumbers, defaultPosition, photo, avatar:
                       {uniqueNames.filter((pn: string) => teamStructure.find((p: any) => p.name === pn && p.group === group)).map((pn: string) => {
                         const nums = teamStructure.filter((p: any) => p.name === pn).map((p: any) => p.number);
                         const sel = nums.some((n: number) => positionNumbers.includes(n));
-                        return <button key={pn} onClick={() => { if (sel) setPositionNumbers(positionNumbers.filter((n: number) => !nums.includes(n))); else setPositionNumbers(Array.from(new Set([...positionNumbers, ...nums])).sort((a: number, b: number) => a - b)); }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${sel ? 'bg-slate-800 text-white' : 'bg-white border hover:bg-slate-100'}`}>{pn}</button>;
+                        return <button key={pn} onClick={() => { if (sel) { setPositionNumbers(positionNumbers.filter((n: number) => !nums.includes(n))); if (defaultPosition && nums.includes(defaultPosition)) setDefaultPosition(null); } else setPositionNumbers(Array.from(new Set([...positionNumbers, ...nums])).sort((a: number, b: number) => a - b)); }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${sel ? 'bg-slate-800 text-white' : 'bg-white border hover:bg-slate-100'}`}>{pn}</button>;
                       })}
                     </div>
                   </div>
