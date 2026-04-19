@@ -50,6 +50,7 @@ interface Athlete {
   avatar: string;
   photo: string;
   positionNumbers: number[];
+  defaultPosition?: number | null;
   injuries: Injury[];
 }
 
@@ -4048,8 +4049,9 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
 const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecords, seasonDates, teamStructure, onSave, onDelete, saving, role }: any) => {
   const athlete = athletes.find(a => a.id === athleteId);
   const [name, setName] = useState(athlete?.name || '');
-  const [positionNumbers, setPositionNumbers] = useState(athlete?.positionNumbers || []);
-  const [photo, setPhoto] = useState(athlete?.photo || '');
+const [positionNumbers, setPositionNumbers] = useState(athlete?.positionNumbers || []);
+const [defaultPosition, setDefaultPosition] = useState<number | null>(athlete?.defaultPosition ?? null);
+const [photo, setPhoto] = useState(athlete?.photo || '');
   const [injuries, setInjuries] = useState(athlete?.injuries || []);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
   const [showPositionPicker, setShowPositionPicker] = useState(false);
@@ -4062,7 +4064,7 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
   const genAvatar = (n: string) => { if (!n) return ''; const p = n.trim().split(' '); return p.length >= 2 ? p[0][0].toUpperCase() + p[p.length-1][0].toUpperCase() : n.substring(0,2).toUpperCase(); };
   const isNew = athlete?.name === 'New Athlete' && !athlete?.positionNumbers?.length;
   const handleSave = async () => { 
-    await onSave({...athlete, name, positionNumbers, photo, avatar: genAvatar(name), injuries}); 
+await onSave({...athlete, name, positionNumbers, defaultPosition, photo, avatar: genAvatar(name), injuries});
     setShowSaveSuccess(true); 
     setTimeout(() => { setShowSaveSuccess(false); navigateTo('availability'); }, 1000);
   };
@@ -4121,8 +4123,40 @@ const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecor
               </div>
             )}
           </div>
-          {positionNumbers.length > 0 && <p className="text-xs text-slate-500">Group: {getPositionGroup(positionNumbers, teamStructure)}</p>}
-        </div>
+          {/* Default Position picker — only shown when athlete has positions assigned */}
+{positionNumbers.length > 0 && (() => {
+  const seen = new Set<string>();
+  const assignedPosNames: { name: string; number: number }[] = [];
+  positionNumbers.forEach((num: number) => {
+    const pos = teamStructure.find((p: any) => p.number === num);
+    if (pos && !seen.has(pos.name)) {
+      seen.add(pos.name);
+      assignedPosNames.push({ name: pos.name, number: num });
+    }
+  });
+  return (
+    <div>
+      <label className="block text-xs font-medium mb-1.5">Default Position</label>
+      <div className="flex flex-wrap gap-2">
+        {assignedPosNames.map(pos => (
+          <button
+            key={pos.number}
+            type="button"
+            onClick={() => setDefaultPosition(defaultPosition === pos.number ? null : pos.number)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+              defaultPosition === pos.number
+                ? 'bg-blue-600 text-white border-blue-600'
+                : 'bg-white border-slate-200 text-slate-600 hover:border-slate-400'
+            }`}>
+            {defaultPosition === pos.number ? '★ ' : ''}{pos.name}
+          </button>
+        ))}
+      </div>
+      <p className="text-[11px] text-slate-400 mt-1.5">Used for grouping on Availability and End of Day screens</p>
+    </div>
+  );
+})()}
+{positionNumbers.length > 0 && <p className="text-xs text-slate-500">Group: {getPositionGroup(positionNumbers, teamStructure)}</p>} </div>
 
         <div className="bg-white rounded-lg border border-slate-200 p-4">
           <div className="flex justify-between items-center mb-3">
