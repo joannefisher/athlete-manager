@@ -2204,7 +2204,7 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
             const isActive = date === activeDay;
             const isToday = date === today;
             return (
-              <button key={date} onClick={() => setActiveDay(date)}
+              <button key={date} onClick={() => { setActiveDay(date); onDateChange(date); }}
                 className={`flex flex-col items-center py-2.5 px-1 transition-colors ${isActive ? 'bg-slate-900 text-white' : 'hover:bg-slate-50 text-slate-600'}`}>
                 <span className={`text-[10px] font-semibold ${isActive ? 'text-white/60' : 'text-slate-400'}`}>{DAY_LABELS[i]}</span>
                 <span className={`text-[15px] font-bold leading-tight ${isToday && !isActive ? 'text-blue-600' : ''}`}>{fmtDayNum(date)}</span>
@@ -4188,7 +4188,26 @@ const [photo, setPhoto] = useState(athlete?.photo || '');
                       {uniqueNames.filter((pn: string) => teamStructure.find((p: any) => p.name === pn && p.group === group)).map((pn: string) => {
                         const nums = teamStructure.filter((p: any) => p.name === pn).map((p: any) => p.number);
                         const sel = nums.some((n: number) => positionNumbers.includes(n));
-                        return <button key={pn} onClick={() => { if (sel) { setPositionNumbers(positionNumbers.filter((n: number) => !nums.includes(n))); if (defaultPosition && nums.includes(defaultPosition)) setDefaultPosition(null); } else setPositionNumbers(Array.from(new Set([...positionNumbers, ...nums])).sort((a: number, b: number) => a - b)); }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${sel ? 'bg-slate-800 text-white' : 'bg-white border hover:bg-slate-100'}`}>{pn}</button>;
+                        return <button key={pn} onClick={() => {
+                          if (sel) {
+                            // Removing this position
+                            const newNums = positionNumbers.filter((n: number) => !nums.includes(n));
+                            setPositionNumbers(newNums);
+                            // Clear default if it was this position
+                            if (defaultPosition && nums.includes(defaultPosition)) setDefaultPosition(null);
+                            // If only one position name remains, auto-set it as default
+                            const remaining = [...new Set(newNums.map((n: number) => teamStructure.find((p: any) => p.number === n)?.number).filter(Boolean))] as number[];
+                            const remainingNames = [...new Set(newNums.map((n: number) => teamStructure.find((p: any) => p.number === n)?.name).filter(Boolean))];
+                            if (remainingNames.length === 1) setDefaultPosition(newNums[0]);
+                          } else {
+                            // Adding this position
+                            const newNums = Array.from(new Set([...positionNumbers, ...nums])).sort((a: number, b: number) => a - b);
+                            setPositionNumbers(newNums);
+                            // If this is the only position, auto-set as default
+                            const allNames = [...new Set(newNums.map((n: number) => teamStructure.find((p: any) => p.number === n)?.name).filter(Boolean))];
+                            if (allNames.length === 1) setDefaultPosition(newNums[0]);
+                          }
+                        }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${sel ? 'bg-slate-800 text-white' : 'bg-white border hover:bg-slate-100'}`}>{pn}</button>;
                       })}
                     </div>
                   </div>
