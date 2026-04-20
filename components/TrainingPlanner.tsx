@@ -1945,6 +1945,7 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [quickAddName, setQuickAddName] = useState('');
   const [quickAddError, setQuickAddError] = useState(false);
+  const [createAnother, setCreateAnother] = useState(true);
 
   const [expandedDrill, setExpandedDrill] = useState<string | null>(null);
   const [editingTeam, setEditingTeam] = useState<Drill | null>(null);
@@ -1999,14 +2000,15 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
       subs1: { ...defaultTeam.subs1 },
       subs2: { ...defaultTeam.subs2 },
     };
-    setDayDrills([...dayDrills, newDrill]);
-    // Immediately open the new drill in edit mode
-    setExpandedDrill(newId);
-    setEditingDrillId(newId);
-    setEditDrillData({});
-    setShowQuickAdd(false);
-    setQuickAddName('');
+    setDayDrills(prev => [...prev, newDrill]);
     onMarkDirty?.(true);
+    // Accordion stays closed — user clicks to expand when ready
+    setQuickAddName('');
+    setQuickAddError(false);
+    if (!createAnother) {
+      setShowQuickAdd(false);
+    }
+    // Focus back on the name input handled by autoFocus re-render
   };
 
   const handleSaveDay = async () => {
@@ -2363,11 +2365,17 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
                 />
                 {quickAddError && <p className="text-[11px] text-red-500 mt-1">Please enter a drill name</p>}
               </div>
-              <p className="text-[11px] text-slate-400 leading-relaxed">Added to the plan immediately. Click the drill to add type, duration, intensity, notes and team selection.</p>
+              <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                <div onClick={() => setCreateAnother(!createAnother)}
+                  className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors shrink-0 ${createAnother ? 'bg-slate-900 border-slate-900' : 'border-slate-300 bg-white'}`}>
+                  {createAnother && <svg width="8" height="6" viewBox="0 0 8 6" fill="none"><path d="M1 3l2 2 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                </div>
+                <span className="text-[12px] text-slate-600">Create another</span>
+              </label>
             </div>
             <div className="flex gap-2 px-4 pb-4">
               <button onClick={handleQuickAdd} className="flex-1 h-10 bg-slate-900 text-white rounded-lg text-[13px] font-semibold hover:bg-slate-700 transition-colors">Add Drill</button>
-              <button onClick={() => setShowQuickAdd(false)} className="h-10 px-5 bg-slate-100 text-slate-600 rounded-lg text-[13px] hover:bg-slate-200 transition-colors">Cancel</button>
+              <button onClick={() => setShowQuickAdd(false)} className="h-10 px-5 bg-slate-100 text-slate-600 rounded-lg text-[13px] hover:bg-slate-200 transition-colors">Done</button>
             </div>
           </div>
         </div>
