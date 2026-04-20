@@ -476,7 +476,6 @@ const RehabSetupPage = ({ clubId, role }: { clubId: string; role: Role }) => {
 // ── Compact metadata strip ───────────────────────────────────────────────────
 const MetaStrip = ({ row, athlete, weekCommencing, rtpPhases, staffLeads, fixtures, canEdit, onUpdateField }: any) => {
   const [expandedInjId, setExpandedInjId] = useState<string | null>(null);
-  const [overviewExpanded, setOverviewExpanded] = useState(false);
   const today = new Date().toISOString().split('T')[0];
   const futureFixtures = fixtures.filter((f: any) => f.date >= today);
   const activeInjuries = (athlete?.injuries || []).filter((i: any) => !i.returnDate || i.returnDate >= weekCommencing);
@@ -489,11 +488,6 @@ const MetaStrip = ({ row, athlete, weekCommencing, rtpPhases, staffLeads, fixtur
     const weeksPost = inj.surgeryDate ? weeksApart(inj.surgeryDate, weekCommencing) : null;
     return { ...inj, weeksIn, weeksRtn, weeksPost, urgent: weeksRtn !== null && weeksRtn <= 2 && weeksRtn >= 0 };
   });
-
-  // Overview line logic
-  const overviewLines = (row.weekOverview || '').split('\n').filter((l: string) => l.trim());
-  const firstLine = overviewLines[0] || '';
-  const hasMoreLines = overviewLines.length > 1;
 
   return (
     <div className="border-b border-slate-100">
@@ -566,39 +560,20 @@ const MetaStrip = ({ row, athlete, weekCommencing, rtpPhases, staffLeads, fixtur
           <span className="bg-slate-100 text-slate-600 rounded px-1.5 py-0.5 text-[9px] self-center">{fmtShort(fixture.date)} {fixture.opposition}</span>
         ) : null}
 
-        {/* Overview — inline first line, expand if more */}
-        <div className="ml-auto flex items-center gap-1 self-center min-w-0 max-w-[180px]">
-          {canEdit ? (
-            <button onClick={() => setOverviewExpanded(!overviewExpanded)}
-              className="text-[9px] text-slate-400 hover:text-slate-600 flex items-center gap-0.5 shrink-0">
-              Overview {overviewExpanded ? '▲' : '▼'}
-            </button>
-          ) : firstLine ? (
-            <div className="flex items-center gap-1 min-w-0">
-              <span className="text-[9px] text-slate-500 truncate">{firstLine}</span>
-              {hasMoreLines && (
-                <button onClick={() => setOverviewExpanded(!overviewExpanded)}
-                  className="text-[9px] text-slate-400 hover:text-slate-600 shrink-0">
-                  {overviewExpanded ? '▲' : `+${overviewLines.length - 1}`}
-                </button>
-              )}
-            </div>
-          ) : null}
-        </div>
       </div>
 
-      {/* ── Expanded overview ──────────────────────────────────────── */}
-      {overviewExpanded && (
-        <div className="px-2 py-1.5 bg-white border-b border-slate-100">
-          {canEdit ? (
-            <textarea value={row.weekOverview} onChange={e => onUpdateField('weekOverview', e.target.value)}
-              rows={3} placeholder="Week overview…"
-              className="w-full px-2 py-1 text-[10px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-emerald-400 resize-none leading-snug" />
-          ) : (
-            <p className="text-[10px] text-slate-600 whitespace-pre-wrap leading-snug">{row.weekOverview}</p>
-          )}
-        </div>
-      )}
+      {/* ── Week Overview — always visible ─────────────────────────── */}
+      <div className="px-2 py-1.5 border-b border-slate-100">
+        {canEdit ? (
+          <textarea value={row.weekOverview} onChange={e => onUpdateField('weekOverview', e.target.value)}
+            rows={2} placeholder="Week overview…"
+            className="w-full px-2 py-1 text-[10px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-emerald-400 resize-none leading-snug bg-white" />
+        ) : row.weekOverview ? (
+          <p className="text-[10px] text-slate-600 whitespace-pre-wrap leading-snug">{row.weekOverview}</p>
+        ) : (
+          <span className="text-[9px] text-slate-300 italic">No overview</span>
+        )}
+      </div>
     </div>
   );
 };
