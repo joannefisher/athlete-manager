@@ -5,6 +5,7 @@ import { Target, Zap, Calendar, Loader2, X, AlertCircle, Check, Plus, Trash2, Us
 import { supabase } from '@/lib/supabase';
 import { TrainingPlanner } from './TrainingPlanner';
 import { MainSchedule } from './MainSchedule';
+import { RehabPlanner } from './RehabPlanner';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 export type Role = 'Admin' | 'S&C' | 'Physio' | 'Coach' | 'Player';
@@ -404,18 +405,7 @@ export default function AthleteManager() {
   if (activeApp === 'main-schedule')
     return <MainSchedule role={role} clubId={clubId} authUser={authUser} onBack={() => setActiveApp(null)} />;
   if (activeApp === 'rehab-planner')
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-4">
-        <div className="w-12 h-12 rounded-xl bg-emerald-600 flex items-center justify-center">
-          <Target className="w-6 h-6 text-white" />
-        </div>
-        <p className="text-slate-600 font-medium text-[15px]">Rehab Planner</p>
-        <p className="text-slate-400 text-[13px]">Coming in next build</p>
-        {role !== 'Player' && (
-          <button onClick={() => setActiveApp(null)} className="text-[12px] text-slate-400 hover:text-slate-600 mt-2">← Back to apps</button>
-        )}
-      </div>
-    );
+    return <RehabPlanner role={role} clubId={clubId} authUser={authUser} onBack={() => setActiveApp(null)} />;
 
   return (
     <LandingPage role={role} clubId={clubId} currentUserId={authUser.id} onOpenApp={setActiveApp} />
