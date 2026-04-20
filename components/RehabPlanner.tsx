@@ -643,7 +643,8 @@ const AthleteRow = ({ row, athlete, components, weekDates, rtpPhases, staffLeads
   );
 };
 
- ──────────────────────────────────────────────────────────────────
+
+// ── Day View ─────────────────────────────────────────────────────────────────
 const DayView = ({ rows, allAthletes, components, weekDates, staffLeads, canEdit, isPlayer, weekCommencing, onUpdateEntry }: any) => {
   const today = new Date().toISOString().split('T')[0];
   const defaultDay = weekDates.find((d: string) => d === today) || weekDates[0];
