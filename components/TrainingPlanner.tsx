@@ -166,6 +166,10 @@ export function TrainingPlanner({ role: propRole, clubId: propClubId, authUser, 
   const [teamStructure, setTeamStructure] = useState<TeamPosition[]>([]);
   const [defaultTeam, setDefaultTeam] = useState<DefaultTeam>({ team1: {}, team2: {}, subs1: {}, subs2: {} });
 
+  // Props mapped to stable names used throughout the component
+  const role = propRole;
+  const clubId = propClubId;
+
   // ============================================
   // SUPABASE DATA FETCHING
   // ============================================
