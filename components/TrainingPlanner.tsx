@@ -803,20 +803,10 @@ export function TrainingPlanner({ role: propRole, clubId: propClubId, authUser, 
   const navigateTo = (page: string) => { setCurrentPage(page); setShowMenu(false); };
   const getPageTitle = () => ({ home: 'Home', availability: 'Availability', 'session-plan': 'Session Plan', 'add-drill': 'Create Drill', 'athlete-profile': 'Athlete Profile', setup: 'Setup', reporting: 'Reporting' }[currentPage] || 'Team');
 
-  // ── Unsaved session-plan guard ───────────────────────────────────────────────
-  const [sessionPlanDirty, setSessionPlanDirty] = useState(false);
-  const [pendingNavPage, setPendingNavPage] = useState<string | null>(null);
-
-  // Use this instead of navigateTo everywhere in the shell nav buttons
-  const guardedNavigateTo = (page: string) => {
-    // 'add-drill' is a sub-page of session-plan — always allow
-    if (page === 'add-drill') { navigateTo(page); return; }
-    if (effectivePage === 'session-plan' && sessionPlanDirty && page !== 'session-plan') {
-      setPendingNavPage(page);
-    } else {
-      navigateTo(page);
-    }
-  };
+  // Admin can impersonate other roles to preview their view
+  const [viewingAs, setViewingAs] = React.useState<Role>(role);
+  React.useEffect(() => { setViewingAs(role); }, [role]);
+  const effectiveRole: Role = role === 'Admin' ? viewingAs : role;
 
   // loading is now an overlay so the app shell stays visible
 
@@ -833,6 +823,20 @@ export function TrainingPlanner({ role: propRole, clubId: propClubId, authUser, 
   // If current page not accessible for role, redirect to first allowed page
   const allowedPages = ROLE_ACCESS[effectiveRole];
   const effectivePage = allowedPages.includes(currentPage) ? currentPage : allowedPages[0];
+
+  // ── Unsaved session-plan guard ───────────────────────────────────────────────
+  const [sessionPlanDirty, setSessionPlanDirty] = useState(false);
+  const [pendingNavPage, setPendingNavPage] = useState<string | null>(null);
+
+  const guardedNavigateTo = (page: string) => {
+    if (page === 'add-drill') { navigateTo(page); return; }
+    if (effectivePage === 'session-plan' && sessionPlanDirty && page !== 'session-plan') {
+      setPendingNavPage(page);
+    } else {
+      navigateTo(page);
+    }
+  };
+
 
   const UserInfo = ({ dark = false }: { dark?: boolean }) => {
     const email = authUser?.email || '';
