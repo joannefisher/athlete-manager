@@ -78,8 +78,8 @@ const STAFF_COLOURS = [
   { bg: 'bg-indigo-100',  text: 'text-indigo-700',  border: 'border-indigo-200',  dot: 'bg-indigo-500'  },
   { bg: 'bg-fuchsia-100', text: 'text-fuchsia-700', border: 'border-fuchsia-200', dot: 'bg-fuchsia-500' },
   { bg: 'bg-cyan-100',    text: 'text-cyan-700',    border: 'border-cyan-200',    dot: 'bg-cyan-500'    },
-  { bg: 'bg-teal-100',    text: 'text-teal-700',    border: 'border-teal-200',    dot: 'bg-teal-500'    },
-  { bg: 'bg-rose-100',    text: 'text-rose-700',    border: 'border-rose-200',    dot: 'bg-rose-500'    },
+  { bg: 'bg-purple-100',  text: 'text-purple-700',  border: 'border-purple-200',  dot: 'bg-purple-500'  },
+  { bg: 'bg-slate-200',   text: 'text-slate-700',   border: 'border-slate-300',   dot: 'bg-slate-500'   },
 ];
 const staffColour = (idx: number) => STAFF_COLOURS[idx % STAFF_COLOURS.length];
 
@@ -161,7 +161,7 @@ const ComboCell = ({ value, options, canEdit, onChange }: {
       />
       {/* Options as checkboxes */}
       {hasOptions && (
-        <div className="absolute top-full left-0 mt-0.5 bg-white border border-slate-200 rounded-lg shadow-lg min-w-full z-40 max-h-44 overflow-y-auto py-1">
+        <div className="absolute bottom-full left-0 mb-0.5 bg-white border border-slate-200 rounded-lg shadow-lg min-w-full z-40 max-h-44 overflow-y-auto py-1">
           {options.map(o => (
             <button key={o} onMouseDown={e => { e.preventDefault(); toggleOption(o); }}
               className="w-full flex items-center gap-2 px-2 py-1 hover:bg-slate-50 transition-colors">
@@ -223,16 +223,16 @@ const StaffLeadPicker = ({ selectedIds, staffLeads, canEdit, onChange, compact =
         {selected.length === 0
           ? <span className="text-slate-300 italic">— Select —</span>
           : <div className="flex flex-wrap gap-0.5">
-              {selected.map(s => (
-                <span key={s.id} className="bg-emerald-100 text-emerald-700 rounded px-1 py-0.5 text-[9px] font-medium">
+              {selected.map((s) => { const c = staffColour(staffLeads.indexOf(s)); return (
+                <span key={s.id} className={`${c.bg} ${c.text} rounded px-1 py-0.5 text-[9px] font-medium`}>
                   {s.name}{s.role && <span className="opacity-60"> · {s.role}</span>}
                 </span>
-              ))}
+              );})}
             </div>
         }
       </button>
       {open && (
-        <div className="absolute top-full left-0 mt-0.5 bg-white border border-slate-200 rounded-lg shadow-xl z-40 min-w-[180px] py-1">
+        <div className="absolute bottom-full left-0 mb-0.5 bg-white border border-slate-200 rounded-lg shadow-xl z-40 min-w-[180px] py-1">
           <p className="px-3 py-1 text-[9px] font-bold text-slate-400 uppercase tracking-wider">Select staff</p>
           {staffLeads.map(s => (
             <button key={s.id} onMouseDown={e => { e.preventDefault(); toggle(s.id); }}
@@ -475,83 +475,127 @@ const RehabSetupPage = ({ clubId, role }: { clubId: string; role: Role }) => {
 
 // ── Compact metadata strip ───────────────────────────────────────────────────
 const MetaStrip = ({ row, athlete, weekCommencing, rtpPhases, staffLeads, fixtures, canEdit, onUpdateField }: any) => {
-  const [showDetail, setShowDetail] = useState(false);
+  const [expandedInjId, setExpandedInjId] = useState<string | null>(null);
+  const [overviewExpanded, setOverviewExpanded] = useState(false);
   const today = new Date().toISOString().split('T')[0];
   const futureFixtures = fixtures.filter((f: any) => f.date >= today);
   const activeInjuries = (athlete?.injuries || []).filter((i: any) => !i.returnDate || i.returnDate >= weekCommencing);
   const fixture = fixtures.find((f: any) => f.id === row.targetFixtureId);
   const rtpPhase = rtpPhases.find((r: any) => r.id === row.rtpPhaseId);
-  const selectedStaff = staffLeads.filter((s: any) => (row.staffLeadIds || []).includes(s.id));
 
-  // Injury summary — most urgent first
   const injSummary = activeInjuries.map((inj: any) => {
+    const weeksIn  = inj.startDate  ? weeksApart(inj.startDate, weekCommencing)  : null;
     const weeksRtn = inj.returnDate ? weeksApart(weekCommencing, inj.returnDate) : null;
-    return { ...inj, weeksRtn, urgent: weeksRtn !== null && weeksRtn <= 2 && weeksRtn >= 0 };
+    const weeksPost = inj.surgeryDate ? weeksApart(inj.surgeryDate, weekCommencing) : null;
+    return { ...inj, weeksIn, weeksRtn, weeksPost, urgent: weeksRtn !== null && weeksRtn <= 2 && weeksRtn >= 0 };
   });
+
+  // Overview line logic
+  const overviewLines = (row.weekOverview || '').split('\n').filter((l: string) => l.trim());
+  const firstLine = overviewLines[0] || '';
+  const hasMoreLines = overviewLines.length > 1;
 
   return (
     <div className="border-b border-slate-100">
-      {/* Single compact row */}
-      <div className="flex items-center gap-1.5 px-2 py-1 flex-wrap min-h-0 bg-slate-50/60">
+      {/* ── Compact strip row ──────────────────────────────────────── */}
+      <div className="flex items-start gap-1.5 px-2 py-1 flex-wrap bg-slate-50/60">
 
-        {/* Injury chips */}
+        {/* Injury chips — clickable to show full detail */}
         {injSummary.length > 0
           ? injSummary.map((inj: any) => (
-            <span key={inj.id} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold leading-none ${inj.urgent ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
-              {inj.bodyPart}
-              {inj.returnDate
-                ? <span className="font-normal opacity-80 ml-0.5">ETR {fmtShort(inj.returnDate)}{inj.weeksRtn !== null && ` (${inj.weeksRtn > 0 ? inj.weeksRtn + 'w' : 'due'})`}</span>
-                : <span className="opacity-80 ml-0.5">Season</span>}
-            </span>
+            <div key={inj.id} className="flex flex-col">
+              <button
+                onClick={() => setExpandedInjId(expandedInjId === inj.id ? null : inj.id)}
+                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold leading-none transition-colors ${inj.urgent ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' : 'bg-red-100 text-red-700 hover:bg-red-200'}`}>
+                {inj.bodyPart}
+                {inj.returnDate
+                  ? <span className="font-normal opacity-80 ml-0.5">ETR {fmtShort(inj.returnDate)}{inj.weeksRtn !== null && ` (${inj.weeksRtn > 0 ? inj.weeksRtn + 'w' : 'due'})`}</span>
+                  : <span className="opacity-80 ml-0.5">Season</span>}
+                <span className="opacity-50 ml-0.5">{expandedInjId === inj.id ? '▲' : '▼'}</span>
+              </button>
+              {/* Full injury detail — expands inline below the chip */}
+              {expandedInjId === inj.id && (
+                <div className="mt-0.5 ml-0.5 bg-white border border-slate-200 rounded p-1.5 text-[9px] text-slate-600 space-y-0.5 shadow-sm z-10 relative min-w-[160px]">
+                  {inj.startDate && (
+                    <p><span className="font-semibold text-slate-400">Start</span> {fmtShort(inj.startDate)}{inj.weeksIn !== null && <span className="text-slate-400 ml-1">({inj.weeksIn}w ago)</span>}</p>
+                  )}
+                  {inj.surgeryDate && (
+                    <p><span className="font-semibold text-slate-400">Surgery</span> {fmtShort(inj.surgeryDate)}{inj.weeksPost !== null && <span className="text-slate-400 ml-1">({inj.weeksPost}w post-op)</span>}</p>
+                  )}
+                  {inj.returnDate && (
+                    <p><span className="font-semibold text-slate-400">ETR</span> {fmtShort(inj.returnDate)}{inj.weeksRtn !== null && <span className="text-slate-400 ml-1">({inj.weeksRtn > 0 ? inj.weeksRtn + 'w away' : 'due this week'})</span>}</p>
+                  )}
+                  {!inj.returnDate && <p className="text-red-600 font-semibold">Season-ending</p>}
+                  {inj.notes && <p className="italic text-slate-400">{inj.notes}</p>}
+                  {inj.event && <p><span className="font-semibold text-slate-400">Event</span> {inj.event}</p>}
+                </div>
+              )}
+            </div>
           ))
-          : <span className="text-[9px] text-slate-300 italic">No injuries</span>
+          : <span className="text-[9px] text-slate-300 italic self-center">No injuries</span>
         }
 
         {/* Divider */}
-        {!isPlayerRole(canEdit) && <span className="w-px h-3 bg-slate-200 mx-0.5 shrink-0" />}
+        <span className="w-px h-3 bg-slate-200 mx-0.5 shrink-0 self-center" />
 
         {/* RTP Phase */}
         {canEdit ? (
           <select value={row.rtpPhaseId || ''} onChange={e => onUpdateField('rtpPhaseId', e.target.value || null)}
-            className="h-5 px-1 text-[9px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-[100px]">
+            className="h-5 px-1 text-[9px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-[100px] self-center">
             <option value="">RTP —</option>
             {rtpPhases.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
         ) : rtpPhase ? (
-          <span className="bg-slate-100 text-slate-600 rounded px-1.5 py-0.5 text-[9px] font-medium">{rtpPhase.name}</span>
+          <span className="bg-slate-100 text-slate-600 rounded px-1.5 py-0.5 text-[9px] font-medium self-center">{rtpPhase.name}</span>
         ) : null}
 
         {/* Staff Lead pills */}
-        <StaffLeadPicker selectedIds={row.staffLeadIds || []} staffLeads={staffLeads} canEdit={canEdit}
-          onChange={ids => onUpdateField('staffLeadIds', ids)} compact={true} />
+        <span className="self-center">
+          <StaffLeadPicker selectedIds={row.staffLeadIds || []} staffLeads={staffLeads} canEdit={canEdit}
+            onChange={ids => onUpdateField('staffLeadIds', ids)} compact={true} />
+        </span>
 
         {/* Target Fixture */}
         {canEdit ? (
           <select value={row.targetFixtureId || ''} onChange={e => onUpdateField('targetFixtureId', e.target.value || null)}
-            className="h-5 px-1 text-[9px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-[130px]">
+            className="h-5 px-1 text-[9px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-[130px] self-center">
             <option value="">Fixture —</option>
             {futureFixtures.map((f: any) => <option key={f.id} value={f.id}>{fmtShort(f.date)} {f.opposition}</option>)}
           </select>
         ) : fixture ? (
-          <span className="bg-slate-100 text-slate-600 rounded px-1.5 py-0.5 text-[9px]">{fmtShort(fixture.date)} {fixture.opposition}</span>
+          <span className="bg-slate-100 text-slate-600 rounded px-1.5 py-0.5 text-[9px] self-center">{fmtShort(fixture.date)} {fixture.opposition}</span>
         ) : null}
 
-        {/* Week overview — expand toggle */}
-        <button onClick={() => setShowDetail(!showDetail)}
-          className="ml-auto text-[9px] text-slate-400 hover:text-slate-600 shrink-0 flex items-center gap-0.5">
-          Overview {showDetail ? '▲' : '▼'}
-        </button>
+        {/* Overview — inline first line, expand if more */}
+        <div className="ml-auto flex items-center gap-1 self-center min-w-0 max-w-[180px]">
+          {canEdit ? (
+            <button onClick={() => setOverviewExpanded(!overviewExpanded)}
+              className="text-[9px] text-slate-400 hover:text-slate-600 flex items-center gap-0.5 shrink-0">
+              Overview {overviewExpanded ? '▲' : '▼'}
+            </button>
+          ) : firstLine ? (
+            <div className="flex items-center gap-1 min-w-0">
+              <span className="text-[9px] text-slate-500 truncate">{firstLine}</span>
+              {hasMoreLines && (
+                <button onClick={() => setOverviewExpanded(!overviewExpanded)}
+                  className="text-[9px] text-slate-400 hover:text-slate-600 shrink-0">
+                  {overviewExpanded ? '▲' : `+${overviewLines.length - 1}`}
+                </button>
+              )}
+            </div>
+          ) : null}
+        </div>
       </div>
 
-      {/* Expandable overview */}
-      {showDetail && (
-        <div className="px-2 py-1.5 bg-slate-50 border-b border-slate-100">
+      {/* ── Expanded overview ──────────────────────────────────────── */}
+      {overviewExpanded && (
+        <div className="px-2 py-1.5 bg-white border-b border-slate-100">
           {canEdit ? (
             <textarea value={row.weekOverview} onChange={e => onUpdateField('weekOverview', e.target.value)}
-              rows={2} placeholder="Week overview…"
-              className="w-full px-2 py-1 text-[10px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-emerald-400 resize-none leading-snug bg-white" />
+              rows={3} placeholder="Week overview…"
+              className="w-full px-2 py-1 text-[10px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-emerald-400 resize-none leading-snug" />
           ) : (
-            <p className="text-[10px] text-slate-600 whitespace-pre-wrap leading-snug">{row.weekOverview || <span className="text-slate-300 italic">No overview</span>}</p>
+            <p className="text-[10px] text-slate-600 whitespace-pre-wrap leading-snug">{row.weekOverview}</p>
           )}
         </div>
       )}
