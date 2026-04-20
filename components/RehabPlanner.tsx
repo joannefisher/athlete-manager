@@ -484,23 +484,21 @@ const AthleteRow = ({
   onUpdateEntry, onUpdateField, onRemove, onCopyPrev, hasPrevWeek,
 }: any) => {
   const [collapsed, setCollapsed] = useState(false);
-  const [injuryExpanded, setInjuryExpanded] = useState(false);
+  const [injExpanded, setInjExpanded] = useState(false);
 
   const staffLead = staffLeads.find((s: any) => s.id === row.staffLeadId);
-  const rtpPhase = rtpPhases.find((r: any) => r.id === row.rtpPhaseId);
-  const fixture = fixtures.find((f: any) => f.id === row.targetFixtureId);
+  const rtpPhase  = rtpPhases.find((r: any) => r.id === row.rtpPhaseId);
+  const fixture   = fixtures.find((f: any)  => f.id === row.targetFixtureId);
   const today = new Date().toISOString().split('T')[0];
   const futureFixtures = fixtures.filter((f: any) => f.date >= today);
-  const activeInjuries = (athlete?.injuries || []).filter((i: any) => !i.returnDate || i.returnDate >= weekCommencing);
+  const activeInjuries = (athlete?.injuries || []).filter(
+    (i: any) => !i.returnDate || i.returnDate >= weekCommencing
+  );
   const nComp = Math.max(components.length, 1);
-
-  // Cell styles
-  const metaCell = "align-top px-2 py-2 border-r border-slate-100 text-[11px]";
-  const metaLabel = "text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1";
 
   return (
     <div className="border-b-2 border-slate-200 last:border-0">
-      {/* ── Athlete name bar ──────────────────────────────────────────── */}
+      {/* ── Athlete name bar ─────────────────────────────────────────── */}
       <div className="flex items-center gap-2 px-3 py-2 bg-slate-800 text-white">
         <button onClick={() => setCollapsed(!collapsed)} className="flex items-center gap-2 flex-1 min-w-0">
           <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center text-[10px] font-bold shrink-0">
@@ -509,7 +507,7 @@ const AthleteRow = ({
           <span className="text-[13px] font-semibold truncate">{athlete?.name}</span>
           {collapsed
             ? <ChevronDown className="w-3.5 h-3.5 text-white/50 shrink-0" />
-            : <ChevronUp className="w-3.5 h-3.5 text-white/50 shrink-0" />}
+            : <ChevronUp   className="w-3.5 h-3.5 text-white/50 shrink-0" />}
         </button>
         <div className="flex items-center gap-1.5 shrink-0">
           {hasPrevWeek && canEdit && (
@@ -528,63 +526,157 @@ const AthleteRow = ({
 
       {!collapsed && (
         <div className="overflow-x-auto bg-white">
-          <table className="w-full border-collapse text-left" style={{ minWidth: isPlayer ? '560px' : '900px' }}>
-            {/* Column headers — only shown once per athlete block */}
+          <table className="w-full border-collapse text-left" style={{ minWidth: isPlayer ? '560px' : '820px' }}>
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
-                {!isPlayer && <>
-                  <th className="px-2 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wider w-36 border-r border-slate-200">Injury</th>
-                  <th className="px-2 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wider w-28 border-r border-slate-200">RTP Phase</th>
-                  <th className="px-2 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wider w-24 border-r border-slate-200">Staff Lead</th>
-                  <th className="px-2 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wider w-32 border-r border-slate-200">Target Fixture</th>
-                  <th className="px-2 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wider w-36 border-r border-slate-200">Week Overview</th>
-                </>}
-                <th className="px-2 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wider w-28 border-r border-slate-200">Component</th>
+                {!isPlayer && (
+                  <th className="px-3 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wider border-r border-slate-200 w-52">
+                    Player Info
+                  </th>
+                )}
+                <th className="px-2 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wider w-28 border-r border-slate-200">
+                  Component
+                </th>
                 {weekDates.map((d: string, i: number) => (
                   <th key={d} className="px-1 py-1.5 text-[9px] font-bold text-slate-400 text-center w-20">
-                    {DAY_LABELS[i]} <span className="font-normal text-slate-300">{fmtShort(d)}</span>
+                    {DAY_LABELS[i]}{' '}
+                    <span className="font-normal text-slate-300">{fmtShort(d)}</span>
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {components.length === 0 ? (
-                <tr>
-                  {!isPlayer && (
-                    <td colSpan={5} className={`${metaCell} border-r border-slate-100`}>
-                      {/* Staff metadata — shown even with no components */}
-                      <StaffMetaCols
-                        row={row} canEdit={canEdit} rtpPhases={rtpPhases} staffLeads={staffLeads}
-                        futureFixtures={futureFixtures} fixture={fixture} rtpPhase={rtpPhase}
-                        staffLead={staffLead} athlete={athlete} weekCommencing={weekCommencing}
-                        activeInjuries={activeInjuries} injuryExpanded={injuryExpanded}
-                        setInjuryExpanded={setInjuryExpanded} onUpdateField={onUpdateField}
-                        inline={true}
-                      />
+              {components.map((comp: RehabComponent, ci: number) => (
+                <tr key={comp.id} className={`border-b border-slate-50 last:border-0 ${ci % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
+
+                  {/* ── Info panel — single cell, rowSpan all components ── */}
+                  {!isPlayer && ci === 0 && (
+                    <td rowSpan={nComp} className="align-top border-r border-slate-200 p-0 w-52">
+                      <div className="p-2.5 space-y-2.5 h-full">
+
+                        {/* ── Injury badges ──────────────────────────── */}
+                        {activeInjuries.length > 0 ? (
+                          <div>
+                            <div className="space-y-1">
+                              {activeInjuries.map((inj: any) => {
+                                const weeksIn  = inj.startDate  ? weeksApart(inj.startDate, weekCommencing)  : null;
+                                const weeksRtn = inj.returnDate ? weeksApart(weekCommencing, inj.returnDate) : null;
+                                const urgent   = weeksRtn !== null && weeksRtn <= 2 && weeksRtn >= 0;
+                                return (
+                                  <div key={inj.id} className={`rounded-lg px-2 py-1.5 text-[10px] leading-snug ${urgent ? 'bg-amber-50 border border-amber-200' : 'bg-red-50 border border-red-100'}`}>
+                                    <div className="flex items-center justify-between gap-1">
+                                      <span className={`font-bold ${urgent ? 'text-amber-700' : 'text-red-700'}`}>{inj.bodyPart}</span>
+                                      {inj.returnDate
+                                        ? <span className={`font-semibold shrink-0 ${urgent ? 'text-amber-600' : 'text-red-500'}`}>
+                                            ETR {fmtShort(inj.returnDate)}
+                                            {weeksRtn !== null && <span className="ml-1 font-normal opacity-70">({weeksRtn > 0 ? `${weeksRtn}w` : 'due'})</span>}
+                                          </span>
+                                        : <span className="text-red-600 font-bold shrink-0">Season</span>}
+                                    </div>
+                                    {weeksIn !== null && (
+                                      <div className="text-slate-400 mt-0.5">{weeksIn}w since injury</div>
+                                    )}
+                                    {/* Expandable detail */}
+                                    {injExpanded && (
+                                      <div className="mt-1.5 pt-1.5 border-t border-slate-200 text-slate-500 space-y-0.5">
+                                        <div>Start: {fmtShort(inj.startDate)}</div>
+                                        {inj.surgeryDate && (
+                                          <div>Surgery: {fmtShort(inj.surgeryDate)}
+                                            {inj.surgeryDate && <span className="ml-1 opacity-70">({weeksApart(inj.surgeryDate, weekCommencing)}w post-op)</span>}
+                                          </div>
+                                        )}
+                                        {inj.notes && <div className="italic opacity-70">{inj.notes}</div>}
+                                        {inj.event && <div>{inj.event}</div>}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <button onClick={() => setInjExpanded(!injExpanded)}
+                              className="mt-1 text-[9px] text-blue-400 hover:text-blue-600 font-medium">
+                              {injExpanded ? '▲ Less' : '▼ Full detail'}
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-slate-300 italic px-1">No active injuries</div>
+                        )}
+
+                        {/* ── Divider ─────────────────────────────────── */}
+                        <div className="border-t border-slate-100" />
+
+                        {/* ── RTP + Staff Lead (2-col grid) ────────────── */}
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <div>
+                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">RTP Phase</p>
+                            {canEdit ? (
+                              <select value={row.rtpPhaseId || ''} onChange={e => onUpdateField('rtpPhaseId', e.target.value || null)}
+                                className="w-full h-6 px-1 text-[10px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400">
+                                <option value="">—</option>
+                                {rtpPhases.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                              </select>
+                            ) : (
+                              <span className="text-[11px] text-slate-700 font-medium">{rtpPhase?.name || <span className="text-slate-300">—</span>}</span>
+                            )}
+                          </div>
+                          <div>
+                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Staff Lead</p>
+                            {canEdit ? (
+                              <select value={row.staffLeadId || ''} onChange={e => onUpdateField('staffLeadId', e.target.value || null)}
+                                className="w-full h-6 px-1 text-[10px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400">
+                                <option value="">—</option>
+                                {staffLeads.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                              </select>
+                            ) : (
+                              <span className="text-[11px] text-slate-700 font-medium">{staffLead?.name || <span className="text-slate-300">—</span>}</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* ── Target Fixture ───────────────────────────── */}
+                        <div>
+                          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Target Fixture</p>
+                          {canEdit ? (
+                            <select value={row.targetFixtureId || ''} onChange={e => onUpdateField('targetFixtureId', e.target.value || null)}
+                              className="w-full h-6 px-1 text-[10px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400">
+                              <option value="">—</option>
+                              {futureFixtures.map((f: any) => (
+                                <option key={f.id} value={f.id}>{fmtShort(f.date)} · {f.opposition} ({f.homeAway})</option>
+                              ))}
+                            </select>
+                          ) : fixture ? (
+                            <div className="text-[10px] leading-snug">
+                              <span className="font-semibold text-slate-700">{fixture.opposition}</span>
+                              <span className="text-slate-400 ml-1">({fixture.homeAway})</span>
+                              <div className="text-slate-400">{fmtShort(fixture.date)}</div>
+                            </div>
+                          ) : <span className="text-slate-300 text-[10px]">—</span>}
+                        </div>
+
+                        {/* ── Week Overview ────────────────────────────── */}
+                        <div>
+                          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Overview</p>
+                          {canEdit ? (
+                            <textarea value={row.weekOverview} onChange={e => onUpdateField('weekOverview', e.target.value)}
+                              rows={2} placeholder="Week overview…"
+                              className="w-full px-1.5 py-1 text-[10px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-emerald-400 resize-none leading-snug bg-slate-50" />
+                          ) : row.weekOverview ? (
+                            <p className="text-[10px] text-slate-600 whitespace-pre-wrap leading-snug">{row.weekOverview}</p>
+                          ) : <span className="text-slate-300 text-[10px]">—</span>}
+                        </div>
+
+                      </div>
                     </td>
                   )}
-                  <td className="px-2 py-3 text-[11px] text-slate-300 italic" colSpan={8}>No components configured</td>
-                </tr>
-              ) : components.map((comp: RehabComponent, ci: number) => (
-                <tr key={comp.id} className={`border-b border-slate-50 last:border-0 ${ci % 2 === 0 ? '' : 'bg-slate-50/50'}`}>
-                  {/* Staff metadata columns — only rendered on first component row, spans all */}
-                  {!isPlayer && ci === 0 && (
-                    <StaffMetaCols
-                      row={row} canEdit={canEdit} rtpPhases={rtpPhases} staffLeads={staffLeads}
-                      futureFixtures={futureFixtures} fixture={fixture} rtpPhase={rtpPhase}
-                      staffLead={staffLead} athlete={athlete} weekCommencing={weekCommencing}
-                      activeInjuries={activeInjuries} injuryExpanded={injuryExpanded}
-                      setInjuryExpanded={setInjuryExpanded} onUpdateField={onUpdateField}
-                      rowSpan={nComp} inline={false}
-                    />
-                  )}
-                  {/* Component name */}
-                  <td className="px-2 py-1.5 text-[11px] font-medium text-slate-600 border-r border-slate-100 max-w-[112px]">
+
+                  {/* ── Component name ──────────────────────────────────── */}
+                  <td className="px-2 py-1.5 text-[11px] font-medium text-slate-600 border-r border-slate-100 max-w-[112px] align-middle">
                     <span className="block truncate" title={comp.name}>{comp.name}</span>
                   </td>
-                  {/* Day cells */}
+
+                  {/* ── Day cells ────────────────────────────────────────── */}
                   {weekDates.map((date: string) => (
-                    <td key={date} className="px-1 py-1 text-center">
+                    <td key={date} className="px-1 py-1 text-center align-middle">
                       <ComponentCell
                         value={row.entries[comp.id]?.[date] || ''}
                         options={comp.options}
@@ -595,6 +687,20 @@ const AthleteRow = ({
                   ))}
                 </tr>
               ))}
+
+              {/* Fallback — no components configured */}
+              {components.length === 0 && (
+                <tr>
+                  {!isPlayer && (
+                    <td className="align-top border-r border-slate-200 p-2.5 w-52">
+                      <div className="text-[10px] text-slate-400 italic">No components configured</div>
+                    </td>
+                  )}
+                  <td colSpan={8} className="px-3 py-4 text-[11px] text-slate-300 italic text-center">
+                    Add rehab components in Setup
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -603,114 +709,7 @@ const AthleteRow = ({
   );
 };
 
-// Staff metadata rendered as rowSpan cells (first comp row) or inline (no comps)
-const StaffMetaCols = ({
-  row, canEdit, rtpPhases, staffLeads, futureFixtures, fixture, rtpPhase, staffLead,
-  athlete, weekCommencing, activeInjuries, injuryExpanded, setInjuryExpanded,
-  onUpdateField, rowSpan, inline,
-}: any) => {
-  const cellClass = `align-top px-2 py-2 border-r border-slate-100 text-[11px]${inline ? '' : ''}`;
-  const rs = inline ? undefined : rowSpan;
-
-  return (
-    <>
-      {/* Injury Detail */}
-      <td rowSpan={rs} className={cellClass + " w-36"}>
-        {activeInjuries.length === 0 ? (
-          <span className="text-slate-300 italic text-[10px]">None</span>
-        ) : (
-          <div>
-            {/* Summary — always visible */}
-            <div className="space-y-1">
-              {activeInjuries.map((inj: any) => {
-                const weeksIn = inj.startDate ? weeksApart(inj.startDate, weekCommencing) : null;
-                const weeksToRtn = inj.returnDate ? weeksApart(weekCommencing, inj.returnDate) : null;
-                return (
-                  <div key={inj.id} className="text-[10px] leading-tight">
-                    <span className="font-semibold text-slate-700">{inj.bodyPart}</span>
-                    {weeksIn !== null && <span className="text-slate-400 ml-1">({weeksIn}w in)</span>}
-                    {inj.returnDate
-                      ? <span className="text-slate-400 ml-1">ETR {fmtShort(inj.returnDate)}{weeksToRtn !== null && ` (${weeksToRtn > 0 ? weeksToRtn + 'w' : 'due'})`}</span>
-                      : <span className="text-red-500 font-medium ml-1">Season</span>}
-                  </div>
-                );
-              })}
-            </div>
-            {/* Expand for full detail */}
-            <button onClick={() => setInjuryExpanded(!injuryExpanded)}
-              className="mt-1 text-[9px] text-blue-500 hover:text-blue-700">
-              {injuryExpanded ? 'Less ▲' : 'Detail ▼'}
-            </button>
-            {injuryExpanded && (
-              <div className="mt-1.5 pt-1.5 border-t border-slate-100 space-y-2">
-                {activeInjuries.map((inj: any) => {
-                  const weeksPostSurg = inj.surgeryDate ? weeksApart(inj.surgeryDate, weekCommencing) : null;
-                  return (
-                    <div key={inj.id} className="text-[10px] text-slate-500 space-y-0.5">
-                      <p className="font-semibold text-slate-700">{inj.bodyPart}{inj.notes ? ` — ${inj.notes}` : ''}</p>
-                      <p>Start: {fmtShort(inj.startDate)}</p>
-                      {inj.surgeryDate && <p>Surgery: {fmtShort(inj.surgeryDate)}{weeksPostSurg !== null && ` (${weeksPostSurg}w post-op)`}</p>}
-                      <p>ETR: {inj.returnDate ? fmtShort(inj.returnDate) : <span className="text-red-500">Season</span>}</p>
-                      {inj.event && <p>Event: {inj.event}</p>}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-      </td>
-
-      {/* RTP Phase */}
-      <td rowSpan={rs} className={cellClass + " w-28"}>
-        {canEdit ? (
-          <select value={row.rtpPhaseId || ''} onChange={e => onUpdateField('rtpPhaseId', e.target.value || null)}
-            className="w-full h-7 px-1.5 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400">
-            <option value="">—</option>
-            {rtpPhases.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}
-          </select>
-        ) : <span className="text-slate-600">{rtpPhase?.name || <span className="text-slate-300">—</span>}</span>}
-      </td>
-
-      {/* Staff Lead */}
-      <td rowSpan={rs} className={cellClass + " w-24"}>
-        {canEdit ? (
-          <select value={row.staffLeadId || ''} onChange={e => onUpdateField('staffLeadId', e.target.value || null)}
-            className="w-full h-7 px-1.5 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400">
-            <option value="">—</option>
-            {staffLeads.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-        ) : <span className="text-slate-600">{staffLead?.name || <span className="text-slate-300">—</span>}</span>}
-      </td>
-
-      {/* Target Fixture */}
-      <td rowSpan={rs} className={cellClass + " w-32"}>
-        {canEdit ? (
-          <select value={row.targetFixtureId || ''} onChange={e => onUpdateField('targetFixtureId', e.target.value || null)}
-            className="w-full h-7 px-1.5 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400">
-            <option value="">—</option>
-            {futureFixtures.map((f: any) => <option key={f.id} value={f.id}>{fmtShort(f.date)} {f.opposition} ({f.homeAway})</option>)}
-          </select>
-        ) : (
-          <span className="text-slate-600">
-            {fixture ? <><span className="font-medium">{fmtShort(fixture.date)}</span><br/><span className="text-[10px]">{fixture.opposition} ({fixture.homeAway})</span></> : <span className="text-slate-300">—</span>}
-          </span>
-        )}
-      </td>
-
-      {/* Week Overview */}
-      <td rowSpan={rs} className={cellClass + " w-36 align-top"}>
-        {canEdit ? (
-          <textarea value={row.weekOverview} onChange={e => onUpdateField('weekOverview', e.target.value)}
-            rows={3} placeholder="Overview…"
-            className="w-full px-1.5 py-1 text-[10px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400 resize-none leading-snug" />
-        ) : <span className="text-[10px] text-slate-600 whitespace-pre-wrap leading-snug">{row.weekOverview || <span className="text-slate-300">—</span>}</span>}
-      </td>
-    </>
-  );
-};
-
-// ── Add Athlete Modal ─────────────────────────────────────────────────────────
+ ─────────────────────────────────────────────────────────
 const AddAthleteModal = ({ athletes, existingIds, onAdd, onClose }: any) => {
   const [search, setSearch] = useState('');
   const available = athletes.filter((a: Athlete) =>
