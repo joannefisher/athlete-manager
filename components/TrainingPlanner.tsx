@@ -2000,7 +2000,7 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
       subs1: { ...defaultTeam.subs1 },
       subs2: { ...defaultTeam.subs2 },
     };
-    setDayDrills(prev => [...prev, newDrill]);
+    setDayDrills([...dayDrills, newDrill]);
     onMarkDirty?.(true);
     // Accordion stays closed — user clicks to expand when ready
     setQuickAddName('');
