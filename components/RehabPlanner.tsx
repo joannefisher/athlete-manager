@@ -184,8 +184,8 @@ const ComboCell = ({ value, options, canEdit, onChange }: {
 };
 
 // ── Multi Staff Lead picker ───────────────────────────────────────────────────
-const StaffLeadPicker = ({ selectedIds, staffLeads, canEdit, onChange }: {
-  selectedIds: string[]; staffLeads: StaffLead[]; canEdit: boolean; onChange: (ids: string[]) => void;
+const StaffLeadPicker = ({ selectedIds, staffLeads, canEdit, onChange, compact = false }: {
+  selectedIds: string[]; staffLeads: StaffLead[]; canEdit: boolean; onChange: (ids: string[]) => void; compact?: boolean;
 }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -473,179 +473,177 @@ const RehabSetupPage = ({ clubId, role }: { clubId: string; role: Role }) => {
   );
 };
 
-// ── Athlete info panel (left column) ─────────────────────────────────────────
-const InfoPanel = ({ row, athlete, weekCommencing, rtpPhases, staffLeads, fixtures, canEdit, onUpdateField }: any) => {
-  const [injExpanded, setInjExpanded] = useState(false);
+// ── Compact metadata strip ───────────────────────────────────────────────────
+const MetaStrip = ({ row, athlete, weekCommencing, rtpPhases, staffLeads, fixtures, canEdit, onUpdateField }: any) => {
+  const [showDetail, setShowDetail] = useState(false);
   const today = new Date().toISOString().split('T')[0];
   const futureFixtures = fixtures.filter((f: any) => f.date >= today);
   const activeInjuries = (athlete?.injuries || []).filter((i: any) => !i.returnDate || i.returnDate >= weekCommencing);
   const fixture = fixtures.find((f: any) => f.id === row.targetFixtureId);
   const rtpPhase = rtpPhases.find((r: any) => r.id === row.rtpPhaseId);
+  const selectedStaff = staffLeads.filter((s: any) => (row.staffLeadIds || []).includes(s.id));
+
+  // Injury summary — most urgent first
+  const injSummary = activeInjuries.map((inj: any) => {
+    const weeksRtn = inj.returnDate ? weeksApart(weekCommencing, inj.returnDate) : null;
+    return { ...inj, weeksRtn, urgent: weeksRtn !== null && weeksRtn <= 2 && weeksRtn >= 0 };
+  });
 
   return (
-    <div className="p-2 space-y-2">
-      {/* Injuries */}
-      {activeInjuries.length > 0 ? (
-        <div>
-          {activeInjuries.map((inj: any) => {
-            const weeksIn  = inj.startDate  ? weeksApart(inj.startDate, weekCommencing)  : null;
-            const weeksRtn = inj.returnDate ? weeksApart(weekCommencing, inj.returnDate) : null;
-            const urgent   = weeksRtn !== null && weeksRtn <= 2 && weeksRtn >= 0;
-            return (
-              <div key={inj.id} className={`rounded-lg px-2 py-1.5 text-[10px] leading-snug mb-1 ${urgent ? 'bg-amber-50 border border-amber-200' : 'bg-red-50 border border-red-100'}`}>
-                <div className="flex items-center justify-between gap-1">
-                  <span className={`font-bold ${urgent ? 'text-amber-700' : 'text-red-700'}`}>{inj.bodyPart}</span>
-                  {inj.returnDate
-                    ? <span className={`font-semibold shrink-0 text-[9px] ${urgent ? 'text-amber-600' : 'text-red-500'}`}>
-                        ETR {fmtShort(inj.returnDate)}{weeksRtn !== null && <span className="ml-0.5 font-normal opacity-70">({weeksRtn > 0 ? `${weeksRtn}w` : 'due'})</span>}
-                      </span>
-                    : <span className="text-red-600 font-bold shrink-0 text-[9px]">Season</span>}
-                </div>
-                {weeksIn !== null && <div className="text-slate-400 mt-0.5">{weeksIn}w since injury</div>}
-                {injExpanded && (
-                  <div className="mt-1.5 pt-1.5 border-t border-slate-200 text-slate-500 space-y-0.5">
-                    <div>Start: {fmtShort(inj.startDate)}</div>
-                    {inj.surgeryDate && <div>Surgery: {fmtShort(inj.surgeryDate)} ({weeksApart(inj.surgeryDate, weekCommencing)}w post-op)</div>}
-                    {inj.notes && <div className="italic opacity-70">{inj.notes}</div>}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-          <button onClick={() => setInjExpanded(!injExpanded)} className="text-[9px] text-blue-400 hover:text-blue-600 font-medium">
-            {injExpanded ? '▲ Less' : '▼ Full detail'}
-          </button>
-        </div>
-      ) : (
-        <div className="text-[10px] text-slate-300 italic px-1">No active injuries</div>
-      )}
+    <div className="border-b border-slate-100">
+      {/* Single compact row */}
+      <div className="flex items-center gap-1.5 px-2 py-1 flex-wrap min-h-0 bg-slate-50/60">
 
-      <div className="border-t border-slate-100" />
+        {/* Injury chips */}
+        {injSummary.length > 0
+          ? injSummary.map((inj: any) => (
+            <span key={inj.id} className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold leading-none ${inj.urgent ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
+              {inj.bodyPart}
+              {inj.returnDate
+                ? <span className="font-normal opacity-80 ml-0.5">ETR {fmtShort(inj.returnDate)}{inj.weeksRtn !== null && ` (${inj.weeksRtn > 0 ? inj.weeksRtn + 'w' : 'due'})`}</span>
+                : <span className="opacity-80 ml-0.5">Season</span>}
+            </span>
+          ))
+          : <span className="text-[9px] text-slate-300 italic">No injuries</span>
+        }
 
-      {/* RTP + Staff 2-col */}
-      <div className="grid grid-cols-2 gap-1.5">
-        <div>
-          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">RTP Phase</p>
-          {canEdit ? (
-            <select value={row.rtpPhaseId || ''} onChange={e => onUpdateField('rtpPhaseId', e.target.value || null)}
-              className="w-full h-6 px-1 text-[10px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400">
-              <option value="">—</option>
-              {rtpPhases.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}
-            </select>
-          ) : <span className="text-[11px] text-slate-700 font-medium">{rtpPhase?.name || <span className="text-slate-300">—</span>}</span>}
-        </div>
-        <div>
-          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Staff Lead</p>
-          <StaffLeadPicker selectedIds={row.staffLeadIds || []} staffLeads={staffLeads} canEdit={canEdit}
-            onChange={ids => onUpdateField('staffLeadIds', ids)} />
-        </div>
-      </div>
+        {/* Divider */}
+        {!isPlayerRole(canEdit) && <span className="w-px h-3 bg-slate-200 mx-0.5 shrink-0" />}
 
-      {/* Target Fixture */}
-      <div>
-        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Target Fixture</p>
+        {/* RTP Phase */}
+        {canEdit ? (
+          <select value={row.rtpPhaseId || ''} onChange={e => onUpdateField('rtpPhaseId', e.target.value || null)}
+            className="h-5 px-1 text-[9px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-[100px]">
+            <option value="">RTP —</option>
+            {rtpPhases.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+        ) : rtpPhase ? (
+          <span className="bg-slate-100 text-slate-600 rounded px-1.5 py-0.5 text-[9px] font-medium">{rtpPhase.name}</span>
+        ) : null}
+
+        {/* Staff Lead pills */}
+        <StaffLeadPicker selectedIds={row.staffLeadIds || []} staffLeads={staffLeads} canEdit={canEdit}
+          onChange={ids => onUpdateField('staffLeadIds', ids)} compact={true} />
+
+        {/* Target Fixture */}
         {canEdit ? (
           <select value={row.targetFixtureId || ''} onChange={e => onUpdateField('targetFixtureId', e.target.value || null)}
-            className="w-full h-6 px-1 text-[10px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400">
-            <option value="">—</option>
-            {futureFixtures.map((f: any) => <option key={f.id} value={f.id}>{fmtShort(f.date)} · {f.opposition} ({f.homeAway})</option>)}
+            className="h-5 px-1 text-[9px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-[130px]">
+            <option value="">Fixture —</option>
+            {futureFixtures.map((f: any) => <option key={f.id} value={f.id}>{fmtShort(f.date)} {f.opposition}</option>)}
           </select>
         ) : fixture ? (
-          <div className="text-[10px] leading-snug">
-            <span className="font-semibold text-slate-700">{fixture.opposition}</span><span className="text-slate-400 ml-1">({fixture.homeAway})</span>
-            <div className="text-slate-400">{fmtShort(fixture.date)}</div>
-          </div>
-        ) : <span className="text-slate-300 text-[10px]">—</span>}
+          <span className="bg-slate-100 text-slate-600 rounded px-1.5 py-0.5 text-[9px]">{fmtShort(fixture.date)} {fixture.opposition}</span>
+        ) : null}
+
+        {/* Week overview — expand toggle */}
+        <button onClick={() => setShowDetail(!showDetail)}
+          className="ml-auto text-[9px] text-slate-400 hover:text-slate-600 shrink-0 flex items-center gap-0.5">
+          Overview {showDetail ? '▲' : '▼'}
+        </button>
       </div>
 
-      {/* Week Overview */}
-      <div>
-        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Overview</p>
-        {canEdit ? (
-          <textarea value={row.weekOverview} onChange={e => onUpdateField('weekOverview', e.target.value)}
-            rows={2} placeholder="Week overview…"
-            className="w-full px-1.5 py-1 text-[10px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-emerald-400 resize-none leading-snug bg-slate-50" />
-        ) : row.weekOverview ? (
-          <p className="text-[10px] text-slate-600 whitespace-pre-wrap leading-snug">{row.weekOverview}</p>
-        ) : <span className="text-slate-300 text-[10px]">—</span>}
-      </div>
+      {/* Expandable overview */}
+      {showDetail && (
+        <div className="px-2 py-1.5 bg-slate-50 border-b border-slate-100">
+          {canEdit ? (
+            <textarea value={row.weekOverview} onChange={e => onUpdateField('weekOverview', e.target.value)}
+              rows={2} placeholder="Week overview…"
+              className="w-full px-2 py-1 text-[10px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-emerald-400 resize-none leading-snug bg-white" />
+          ) : (
+            <p className="text-[10px] text-slate-600 whitespace-pre-wrap leading-snug">{row.weekOverview || <span className="text-slate-300 italic">No overview</span>}</p>
+          )}
+        </div>
+      )}
     </div>
   );
 };
+
+// Helper — read-only check (canEdit is passed from parent, not the role string)
+const isPlayerRole = (canEdit: boolean) => !canEdit;
 
 // ── Athlete Row (weekly view) ─────────────────────────────────────────────────
 const AthleteRow = ({ row, athlete, components, weekDates, rtpPhases, staffLeads, fixtures, canEdit, isPlayer, weekCommencing, onUpdateEntry, onUpdateField, onRemove, onCopyPrev, hasPrevWeek }: any) => {
   const [collapsed, setCollapsed] = useState(false);
-  const nComp = Math.max(components.length, 1);
 
   return (
-    <div className="border-b-2 border-slate-200 last:border-0">
-      {/* Name bar */}
-      <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 text-white">
-        <button onClick={() => setCollapsed(!collapsed)} className="flex items-center gap-2 flex-1 min-w-0">
-          <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center text-[10px] font-bold shrink-0">{athlete?.avatar || athlete?.name?.[0] || '?'}</div>
-          <span className="text-[13px] font-semibold truncate">{athlete?.name}</span>
-          {collapsed ? <ChevronDown className="w-3.5 h-3.5 text-white/50 shrink-0" /> : <ChevronUp className="w-3.5 h-3.5 text-white/50 shrink-0" />}
+    <div className="border-b border-slate-200 last:border-0">
+      {/* Compact name bar */}
+      <div className="flex items-center gap-2 px-2 py-1 bg-slate-800 text-white">
+        <button onClick={() => setCollapsed(!collapsed)} className="flex items-center gap-1.5 flex-1 min-w-0">
+          <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[9px] font-bold shrink-0">
+            {athlete?.avatar || athlete?.name?.[0] || '?'}
+          </div>
+          <span className="text-[12px] font-semibold truncate">{athlete?.name}</span>
+          {collapsed ? <ChevronDown className="w-3 h-3 text-white/50 shrink-0" /> : <ChevronUp className="w-3 h-3 text-white/50 shrink-0" />}
         </button>
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
           {hasPrevWeek && canEdit && (
-            <button onClick={onCopyPrev} className="flex items-center gap-1 h-6 px-2 text-[10px] font-medium text-white/60 border border-white/20 rounded hover:bg-white/10 transition-colors">
-              <Copy className="w-3 h-3" />Copy prev
+            <button onClick={onCopyPrev} className="flex items-center gap-0.5 h-5 px-1.5 text-[9px] font-medium text-white/60 border border-white/20 rounded hover:bg-white/10 transition-colors">
+              <Copy className="w-2.5 h-2.5" />Copy
             </button>
           )}
-          {canEdit && <button onClick={onRemove} className="p-1 text-white/30 hover:text-red-400"><X className="w-3.5 h-3.5" /></button>}
+          {canEdit && <button onClick={onRemove} className="p-0.5 text-white/30 hover:text-red-400"><X className="w-3 h-3" /></button>}
         </div>
       </div>
 
       {!collapsed && (
-        <div className="overflow-x-auto bg-white">
-          <table className="w-full border-collapse text-left" style={{ minWidth: isPlayer ? '560px' : '820px' }}>
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-200">
-                {!isPlayer && <th className="px-3 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wider border-r border-slate-200 w-52">Player Info</th>}
-                <th className="px-2 py-1 text-[9px] font-bold text-slate-400 uppercase tracking-wider w-28 border-r border-slate-200">Component</th>
-                {weekDates.map((d: string, i: number) => (
-                  <th key={d} className="py-1 text-center w-20 border-r border-slate-100 last:border-0">
-                    <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">{DAY_LABELS[i]}</span>
-                    <span className="block text-[13px] font-bold text-slate-700 leading-tight">{fmtDayNum(d)}</span>
-                    <span className="block text-[9px] text-slate-400">{fmtShort(d).split(' ')[1]}</span>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {components.map((comp: RehabComponent, ci: number) => (
-                <tr key={comp.id} className={`border-b border-slate-50 last:border-0 ${ci % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
-                  {!isPlayer && ci === 0 && (
-                    <td rowSpan={nComp} className="align-top border-r border-slate-200 p-0 w-52">
-                      <InfoPanel row={row} athlete={athlete} weekCommencing={weekCommencing} rtpPhases={rtpPhases} staffLeads={staffLeads} fixtures={fixtures} canEdit={canEdit} onUpdateField={onUpdateField} />
-                    </td>
-                  )}
-                  <td className="px-2 py-0.5 text-[11px] font-medium text-slate-600 border-r border-slate-100 max-w-[112px] align-middle">
-                    <span className="block truncate" title={comp.name}>{comp.name}</span>
-                  </td>
-                  {weekDates.map((date: string) => (
-                    <td key={date} className="px-0.5 py-0.5 text-center align-middle border-r border-slate-50 last:border-0">
-                      <ComboCell value={row.entries[comp.id]?.[date] || ''} options={comp.options} canEdit={canEdit} onChange={v => onUpdateEntry(comp.id, date, v)} />
-                    </td>
+        <>
+          {/* Compact metadata strip (staff-only) */}
+          {!isPlayer && (
+            <MetaStrip
+              row={row} athlete={athlete} weekCommencing={weekCommencing}
+              rtpPhases={rtpPhases} staffLeads={staffLeads} fixtures={fixtures}
+              canEdit={canEdit} onUpdateField={onUpdateField}
+            />
+          )}
+
+          {/* Component rows — pure horizontal grid, no left panel */}
+          <div className="overflow-x-auto bg-white">
+            <table className="w-full border-collapse text-left" style={{ minWidth: '560px' }}>
+              <thead>
+                <tr className="bg-slate-50/80 border-b border-slate-100">
+                  <th className="px-2 py-0.5 text-[9px] font-bold text-slate-400 uppercase tracking-wider w-24 border-r border-slate-100">Component</th>
+                  {weekDates.map((d: string, i: number) => (
+                    <th key={d} className="py-0.5 text-center border-r border-slate-100 last:border-0" style={{ minWidth: '80px' }}>
+                      <span className="block text-[9px] font-bold text-slate-400">{DAY_LABELS[i]}</span>
+                      <span className="block text-[11px] font-bold text-slate-600 leading-tight">{fmtDayNum(d)}</span>
+                    </th>
                   ))}
                 </tr>
-              ))}
-              {components.length === 0 && (
-                <tr>
-                  {!isPlayer && <td className="align-top border-r border-slate-200 p-0 w-52"><InfoPanel row={row} athlete={athlete} weekCommencing={weekCommencing} rtpPhases={rtpPhases} staffLeads={staffLeads} fixtures={fixtures} canEdit={canEdit} onUpdateField={onUpdateField} /></td>}
-                  <td colSpan={8} className="px-3 py-4 text-[11px] text-slate-300 italic text-center">Add rehab components in Setup</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {components.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="px-3 py-2 text-[11px] text-slate-300 italic text-center">Add rehab components in Setup</td>
+                  </tr>
+                ) : components.map((comp: RehabComponent, ci: number) => (
+                  <tr key={comp.id} className={`border-b border-slate-50 last:border-0 ${ci % 2 === 0 ? '' : 'bg-slate-50/30'}`}>
+                    <td className="px-2 py-0.5 text-[10px] font-medium text-slate-500 border-r border-slate-100 align-middle">
+                      <span className="block truncate" title={comp.name}>{comp.name}</span>
+                    </td>
+                    {weekDates.map((date: string) => (
+                      <td key={date} className="px-0.5 py-0.5 text-center align-middle border-r border-slate-50 last:border-0">
+                        <ComboCell
+                          value={row.entries[comp.id]?.[date] || ''}
+                          options={comp.options}
+                          canEdit={canEdit}
+                          onChange={(v: string) => onUpdateEntry(comp.id, date, v)}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   );
 };
 
-// ── Day View ──────────────────────────────────────────────────────────────────
+ ──────────────────────────────────────────────────────────────────
 const DayView = ({ rows, allAthletes, components, weekDates, staffLeads, canEdit, isPlayer, weekCommencing, onUpdateEntry }: any) => {
   const today = new Date().toISOString().split('T')[0];
   const defaultDay = weekDates.find((d: string) => d === today) || weekDates[0];
@@ -933,7 +931,7 @@ const RehabPlannerPage = ({ clubId, role }: { clubId: string; role: Role }) => {
   return (
     <div className="flex-1 flex flex-col min-h-0">
       {/* Week nav + view toggle */}
-      <div className="bg-white border-b border-slate-200 px-4 py-3 flex items-center gap-3 sticky top-0 z-20">
+      <div className="bg-white border-b border-slate-200 px-4 py-2 flex items-center gap-3 sticky top-0 z-20">
         <button onClick={prevWeek} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"><ChevronLeft className="w-4 h-4 text-slate-600" /></button>
         <div className="flex-1 text-center">
           <p className="text-[14px] font-semibold text-slate-900">w/c {fmtWC(weekCommencing)}</p>
@@ -988,7 +986,7 @@ const RehabPlannerPage = ({ clubId, role }: { clubId: string; role: Role }) => {
             const collapsed = collapsedSections.has(section);
             return (
               <div key={section} className="mb-2">
-                <button onClick={() => toggleSection(section)} className={`w-full flex items-center justify-between px-4 py-2.5 ${SECTION_BG[section]} text-white`}>
+                <button onClick={() => toggleSection(section)} className={`w-full flex items-center justify-between px-4 py-1.5 ${SECTION_BG[section]} text-white`}>
                   <div className="flex items-center gap-2">
                     <span className="text-[13px] font-bold">{SECTION_LABELS[section]}</span>
                     <span className="text-[11px] text-white/70">{sectionRows.length} athlete{sectionRows.length !== 1 ? 's' : ''}</span>
