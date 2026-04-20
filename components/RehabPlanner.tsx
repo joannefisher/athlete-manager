@@ -432,38 +432,6 @@ const RehabSetupPage = ({ clubId, role }: { clubId: string; role: Role }) => {
 };
 
 // ── Injury Detail Cell (staff only) ──────────────────────────────────────────
-const InjuryDetailCell = ({ athlete, weekCommencing }: { athlete: Athlete; weekCommencing: string }) => {
-  const today = weekCommencing;
-  const active = athlete.injuries.filter(i => !i.returnDate || i.returnDate >= today);
-  if (!active.length) return <span className="text-[11px] text-slate-300 italic">None</span>;
-  return (
-    <div className="space-y-1.5">
-      {active.map(inj => {
-        const weeksIn = inj.startDate ? weeksApart(inj.startDate, weekCommencing) : null;
-        const weeksPostSurg = inj.surgeryDate ? weeksApart(inj.surgeryDate, weekCommencing) : null;
-        const weeksToRtn = inj.returnDate ? weeksApart(weekCommencing, inj.returnDate) : null;
-        return (
-          <div key={inj.id} className="text-[10px] leading-snug space-y-0.5">
-            <p className="font-semibold text-slate-700">{inj.bodyPart}{inj.notes ? ` — ${inj.notes}` : ''}</p>
-            <p className="text-slate-400">
-              Start: {fmtShort(inj.startDate)}
-              {weeksIn !== null && <span className="ml-1 text-slate-500">({weeksIn}w ago)</span>}
-            </p>
-            {inj.surgeryDate && (
-              <p className="text-slate-400">
-                Surgery: {fmtShort(inj.surgeryDate)}
-                {weeksPostSurg !== null && <span className="ml-1 text-slate-500">({weeksPostSurg}w post-op)</span>}
-              </p>
-            )}
-            <p className="text-slate-400">
-              ETR: {inj.returnDate ? <>{fmtShort(inj.returnDate)}{weeksToRtn !== null && <span className="ml-1 text-slate-500">({weeksToRtn > 0 ? `${weeksToRtn}w away` : 'this week'})</span>}</> : <span className="text-red-500 font-medium">Season</span>}
-            </p>
-          </div>
-        );
-      })}
-    </div>
-  );
-};
 
 // ── Component Entry Cell ──────────────────────────────────────────────────────
 const ComponentCell = ({ value, options, canEdit, onChange }: {
@@ -516,33 +484,42 @@ const AthleteRow = ({
   onUpdateEntry, onUpdateField, onRemove, onCopyPrev, hasPrevWeek,
 }: any) => {
   const [collapsed, setCollapsed] = useState(false);
+  const [injuryExpanded, setInjuryExpanded] = useState(false);
 
   const staffLead = staffLeads.find((s: any) => s.id === row.staffLeadId);
   const rtpPhase = rtpPhases.find((r: any) => r.id === row.rtpPhaseId);
   const fixture = fixtures.find((f: any) => f.id === row.targetFixtureId);
   const today = new Date().toISOString().split('T')[0];
   const futureFixtures = fixtures.filter((f: any) => f.date >= today);
+  const activeInjuries = (athlete?.injuries || []).filter((i: any) => !i.returnDate || i.returnDate >= weekCommencing);
+  const nComp = Math.max(components.length, 1);
+
+  // Cell styles
+  const metaCell = "align-top px-2 py-2 border-r border-slate-100 text-[11px]";
+  const metaLabel = "text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1";
 
   return (
-    <div className="border-b border-slate-100 last:border-0">
-      {/* Athlete header row */}
-      <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 hover:bg-slate-100 transition-colors">
-        <button onClick={() => setCollapsed(!collapsed)} className="flex items-center gap-1.5 flex-1 min-w-0">
-          <div className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-[10px] font-bold text-slate-600 shrink-0">
+    <div className="border-b-2 border-slate-200 last:border-0">
+      {/* ── Athlete name bar ──────────────────────────────────────────── */}
+      <div className="flex items-center gap-2 px-3 py-2 bg-slate-800 text-white">
+        <button onClick={() => setCollapsed(!collapsed)} className="flex items-center gap-2 flex-1 min-w-0">
+          <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center text-[10px] font-bold shrink-0">
             {athlete?.avatar || athlete?.name?.[0] || '?'}
           </div>
-          <span className="text-[13px] font-semibold text-slate-800 truncate">{athlete?.name}</span>
-          {collapsed ? <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" /> : <ChevronUp className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
+          <span className="text-[13px] font-semibold truncate">{athlete?.name}</span>
+          {collapsed
+            ? <ChevronDown className="w-3.5 h-3.5 text-white/50 shrink-0" />
+            : <ChevronUp className="w-3.5 h-3.5 text-white/50 shrink-0" />}
         </button>
         <div className="flex items-center gap-1.5 shrink-0">
           {hasPrevWeek && canEdit && (
             <button onClick={onCopyPrev}
-              className="flex items-center gap-1 h-6 px-2 text-[10px] font-medium text-blue-600 border border-blue-200 rounded hover:bg-blue-50 transition-colors">
-              <Copy className="w-3 h-3" />Copy prev week
+              className="flex items-center gap-1 h-6 px-2 text-[10px] font-medium text-white/60 border border-white/20 rounded hover:bg-white/10 transition-colors">
+              <Copy className="w-3 h-3" />Copy prev
             </button>
           )}
           {canEdit && (
-            <button onClick={onRemove} className="p-1 text-slate-300 hover:text-red-500 transition-colors">
+            <button onClick={onRemove} className="p-1 text-white/30 hover:text-red-400 transition-colors">
               <X className="w-3.5 h-3.5" />
             </button>
           )}
@@ -550,114 +527,186 @@ const AthleteRow = ({
       </div>
 
       {!collapsed && (
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse" style={{ minWidth: '700px' }}>
+        <div className="overflow-x-auto bg-white">
+          <table className="w-full border-collapse text-left" style={{ minWidth: isPlayer ? '560px' : '900px' }}>
+            {/* Column headers — only shown once per athlete block */}
             <thead>
-              <tr className="bg-white border-b border-slate-100">
-                <th className="px-3 py-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider w-32 sticky left-0 bg-white z-10">Component</th>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                {!isPlayer && <>
+                  <th className="px-2 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wider w-36 border-r border-slate-200">Injury</th>
+                  <th className="px-2 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wider w-28 border-r border-slate-200">RTP Phase</th>
+                  <th className="px-2 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wider w-24 border-r border-slate-200">Staff Lead</th>
+                  <th className="px-2 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wider w-32 border-r border-slate-200">Target Fixture</th>
+                  <th className="px-2 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wider w-36 border-r border-slate-200">Week Overview</th>
+                </>}
+                <th className="px-2 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wider w-28 border-r border-slate-200">Component</th>
                 {weekDates.map((d: string, i: number) => (
-                  <th key={d} className="px-2 py-1.5 text-[10px] font-semibold text-slate-400 text-center w-24">
-                    {DAY_LABELS[i]}<br />
-                    <span className="font-normal normal-case">{fmtShort(d)}</span>
+                  <th key={d} className="px-1 py-1.5 text-[9px] font-bold text-slate-400 text-center w-20">
+                    {DAY_LABELS[i]} <span className="font-normal text-slate-300">{fmtShort(d)}</span>
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {/* Staff-only rows */}
-              {!isPlayer && (
-                <>
-                  {/* Injury Detail */}
-                  <tr className="border-b border-slate-50">
-                    <td className="px-3 py-2 text-[11px] font-medium text-slate-500 sticky left-0 bg-white z-10">Injury Detail</td>
-                    <td colSpan={7} className="px-3 py-2">
-                      <InjuryDetailCell athlete={athlete} weekCommencing={weekCommencing} />
+              {components.length === 0 ? (
+                <tr>
+                  {!isPlayer && (
+                    <td colSpan={5} className={`${metaCell} border-r border-slate-100`}>
+                      {/* Staff metadata — shown even with no components */}
+                      <StaffMetaCols
+                        row={row} canEdit={canEdit} rtpPhases={rtpPhases} staffLeads={staffLeads}
+                        futureFixtures={futureFixtures} fixture={fixture} rtpPhase={rtpPhase}
+                        staffLead={staffLead} athlete={athlete} weekCommencing={weekCommencing}
+                        activeInjuries={activeInjuries} injuryExpanded={injuryExpanded}
+                        setInjuryExpanded={setInjuryExpanded} onUpdateField={onUpdateField}
+                        inline={true}
+                      />
                     </td>
-                  </tr>
-                  {/* RTP Phase */}
-                  <tr className="border-b border-slate-50">
-                    <td className="px-3 py-2 text-[11px] font-medium text-slate-500 sticky left-0 bg-white z-10">RTP Phase</td>
-                    <td colSpan={7} className="px-3 py-2">
-                      {canEdit ? (
-                        <select value={row.rtpPhaseId || ''} onChange={e => onUpdateField('rtpPhaseId', e.target.value || null)}
-                          className="h-7 px-2 text-[11px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 min-w-[140px]">
-                          <option value="">— Select —</option>
-                          {rtpPhases.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                        </select>
-                      ) : <span className="text-[11px] text-slate-600">{rtpPhase?.name || '—'}</span>}
-                    </td>
-                  </tr>
-                  {/* Staff Lead */}
-                  <tr className="border-b border-slate-50">
-                    <td className="px-3 py-2 text-[11px] font-medium text-slate-500 sticky left-0 bg-white z-10">Staff Lead</td>
-                    <td colSpan={7} className="px-3 py-2">
-                      {canEdit ? (
-                        <select value={row.staffLeadId || ''} onChange={e => onUpdateField('staffLeadId', e.target.value || null)}
-                          className="h-7 px-2 text-[11px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 min-w-[140px]">
-                          <option value="">— Select —</option>
-                          {staffLeads.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                        </select>
-                      ) : <span className="text-[11px] text-slate-600">{staffLead?.name || '—'}</span>}
-                    </td>
-                  </tr>
-                  {/* Target Fixture */}
-                  <tr className="border-b border-slate-50">
-                    <td className="px-3 py-2 text-[11px] font-medium text-slate-500 sticky left-0 bg-white z-10">Target Fixture</td>
-                    <td colSpan={7} className="px-3 py-2">
-                      {canEdit ? (
-                        <select value={row.targetFixtureId || ''} onChange={e => onUpdateField('targetFixtureId', e.target.value || null)}
-                          className="h-7 px-2 text-[11px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 min-w-[200px]">
-                          <option value="">— Select —</option>
-                          {futureFixtures.map((f: any) => <option key={f.id} value={f.id}>{fmtShort(f.date)} — {f.opposition} ({f.homeAway})</option>)}
-                        </select>
-                      ) : <span className="text-[11px] text-slate-600">{fixture ? `${fmtShort(fixture.date)} — ${fixture.opposition} (${fixture.homeAway})` : '—'}</span>}
-                    </td>
-                  </tr>
-                  {/* Week Overview */}
-                  <tr className="border-b border-slate-50">
-                    <td className="px-3 py-2 text-[11px] font-medium text-slate-500 sticky left-0 bg-white z-10 align-top pt-2.5">Week Overview</td>
-                    <td colSpan={7} className="px-3 py-2">
-                      {canEdit ? (
-                        <textarea value={row.weekOverview} onChange={e => onUpdateField('weekOverview', e.target.value)}
-                          rows={2} placeholder="Free text overview for the week…"
-                          className="w-full px-2 py-1.5 text-[11px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none" />
-                      ) : <span className="text-[11px] text-slate-600 whitespace-pre-wrap">{row.weekOverview || '—'}</span>}
-                    </td>
-                  </tr>
-                </>
-              )}
-
-              {/* Rehab Component rows */}
-              {components.map((comp: RehabComponent) => (
-                <tr key={comp.id} className="border-b border-slate-50 last:border-0">
-                  <td className="px-3 py-2 text-[11px] font-medium text-slate-600 sticky left-0 bg-white z-10 max-w-[120px]">
+                  )}
+                  <td className="px-2 py-3 text-[11px] text-slate-300 italic" colSpan={8}>No components configured</td>
+                </tr>
+              ) : components.map((comp: RehabComponent, ci: number) => (
+                <tr key={comp.id} className={`border-b border-slate-50 last:border-0 ${ci % 2 === 0 ? '' : 'bg-slate-50/50'}`}>
+                  {/* Staff metadata columns — only rendered on first component row, spans all */}
+                  {!isPlayer && ci === 0 && (
+                    <StaffMetaCols
+                      row={row} canEdit={canEdit} rtpPhases={rtpPhases} staffLeads={staffLeads}
+                      futureFixtures={futureFixtures} fixture={fixture} rtpPhase={rtpPhase}
+                      staffLead={staffLead} athlete={athlete} weekCommencing={weekCommencing}
+                      activeInjuries={activeInjuries} injuryExpanded={injuryExpanded}
+                      setInjuryExpanded={setInjuryExpanded} onUpdateField={onUpdateField}
+                      rowSpan={nComp} inline={false}
+                    />
+                  )}
+                  {/* Component name */}
+                  <td className="px-2 py-1.5 text-[11px] font-medium text-slate-600 border-r border-slate-100 max-w-[112px]">
                     <span className="block truncate" title={comp.name}>{comp.name}</span>
                   </td>
+                  {/* Day cells */}
                   {weekDates.map((date: string) => (
-                    <td key={date} className="px-1 py-1 text-center align-middle">
+                    <td key={date} className="px-1 py-1 text-center">
                       <ComponentCell
                         value={row.entries[comp.id]?.[date] || ''}
                         options={comp.options}
                         canEdit={canEdit}
-                        onChange={v => onUpdateEntry(comp.id, date, v)}
+                        onChange={(v: string) => onUpdateEntry(comp.id, date, v)}
                       />
                     </td>
                   ))}
                 </tr>
               ))}
-
-              {components.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="px-3 py-3 text-[11px] text-slate-300 italic text-center">
-                    No rehab components configured — add them in Setup
-                  </td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>
       )}
     </div>
+  );
+};
+
+// Staff metadata rendered as rowSpan cells (first comp row) or inline (no comps)
+const StaffMetaCols = ({
+  row, canEdit, rtpPhases, staffLeads, futureFixtures, fixture, rtpPhase, staffLead,
+  athlete, weekCommencing, activeInjuries, injuryExpanded, setInjuryExpanded,
+  onUpdateField, rowSpan, inline,
+}: any) => {
+  const cellClass = `align-top px-2 py-2 border-r border-slate-100 text-[11px]${inline ? '' : ''}`;
+  const rs = inline ? undefined : rowSpan;
+
+  return (
+    <>
+      {/* Injury Detail */}
+      <td rowSpan={rs} className={cellClass + " w-36"}>
+        {activeInjuries.length === 0 ? (
+          <span className="text-slate-300 italic text-[10px]">None</span>
+        ) : (
+          <div>
+            {/* Summary — always visible */}
+            <div className="space-y-1">
+              {activeInjuries.map((inj: any) => {
+                const weeksIn = inj.startDate ? weeksApart(inj.startDate, weekCommencing) : null;
+                const weeksToRtn = inj.returnDate ? weeksApart(weekCommencing, inj.returnDate) : null;
+                return (
+                  <div key={inj.id} className="text-[10px] leading-tight">
+                    <span className="font-semibold text-slate-700">{inj.bodyPart}</span>
+                    {weeksIn !== null && <span className="text-slate-400 ml-1">({weeksIn}w in)</span>}
+                    {inj.returnDate
+                      ? <span className="text-slate-400 ml-1">ETR {fmtShort(inj.returnDate)}{weeksToRtn !== null && ` (${weeksToRtn > 0 ? weeksToRtn + 'w' : 'due'})`}</span>
+                      : <span className="text-red-500 font-medium ml-1">Season</span>}
+                  </div>
+                );
+              })}
+            </div>
+            {/* Expand for full detail */}
+            <button onClick={() => setInjuryExpanded(!injuryExpanded)}
+              className="mt-1 text-[9px] text-blue-500 hover:text-blue-700">
+              {injuryExpanded ? 'Less ▲' : 'Detail ▼'}
+            </button>
+            {injuryExpanded && (
+              <div className="mt-1.5 pt-1.5 border-t border-slate-100 space-y-2">
+                {activeInjuries.map((inj: any) => {
+                  const weeksPostSurg = inj.surgeryDate ? weeksApart(inj.surgeryDate, weekCommencing) : null;
+                  return (
+                    <div key={inj.id} className="text-[10px] text-slate-500 space-y-0.5">
+                      <p className="font-semibold text-slate-700">{inj.bodyPart}{inj.notes ? ` — ${inj.notes}` : ''}</p>
+                      <p>Start: {fmtShort(inj.startDate)}</p>
+                      {inj.surgeryDate && <p>Surgery: {fmtShort(inj.surgeryDate)}{weeksPostSurg !== null && ` (${weeksPostSurg}w post-op)`}</p>}
+                      <p>ETR: {inj.returnDate ? fmtShort(inj.returnDate) : <span className="text-red-500">Season</span>}</p>
+                      {inj.event && <p>Event: {inj.event}</p>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </td>
+
+      {/* RTP Phase */}
+      <td rowSpan={rs} className={cellClass + " w-28"}>
+        {canEdit ? (
+          <select value={row.rtpPhaseId || ''} onChange={e => onUpdateField('rtpPhaseId', e.target.value || null)}
+            className="w-full h-7 px-1.5 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400">
+            <option value="">—</option>
+            {rtpPhases.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+        ) : <span className="text-slate-600">{rtpPhase?.name || <span className="text-slate-300">—</span>}</span>}
+      </td>
+
+      {/* Staff Lead */}
+      <td rowSpan={rs} className={cellClass + " w-24"}>
+        {canEdit ? (
+          <select value={row.staffLeadId || ''} onChange={e => onUpdateField('staffLeadId', e.target.value || null)}
+            className="w-full h-7 px-1.5 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400">
+            <option value="">—</option>
+            {staffLeads.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        ) : <span className="text-slate-600">{staffLead?.name || <span className="text-slate-300">—</span>}</span>}
+      </td>
+
+      {/* Target Fixture */}
+      <td rowSpan={rs} className={cellClass + " w-32"}>
+        {canEdit ? (
+          <select value={row.targetFixtureId || ''} onChange={e => onUpdateField('targetFixtureId', e.target.value || null)}
+            className="w-full h-7 px-1.5 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400">
+            <option value="">—</option>
+            {futureFixtures.map((f: any) => <option key={f.id} value={f.id}>{fmtShort(f.date)} {f.opposition} ({f.homeAway})</option>)}
+          </select>
+        ) : (
+          <span className="text-slate-600">
+            {fixture ? <><span className="font-medium">{fmtShort(fixture.date)}</span><br/><span className="text-[10px]">{fixture.opposition} ({fixture.homeAway})</span></> : <span className="text-slate-300">—</span>}
+          </span>
+        )}
+      </td>
+
+      {/* Week Overview */}
+      <td rowSpan={rs} className={cellClass + " w-36 align-top"}>
+        {canEdit ? (
+          <textarea value={row.weekOverview} onChange={e => onUpdateField('weekOverview', e.target.value)}
+            rows={3} placeholder="Overview…"
+            className="w-full px-1.5 py-1 text-[10px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400 resize-none leading-snug" />
+        ) : <span className="text-[10px] text-slate-600 whitespace-pre-wrap leading-snug">{row.weekOverview || <span className="text-slate-300">—</span>}</span>}
+      </td>
+    </>
   );
 };
 
@@ -1007,9 +1056,16 @@ const RehabPlannerPage = ({ clubId, role }: { clubId: string; role: Role }) => {
   // Group rows by section
   const rowsBySection = useMemo(() => {
     const grouped: Record<string, PlanRow[]> = { LTI: [], STI: [], RTT: [], Other: [] };
-    for (const row of rows) grouped[row.section]?.push(row);
+    for (const row of rows) {
+      const athlete = allAthletes.find(a => a.id === row.athleteId);
+      // Recalculate live from current statusDef so thresholds always apply correctly
+      const section = athlete && statusDef
+        ? getInjurySection(athlete, weekCommencing, statusDef)
+        : row.section;
+      grouped[section]?.push(row);
+    }
     return grouped;
-  }, [rows]);
+  }, [rows, allAthletes, statusDef, weekCommencing]);
 
   // Week navigation
   const prevWeek = () => {
