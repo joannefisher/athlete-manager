@@ -1942,6 +1942,9 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
   const typedDrillTypes: DrillType[] = drillTypes;
   const typedTeamStructure: TeamPosition[] = teamStructure;
   const canEditSession = canEdit(role);
+  const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const [quickAddName, setQuickAddName] = useState('');
+  const [quickAddError, setQuickAddError] = useState(false);
 
   const [expandedDrill, setExpandedDrill] = useState<string | null>(null);
   const [editingTeam, setEditingTeam] = useState<Drill | null>(null);
@@ -1977,6 +1980,34 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
   };
 
   const getPositionsForDrill = (drill: Drill) => typedDrillTypes.find(dt => dt.name === drill.type)?.positions || typedTeamStructure.map(p => p.number);
+
+  const handleQuickAdd = () => {
+    if (!quickAddName.trim()) { setQuickAddError(true); return; }
+    const defaultType = typedDrillTypes[0]?.name || 'General';
+    const defaultDur = typedDrillTypes[0]?.defaultDuration || 0;
+    const newId = String(Date.now());
+    const newDrill: Drill = {
+      id: newId,
+      name: quickAddName.trim(),
+      type: defaultType,
+      intensity: 'Low',
+      notes: '',
+      duration: defaultDur,
+      isBreak: false,
+      team1: { ...defaultTeam.team1 },
+      team2: { ...defaultTeam.team2 },
+      subs1: { ...defaultTeam.subs1 },
+      subs2: { ...defaultTeam.subs2 },
+    };
+    setDayDrills([...dayDrills, newDrill]);
+    // Immediately open the new drill in edit mode
+    setExpandedDrill(newId);
+    setEditingDrillId(newId);
+    setEditDrillData({});
+    setShowQuickAdd(false);
+    setQuickAddName('');
+    onMarkDirty?.(true);
+  };
 
   const handleSaveDay = async () => {
     setSavingDay(activeDay);
@@ -2094,7 +2125,7 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
       {/* Toolbar: action buttons inline above drill list */}
       <div className="flex gap-2 mb-3">
         {canEditSession && <>
-          <button onClick={() => navigateTo('add-drill')}
+          <button onClick={() => { setQuickAddName(''); setQuickAddError(false); setShowQuickAdd(true); }}
             className="flex-1 h-9 bg-white border border-slate-200 text-slate-700 rounded-lg text-[12px] font-medium flex items-center justify-center gap-1.5 hover:bg-slate-50 hover:border-slate-300 transition-colors">
             <Plus className="w-3.5 h-3.5" />Add Drill
           </button>
@@ -2306,6 +2337,41 @@ const SessionPlanPage = ({ drills, setDrills, weekDrills, setWeekDrills, navigat
           </div>
         )}
       </div>
+
+      {/* ── Quick-add drill modal ──────────────────────────────────────────── */}
+      {showQuickAdd && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+              <h3 className="text-[14px] font-semibold text-slate-900">Add Drill</h3>
+              <button onClick={() => setShowQuickAdd(false)} className="p-1 hover:bg-slate-100 rounded"><X className="w-4 h-4 text-slate-400" /></button>
+            </div>
+            <div className="p-4 space-y-3">
+              <div>
+                <label className="block text-[11px] font-medium text-slate-500 mb-1.5">Drill name</label>
+                <input
+                  type="text"
+                  autoFocus
+                  value={quickAddName}
+                  onChange={e => { setQuickAddName(e.target.value); setQuickAddError(false); }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') handleQuickAdd();
+                    if (e.key === 'Escape') setShowQuickAdd(false);
+                  }}
+                  placeholder="e.g. Rondo, Warm-up, Finishing…"
+                  className={`w-full h-10 px-3 text-[13px] border rounded-lg bg-slate-50 focus:outline-none focus:ring-2 ${quickAddError ? 'border-red-400 focus:ring-red-400' : 'border-slate-200 focus:ring-blue-500'}`}
+                />
+                {quickAddError && <p className="text-[11px] text-red-500 mt-1">Please enter a drill name</p>}
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">Added to the plan immediately. Click the drill to add type, duration, intensity, notes and team selection.</p>
+            </div>
+            <div className="flex gap-2 px-4 pb-4">
+              <button onClick={handleQuickAdd} className="flex-1 h-10 bg-slate-900 text-white rounded-lg text-[13px] font-semibold hover:bg-slate-700 transition-colors">Add Drill</button>
+              <button onClick={() => setShowQuickAdd(false)} className="h-10 px-5 bg-slate-100 text-slate-600 rounded-lg text-[13px] hover:bg-slate-200 transition-colors">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Bottom bar — Save only for editors */}
       {canEditSession && (
