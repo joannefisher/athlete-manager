@@ -139,6 +139,59 @@ const SECTION_LIGHT: Record<string, string> = {
 
 const canEditRole = (role: Role) => role === 'Admin' || role === 'S&C' || role === 'Physio';
 
+// ── Setup sub-components (defined at module level to prevent remount on re-render) ──
+
+const SetupSection = ({ id, expanded, setExpanded, title, count, children }: any) => (
+  <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+    <button onClick={() => setExpanded(expanded === id ? '' : id)}
+      className="w-full px-4 py-3.5 flex items-center justify-between hover:bg-slate-50 transition-colors">
+      <div>
+        <h3 className="text-[13px] font-semibold text-slate-900 text-left">{title}</h3>
+        {count !== undefined && <p className="text-[11px] text-slate-400 mt-0.5">{count} item{count !== 1 ? 's' : ''}</p>}
+      </div>
+      {expanded === id ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+    </button>
+    {expanded === id && <div className="border-t border-slate-100">{children}</div>}
+  </div>
+);
+
+const SimplePicklist = ({ items, onAdd, onEdit, onDelete, newVal, setNewVal, editingId, setEditingId, editVal, setEditVal, canEdit }: any) => (
+  <div className="p-4 space-y-2">
+    {items.map((item: any) => (
+      <div key={item.id} className="flex items-center gap-2">
+        {editingId === item.id ? (
+          <>
+            <input value={editVal} onChange={e => setEditVal(e.target.value)}
+              className="flex-1 h-8 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+            <button onClick={() => onEdit(item.id)} className="h-8 px-3 bg-slate-900 text-white rounded-lg text-[11px]">Save</button>
+            <button onClick={() => setEditingId(null)} className="h-8 px-3 bg-slate-100 text-slate-600 rounded-lg text-[11px]">Cancel</button>
+          </>
+        ) : (
+          <>
+            <span className="flex-1 text-[13px] text-slate-700 px-3 py-1.5 bg-slate-50 rounded-lg border border-slate-200">{item.name}</span>
+            {canEdit && <>
+              <button onClick={() => { setEditingId(item.id); setEditVal(item.name); }} className="p-1.5 text-slate-300 hover:text-slate-600"><Edit2 className="w-3.5 h-3.5" /></button>
+              <button onClick={() => onDelete(item.id)} className="p-1.5 text-slate-300 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button>
+            </>}
+          </>
+        )}
+      </div>
+    ))}
+    {canEdit && (
+      <div className="flex gap-2 pt-1">
+        <input value={newVal} onChange={e => setNewVal(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && onAdd()}
+          placeholder="Add option…"
+          className="flex-1 h-8 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+        <button onClick={onAdd} disabled={!newVal.trim()}
+          className="h-8 px-3 bg-slate-900 text-white rounded-lg text-[11px] disabled:opacity-40 flex items-center gap-1">
+          <Plus className="w-3 h-3" />Add
+        </button>
+      </div>
+    )}
+  </div>
+);
+
 // ── Setup Page ────────────────────────────────────────────────────────────────
 const RehabSetupPage = ({ clubId, role }: { clubId: string; role: Role }) => {
   const canEdit = canEditRole(role);
@@ -256,62 +309,12 @@ const RehabSetupPage = ({ clubId, role }: { clubId: string; role: Role }) => {
     await supabase.from('staff_leads').delete().eq('id', id); await load();
   };
 
-  const Section = ({ id, title, count, children }: any) => (
-    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-      <button onClick={() => setExpanded(expanded === id ? '' : id)}
-        className="w-full px-4 py-3.5 flex items-center justify-between hover:bg-slate-50 transition-colors">
-        <div>
-          <h3 className="text-[13px] font-semibold text-slate-900 text-left">{title}</h3>
-          {count !== undefined && <p className="text-[11px] text-slate-400 mt-0.5">{count} item{count !== 1 ? 's' : ''}</p>}
-        </div>
-        {expanded === id ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
-      </button>
-      {expanded === id && <div className="border-t border-slate-100">{children}</div>}
-    </div>
-  );
-
-  const SimplePicklist = ({ items, onAdd, onEdit, onDelete, newVal, setNewVal, editingId, setEditingId, editVal, setEditVal }: any) => (
-    <div className="p-4 space-y-2">
-      {items.map((item: any) => (
-        <div key={item.id} className="flex items-center gap-2">
-          {editingId === item.id ? (
-            <>
-              <input value={editVal} onChange={e => setEditVal(e.target.value)}
-                className="flex-1 h-8 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
-              <button onClick={() => onEdit(item.id)} className="h-8 px-3 bg-slate-900 text-white rounded-lg text-[11px]">Save</button>
-              <button onClick={() => setEditingId(null)} className="h-8 px-3 bg-slate-100 text-slate-600 rounded-lg text-[11px]">Cancel</button>
-            </>
-          ) : (
-            <>
-              <span className="flex-1 text-[13px] text-slate-700 px-3 py-1.5 bg-slate-50 rounded-lg border border-slate-200">{item.name}</span>
-              {canEdit && <>
-                <button onClick={() => { setEditingId(item.id); setEditVal(item.name); }} className="p-1.5 text-slate-300 hover:text-slate-600"><Edit2 className="w-3.5 h-3.5" /></button>
-                <button onClick={() => onDelete(item.id)} className="p-1.5 text-slate-300 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button>
-              </>}
-            </>
-          )}
-        </div>
-      ))}
-      {canEdit && (
-        <div className="flex gap-2 pt-1">
-          <input value={newVal} onChange={e => setNewVal(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && onAdd()}
-            placeholder="Add option…"
-            className="flex-1 h-8 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
-          <button onClick={onAdd} disabled={!newVal.trim()}
-            className="h-8 px-3 bg-slate-900 text-white rounded-lg text-[11px] disabled:opacity-40 flex items-center gap-1">
-            <Plus className="w-3 h-3" />Add
-          </button>
-        </div>
-      )}
-    </div>
-  );
 
   return (
     <div className="max-w-2xl mx-auto p-4 md:p-6 space-y-3">
 
       {/* Rehab Components */}
-      <Section id="components" title="Rehab Components" count={components.length}>
+      <SetupSection id="components" expanded={expanded} setExpanded={setExpanded} title="Rehab Components" count={components.length}>
         <div className="divide-y divide-slate-100">
           {components.map(comp => (
             <div key={comp.id} className="p-4">
@@ -376,10 +379,10 @@ const RehabSetupPage = ({ clubId, role }: { clubId: string; role: Role }) => {
             )}
           </div>
         )}
-      </Section>
+      </SetupSection>
 
       {/* Status Thresholds */}
-      <Section id="thresholds" title="Status Thresholds (weeks)" count={undefined}>
+      <SetupSection id="thresholds" expanded={expanded} setExpanded={setExpanded} title="Status Thresholds (weeks)" count={undefined}>
         <div className="p-4 space-y-4">
           <p className="text-[12px] text-slate-500 leading-relaxed">Define the minimum number of weeks between injury start date and estimated return date to qualify for each status. The highest week count across all active injuries determines the player's section.</p>
           <div className="grid grid-cols-3 gap-3">
@@ -391,8 +394,8 @@ const RehabSetupPage = ({ clubId, role }: { clubId: string; role: Role }) => {
               <div key={key}>
                 <label className="block text-[11px] text-slate-500 mb-1">{label}</label>
                 <div className="flex items-center gap-1">
-                  <input type="number" min={0} value={(statusForm as any)[key]}
-                    onChange={e => setStatusForm({ ...statusForm, [key]: e.target.value })}
+                  <input type="text" inputMode="numeric" pattern="[0-9]*" value={(statusForm as any)[key]}
+                    onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); setStatusForm({ ...statusForm, [key]: v }); }}
                     disabled={!canEdit}
                     className={`w-full h-9 px-3 text-[13px] font-semibold border rounded-lg focus:outline-none focus:ring-1 ${colour} disabled:opacity-40`} />
                   <span className="text-[11px] text-slate-400 whitespace-nowrap">wks+</span>
@@ -407,23 +410,23 @@ const RehabSetupPage = ({ clubId, role }: { clubId: string; role: Role }) => {
             </button>
           )}
         </div>
-      </Section>
+      </SetupSection>
 
       {/* RTP Phases */}
-      <Section id="rtp" title="RTP Phases" count={rtpPhases.length}>
+      <SetupSection id="rtp" expanded={expanded} setExpanded={setExpanded} title="RTP Phases" count={rtpPhases.length}>
         <SimplePicklist items={rtpPhases} newVal={newRtp} setNewVal={setNewRtp}
           onAdd={addRtp} onEdit={updateRtp} onDelete={deleteRtp}
           editingId={editingRtp} setEditingId={setEditingRtp}
-          editVal={editRtpVal} setEditVal={setEditRtpVal} />
-      </Section>
+          editVal={editRtpVal} setEditVal={setEditRtpVal} canEdit={canEdit} />
+      </SetupSection>
 
       {/* Staff Leads */}
-      <Section id="staff" title="Staff Leads" count={staffLeads.length}>
+      <SetupSection id="staff" expanded={expanded} setExpanded={setExpanded} title="Staff Leads" count={staffLeads.length}>
         <SimplePicklist items={staffLeads} newVal={newStaff} setNewVal={setNewStaff}
           onAdd={addStaff} onEdit={updateStaff} onDelete={deleteStaff}
           editingId={editingStaff} setEditingId={setEditingStaff}
-          editVal={editStaffVal} setEditVal={setEditStaffVal} />
-      </Section>
+          editVal={editStaffVal} setEditVal={setEditStaffVal} canEdit={canEdit} />
+      </SetupSection>
     </div>
   );
 };
