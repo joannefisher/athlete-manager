@@ -1,58 +1,33 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Plus, X, ChevronDown, ChevronUp, ArrowLeft, Loader2, Settings, Check, Trash2, Edit2, ChevronLeft, ChevronRight, Copy, AlertCircle, Target } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { Plus, X, ChevronDown, ChevronUp, ArrowLeft, Loader2, Settings, Check, Trash2, Edit2, ChevronLeft, ChevronRight, Copy, Target, LayoutGrid, List } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import type { Role } from './AthleteManager';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Injury {
-  id: string;
-  bodyPart: string;
-  startDate: string;
-  returnDate: string | null;
-  surgeryDate?: string | null;
-  notes: string;
-  event?: string;
+  id: string; bodyPart: string; startDate: string;
+  returnDate: string | null; surgeryDate?: string | null;
+  notes: string; event?: string;
 }
-
 interface Athlete {
-  id: string;
-  name: string;
-  status: string;
-  avatar: string;
-  injuries: Injury[];
+  id: string; name: string; status: string; avatar: string; injuries: Injury[];
 }
-
-interface RehabComponent {
-  id: string;
-  name: string;
-  options: string[];
-  sortOrder: number;
-}
-
+interface RehabComponent { id: string; name: string; options: string[]; sortOrder: number; }
 interface RTPPhase { id: string; name: string; sortOrder: number; }
-interface StaffLead { id: string; name: string; sortOrder: number; }
+interface StaffLead { id: string; name: string; role: string; sortOrder: number; }
 interface Fixture { id: string; date: string; opposition: string; homeAway: string; }
-
 interface StatusDefinition {
-  id: string;
-  ltiWeeksMin: number;  // >= this = Long Term Injured
-  stiWeeksMin: number;  // >= this = Short Term Injured
-  rttWeeksMin: number;  // >= this = Returning to Training
+  id: string; ltiWeeksMin: number; stiWeeksMin: number; rttWeeksMin: number;
 }
-
 interface PlanRow {
-  id: string;
-  planId: string;
-  athleteId: string;
+  id: string; planId: string; athleteId: string;
   section: 'LTI' | 'STI' | 'RTT' | 'Other';
   rtpPhaseId: string | null;
-  staffLeadId: string | null;
+  staffLeadIds: string[];           // multi-select
   targetFixtureId: string | null;
-  weekOverview: string;
-  sortOrder: number;
-  // component entries: componentId → dayDate → value
+  weekOverview: string; sortOrder: number;
   entries: Record<string, Record<string, string>>;
 }
 
@@ -63,86 +38,168 @@ const getWeekDates = (date: string): string[] => {
   const mon = new Date(d);
   mon.setDate(d.getDate() - ((day + 6) % 7));
   return Array.from({ length: 7 }, (_, i) => {
-    const dd = new Date(mon);
-    dd.setDate(mon.getDate() + i);
+    const dd = new Date(mon); dd.setDate(mon.getDate() + i);
     return dd.toISOString().split('T')[0];
   });
 };
-
-const getMondayOf = (date: string): string => getWeekDates(date)[0];
-
-const fmtWC = (d: string) => {
-  if (!d) return '';
-  return new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-};
-
-const fmtShort = (d: string) => {
-  if (!d) return '';
-  return new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-};
-
+const getMondayOf = (d: string) => getWeekDates(d)[0];
+const fmtWC = (d: string) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+const fmtShort = (d: string) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
+const fmtDayNum = (d: string) => new Date(d + 'T00:00:00').getDate();
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const weeksApart = (from: string, to: string) =>
+  Math.round((new Date(to + 'T00:00:00').getTime() - new Date(from + 'T00:00:00').getTime()) / (7 * 86400000));
 
-const weeksApart = (from: string, to: string): number => {
-  const ms = new Date(to + 'T00:00:00').getTime() - new Date(from + 'T00:00:00').getTime();
-  return Math.round(ms / (7 * 24 * 60 * 60 * 1000));
-};
-
-// Calculate injury section based on active injuries and thresholds
-const getInjurySection = (
-  athlete: Athlete,
-  weekCommencing: string,
-  statusDef: StatusDefinition | null
-): 'LTI' | 'STI' | 'RTT' | 'Other' => {
-  const today = weekCommencing;
-  const active = athlete.injuries.filter(
-    i => !i.returnDate || i.returnDate >= today
-  );
-  if (!active.length || !statusDef) return 'Other';
-
-  // Find max weeks (injury start → ETR)
-  let maxWeeks = 0;
+const getInjurySection = (athlete: Athlete, wc: string, sd: StatusDefinition | null): 'LTI' | 'STI' | 'RTT' | 'Other' => {
+  const active = athlete.injuries.filter(i => !i.returnDate || i.returnDate >= wc);
+  if (!active.length || !sd) return 'Other';
+  let max = 0;
   for (const inj of active) {
-    if (inj.startDate && inj.returnDate) {
-      const w = weeksApart(inj.startDate, inj.returnDate);
-      if (w > maxWeeks) maxWeeks = w;
-    } else if (inj.startDate && !inj.returnDate) {
-      maxWeeks = 999; // Season-ending → always LTI
-    }
+    if (inj.startDate && inj.returnDate) { const w = weeksApart(inj.startDate, inj.returnDate); if (w > max) max = w; }
+    else if (inj.startDate && !inj.returnDate) { max = 999; }
   }
-
-  if (maxWeeks >= statusDef.ltiWeeksMin) return 'LTI';
-  if (maxWeeks >= statusDef.stiWeeksMin) return 'STI';
-  if (maxWeeks >= statusDef.rttWeeksMin) return 'RTT';
+  if (max >= sd.ltiWeeksMin) return 'LTI';
+  if (max >= sd.stiWeeksMin) return 'STI';
+  if (max >= sd.rttWeeksMin) return 'RTT';
   return 'Other';
 };
 
-const SECTION_LABELS: Record<string, string> = {
-  LTI: 'Long Term Injured',
-  STI: 'Short Term Injured',
-  RTT: 'Returning to Training',
-  Other: 'Other',
-};
+const SECTION_LABELS: Record<string, string> = { LTI: 'Long Term Injured', STI: 'Short Term Injured', RTT: 'Returning to Training', Other: 'Other' };
 const SECTION_ORDER = ['LTI', 'STI', 'RTT', 'Other'] as const;
-const SECTION_COLOURS: Record<string, string> = {
-  LTI: 'bg-red-700',
-  STI: 'bg-orange-600',
-  RTT: 'bg-amber-500',
-  Other: 'bg-slate-500',
+const SECTION_BG: Record<string, string> = { LTI: 'bg-red-700', STI: 'bg-orange-600', RTT: 'bg-amber-500', Other: 'bg-slate-500' };
+const SECTION_BORDER: Record<string, string> = { LTI: 'border-red-200', STI: 'border-orange-200', RTT: 'border-amber-200', Other: 'border-slate-200' };
+const canEditRole = (r: Role) => r === 'Admin' || r === 'S&C' || r === 'Physio';
+
+// ── ComboCell — unified picklist + free text, no confirm button ───────────────
+const ComboCell = ({ value, options, canEdit, onChange }: {
+  value: string; options: string[]; canEdit: boolean; onChange: (v: string) => void;
+}) => {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { setDraft(value); }, [value]);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) { onChange(draft); setOpen(false); } };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open, draft]);
+
+  if (!canEdit) return <span className="text-[11px] text-slate-600 px-1">{value || <span className="text-slate-300">—</span>}</span>;
+
+  if (!open) return (
+    <button onClick={() => setOpen(true)}
+      className="w-full min-h-[28px] text-left px-2 py-1 rounded text-[11px] text-slate-700 hover:bg-slate-100 transition-colors border border-transparent hover:border-slate-200">
+      {value || <span className="text-slate-300 italic">—</span>}
+    </button>
+  );
+
+  return (
+    <div ref={ref} className="relative z-30 min-w-[130px]">
+      <input
+        autoFocus
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') { onChange(draft); setOpen(false); } }}
+        placeholder="Type or pick…"
+        className="w-full h-7 px-2 text-[11px] border border-blue-400 rounded focus:outline-none bg-white shadow-sm"
+      />
+      {options.length > 0 && (
+        <div className="absolute top-full left-0 mt-0.5 bg-white border border-slate-200 rounded-lg shadow-lg min-w-full z-40 max-h-40 overflow-y-auto">
+          {options.filter(o => !draft || o.toLowerCase().includes(draft.toLowerCase())).map(o => (
+            <button key={o} onMouseDown={e => { e.preventDefault(); setDraft(o); onChange(o); setOpen(false); }}
+              className={`w-full text-left px-3 py-1.5 text-[11px] hover:bg-blue-50 transition-colors ${draft === o ? 'bg-blue-50 text-blue-700 font-medium' : 'text-slate-700'}`}>
+              {o}
+            </button>
+          ))}
+          {draft && !options.includes(draft) && (
+            <button onMouseDown={e => { e.preventDefault(); onChange(draft); setOpen(false); }}
+              className="w-full text-left px-3 py-1.5 text-[11px] text-slate-400 hover:bg-slate-50 border-t border-slate-100">
+              Use "{draft}"
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
 };
-const SECTION_LIGHT: Record<string, string> = {
-  LTI: 'bg-red-50 border-red-200',
-  STI: 'bg-orange-50 border-orange-200',
-  RTT: 'bg-amber-50 border-amber-200',
-  Other: 'bg-slate-50 border-slate-200',
+
+// ── Multi Staff Lead picker ───────────────────────────────────────────────────
+const StaffLeadPicker = ({ selectedIds, staffLeads, canEdit, onChange }: {
+  selectedIds: string[]; staffLeads: StaffLead[]; canEdit: boolean; onChange: (ids: string[]) => void;
+}) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const selected = staffLeads.filter(s => selectedIds.includes(s.id));
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const toggle = (id: string) => {
+    const next = selectedIds.includes(id) ? selectedIds.filter(x => x !== id) : [...selectedIds, id];
+    onChange(next);
+  };
+
+  if (!canEdit) {
+    if (!selected.length) return <span className="text-slate-300 text-[10px]">—</span>;
+    return (
+      <div className="flex flex-wrap gap-1">
+        {selected.map(s => (
+          <span key={s.id} className="inline-flex items-center gap-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded px-1.5 py-0.5 text-[9px] font-medium">
+            {s.name}{s.role && <span className="opacity-60 ml-0.5">· {s.role}</span>}
+          </span>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      <button onClick={() => setOpen(!open)}
+        className="w-full min-h-[28px] text-left px-2 py-1 rounded text-[10px] hover:bg-slate-100 border border-transparent hover:border-slate-200 transition-colors">
+        {selected.length === 0
+          ? <span className="text-slate-300 italic">— Select —</span>
+          : <div className="flex flex-wrap gap-0.5">
+              {selected.map(s => (
+                <span key={s.id} className="bg-emerald-100 text-emerald-700 rounded px-1 py-0.5 text-[9px] font-medium">
+                  {s.name}{s.role && <span className="opacity-60"> · {s.role}</span>}
+                </span>
+              ))}
+            </div>
+        }
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 mt-0.5 bg-white border border-slate-200 rounded-lg shadow-xl z-40 min-w-[180px] py-1">
+          <p className="px-3 py-1 text-[9px] font-bold text-slate-400 uppercase tracking-wider">Select staff</p>
+          {staffLeads.map(s => (
+            <button key={s.id} onMouseDown={e => { e.preventDefault(); toggle(s.id); }}
+              className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 transition-colors">
+              <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${selectedIds.includes(s.id) ? 'bg-emerald-600 border-emerald-600' : 'border-slate-300'}`}>
+                {selectedIds.includes(s.id) && <Check className="w-2.5 h-2.5 text-white" />}
+              </div>
+              <div className="text-left min-w-0">
+                <span className="text-[11px] font-medium text-slate-700">{s.name}</span>
+                {s.role && <span className="text-[10px] text-slate-400 ml-1">· {s.role}</span>}
+              </div>
+            </button>
+          ))}
+          {staffLeads.length === 0 && <p className="px-3 py-2 text-[11px] text-slate-400 italic">No staff defined in Setup</p>}
+        </div>
+      )}
+    </div>
+  );
 };
 
-const canEditRole = (role: Role) => role === 'Admin' || role === 'S&C' || role === 'Physio';
-
-// ── Setup sub-components (defined at module level to prevent remount on re-render) ──
-
+// ── Setup sub-components ──────────────────────────────────────────────────────
 const SetupSection = ({ id, expanded, setExpanded, title, count, children }: any) => (
-  <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+  <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
     <button onClick={() => setExpanded(expanded === id ? '' : id)}
       className="w-full px-4 py-3.5 flex items-center justify-between hover:bg-slate-50 transition-colors">
       <div>
@@ -155,160 +212,82 @@ const SetupSection = ({ id, expanded, setExpanded, title, count, children }: any
   </div>
 );
 
-const SimplePicklist = ({ items, onAdd, onEdit, onDelete, newVal, setNewVal, editingId, setEditingId, editVal, setEditVal, canEdit }: any) => (
-  <div className="p-4 space-y-2">
-    {items.map((item: any) => (
-      <div key={item.id} className="flex items-center gap-2">
-        {editingId === item.id ? (
-          <>
-            <input value={editVal} onChange={e => setEditVal(e.target.value)}
-              className="flex-1 h-8 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
-            <button onClick={() => onEdit(item.id)} className="h-8 px-3 bg-slate-900 text-white rounded-lg text-[11px]">Save</button>
-            <button onClick={() => setEditingId(null)} className="h-8 px-3 bg-slate-100 text-slate-600 rounded-lg text-[11px]">Cancel</button>
-          </>
-        ) : (
-          <>
-            <span className="flex-1 text-[13px] text-slate-700 px-3 py-1.5 bg-slate-50 rounded-lg border border-slate-200">{item.name}</span>
-            {canEdit && <>
-              <button onClick={() => { setEditingId(item.id); setEditVal(item.name); }} className="p-1.5 text-slate-300 hover:text-slate-600"><Edit2 className="w-3.5 h-3.5" /></button>
-              <button onClick={() => onDelete(item.id)} className="p-1.5 text-slate-300 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button>
-            </>}
-          </>
-        )}
-      </div>
-    ))}
-    {canEdit && (
-      <div className="flex gap-2 pt-1">
-        <input value={newVal} onChange={e => setNewVal(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && onAdd()}
-          placeholder="Add option…"
-          className="flex-1 h-8 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
-        <button onClick={onAdd} disabled={!newVal.trim()}
-          className="h-8 px-3 bg-slate-900 text-white rounded-lg text-[11px] disabled:opacity-40 flex items-center gap-1">
-          <Plus className="w-3 h-3" />Add
-        </button>
-      </div>
-    )}
-  </div>
-);
-
 // ── Setup Page ────────────────────────────────────────────────────────────────
 const RehabSetupPage = ({ clubId, role }: { clubId: string; role: Role }) => {
   const canEdit = canEditRole(role);
   const [expanded, setExpanded] = useState<string>('components');
 
-  // Rehab Components
   const [components, setComponents] = useState<RehabComponent[]>([]);
   const [editingComp, setEditingComp] = useState<string | null>(null);
   const [compForm, setCompForm] = useState({ name: '', options: '' });
   const [showAddComp, setShowAddComp] = useState(false);
 
-  // Status Thresholds
   const [statusDef, setStatusDef] = useState<StatusDefinition | null>(null);
   const [statusForm, setStatusForm] = useState({ lti: '12', sti: '4', rtt: '1' });
   const [savingStatus, setSavingStatus] = useState(false);
 
-  // RTP Phases
   const [rtpPhases, setRtpPhases] = useState<RTPPhase[]>([]);
   const [newRtp, setNewRtp] = useState('');
   const [editingRtp, setEditingRtp] = useState<string | null>(null);
   const [editRtpVal, setEditRtpVal] = useState('');
 
-  // Staff Leads
   const [staffLeads, setStaffLeads] = useState<StaffLead[]>([]);
-  const [newStaff, setNewStaff] = useState('');
+  const [newStaffName, setNewStaffName] = useState('');
+  const [newStaffRole, setNewStaffRole] = useState('');
   const [editingStaff, setEditingStaff] = useState<string | null>(null);
-  const [editStaffVal, setEditStaffVal] = useState('');
+  const [editStaffName, setEditStaffName] = useState('');
+  const [editStaffRole, setEditStaffRole] = useState('');
 
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
-    const [
-      { data: compData },
-      { data: statusData },
-      { data: rtpData },
-      { data: staffData },
-    ] = await Promise.all([
+    const [{ data: compData }, { data: statusData }, { data: rtpData }, { data: staffData }] = await Promise.all([
       supabase.from('rehab_components').select('*').eq('club_id', clubId).order('sort_order'),
       supabase.from('rehab_status_definitions').select('*').eq('club_id', clubId).maybeSingle(),
       supabase.from('rtp_phases').select('*').eq('club_id', clubId).order('sort_order'),
       supabase.from('staff_leads').select('*').eq('club_id', clubId).order('sort_order'),
     ]);
-    setComponents((compData || []).map((c: any) => ({
-      id: c.id, name: c.name,
-      options: Array.isArray(c.options) ? c.options : JSON.parse(c.options || '[]'),
-      sortOrder: c.sort_order,
-    })));
-    if (statusData) {
-      setStatusDef({ id: statusData.id, ltiWeeksMin: statusData.lti_weeks_min, stiWeeksMin: statusData.sti_weeks_min, rttWeeksMin: statusData.rtt_weeks_min });
-      setStatusForm({ lti: String(statusData.lti_weeks_min), sti: String(statusData.sti_weeks_min), rtt: String(statusData.rtt_weeks_min) });
-    }
+    setComponents((compData || []).map((c: any) => ({ id: c.id, name: c.name, options: Array.isArray(c.options) ? c.options : JSON.parse(c.options || '[]'), sortOrder: c.sort_order })));
+    if (statusData) { setStatusDef({ id: statusData.id, ltiWeeksMin: statusData.lti_weeks_min, stiWeeksMin: statusData.sti_weeks_min, rttWeeksMin: statusData.rtt_weeks_min }); setStatusForm({ lti: String(statusData.lti_weeks_min), sti: String(statusData.sti_weeks_min), rtt: String(statusData.rtt_weeks_min) }); }
     setRtpPhases((rtpData || []).map((r: any) => ({ id: r.id, name: r.name, sortOrder: r.sort_order })));
-    setStaffLeads((staffData || []).map((s: any) => ({ id: s.id, name: s.name, sortOrder: s.sort_order })));
+    setStaffLeads((staffData || []).map((s: any) => ({ id: s.id, name: s.name, role: s.role || '', sortOrder: s.sort_order })));
   }, [clubId]);
 
   useEffect(() => { load(); }, [load]);
 
-  // ── Component CRUD ───────────────────────────────────────────────────────
   const saveComponent = async () => {
     if (!compForm.name.trim()) return;
     setSaving(true);
     const opts = compForm.options.split('\n').map(s => s.trim()).filter(Boolean);
-    if (editingComp) {
-      await supabase.from('rehab_components').update({ name: compForm.name.trim(), options: opts }).eq('id', editingComp);
-    } else {
-      await supabase.from('rehab_components').insert({ club_id: clubId, name: compForm.name.trim(), options: opts, sort_order: components.length });
-    }
+    if (editingComp) await supabase.from('rehab_components').update({ name: compForm.name.trim(), options: opts }).eq('id', editingComp);
+    else await supabase.from('rehab_components').insert({ club_id: clubId, name: compForm.name.trim(), options: opts, sort_order: components.length });
     setCompForm({ name: '', options: '' }); setEditingComp(null); setShowAddComp(false);
     await load(); setSaving(false);
   };
+  const deleteComponent = async (id: string) => { if (!confirm('Delete?')) return; await supabase.from('rehab_components').delete().eq('id', id); await load(); };
 
-  const deleteComponent = async (id: string) => {
-    if (!confirm('Delete this component?')) return;
-    await supabase.from('rehab_components').delete().eq('id', id);
-    await load();
-  };
-
-  // ── Status Def ───────────────────────────────────────────────────────────
   const saveStatusDef = async () => {
     setSavingStatus(true);
     const payload = { club_id: clubId, lti_weeks_min: parseInt(statusForm.lti) || 12, sti_weeks_min: parseInt(statusForm.sti) || 4, rtt_weeks_min: parseInt(statusForm.rtt) || 1 };
-    if (statusDef) {
-      await supabase.from('rehab_status_definitions').update(payload).eq('id', statusDef.id);
-    } else {
-      await supabase.from('rehab_status_definitions').insert(payload);
-    }
+    if (statusDef) await supabase.from('rehab_status_definitions').update(payload).eq('id', statusDef.id);
+    else await supabase.from('rehab_status_definitions').insert(payload);
     await load(); setSavingStatus(false);
   };
 
-  // ── RTP Phases CRUD ──────────────────────────────────────────────────────
-  const addRtp = async () => {
-    if (!newRtp.trim()) return;
-    await supabase.from('rtp_phases').insert({ club_id: clubId, name: newRtp.trim(), sort_order: rtpPhases.length });
-    setNewRtp(''); await load();
-  };
-  const updateRtp = async (id: string) => {
-    await supabase.from('rtp_phases').update({ name: editRtpVal.trim() }).eq('id', id);
-    setEditingRtp(null); await load();
-  };
-  const deleteRtp = async (id: string) => {
-    await supabase.from('rtp_phases').delete().eq('id', id); await load();
-  };
+  const addRtp = async () => { if (!newRtp.trim()) return; await supabase.from('rtp_phases').insert({ club_id: clubId, name: newRtp.trim(), sort_order: rtpPhases.length }); setNewRtp(''); await load(); };
+  const updateRtp = async (id: string) => { await supabase.from('rtp_phases').update({ name: editRtpVal.trim() }).eq('id', id); setEditingRtp(null); await load(); };
+  const deleteRtp = async (id: string) => { await supabase.from('rtp_phases').delete().eq('id', id); await load(); };
 
-  // ── Staff Leads CRUD ─────────────────────────────────────────────────────
   const addStaff = async () => {
-    if (!newStaff.trim()) return;
-    await supabase.from('staff_leads').insert({ club_id: clubId, name: newStaff.trim(), sort_order: staffLeads.length });
-    setNewStaff(''); await load();
+    if (!newStaffName.trim()) return;
+    await supabase.from('staff_leads').insert({ club_id: clubId, name: newStaffName.trim(), role: newStaffRole.trim(), sort_order: staffLeads.length });
+    setNewStaffName(''); setNewStaffRole(''); await load();
   };
   const updateStaff = async (id: string) => {
-    await supabase.from('staff_leads').update({ name: editStaffVal.trim() }).eq('id', id);
+    await supabase.from('staff_leads').update({ name: editStaffName.trim(), role: editStaffRole.trim() }).eq('id', id);
     setEditingStaff(null); await load();
   };
-  const deleteStaff = async (id: string) => {
-    await supabase.from('staff_leads').delete().eq('id', id); await load();
-  };
-
+  const deleteStaff = async (id: string) => { await supabase.from('staff_leads').delete().eq('id', id); await load(); };
 
   return (
     <div className="max-w-2xl mx-auto p-4 md:p-6 space-y-3">
@@ -320,33 +299,17 @@ const RehabSetupPage = ({ clubId, role }: { clubId: string; role: Role }) => {
             <div key={comp.id} className="p-4">
               {editingComp === comp.id ? (
                 <div className="space-y-2">
-                  <input value={compForm.name} onChange={e => setCompForm({ ...compForm, name: e.target.value })}
-                    placeholder="Component name"
-                    className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                  <textarea value={compForm.options} onChange={e => setCompForm({ ...compForm, options: e.target.value })}
-                    placeholder="One option per line" rows={4}
-                    className="w-full px-3 py-2 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none" />
+                  <input value={compForm.name} onChange={e => setCompForm({ ...compForm, name: e.target.value })} placeholder="Component name" className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                  <textarea value={compForm.options} onChange={e => setCompForm({ ...compForm, options: e.target.value })} placeholder="One option per line" rows={4} className="w-full px-3 py-2 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none" />
                   <div className="flex gap-2">
-                    <button onClick={saveComponent} disabled={saving} className="h-8 px-4 bg-slate-900 text-white rounded-lg text-[11px] flex items-center gap-1 disabled:opacity-40">
-                      {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}Save
-                    </button>
-                    <button onClick={() => { setEditingComp(null); setCompForm({ name: '', options: '' }); }}
-                      className="h-8 px-4 bg-slate-100 text-slate-600 rounded-lg text-[11px]">Cancel</button>
+                    <button onClick={saveComponent} disabled={saving} className="h-8 px-4 bg-slate-900 text-white rounded-lg text-[11px] flex items-center gap-1 disabled:opacity-40">{saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}Save</button>
+                    <button onClick={() => { setEditingComp(null); setCompForm({ name: '', options: '' }); }} className="h-8 px-4 bg-slate-100 text-slate-600 rounded-lg text-[11px]">Cancel</button>
                   </div>
                 </div>
               ) : (
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-[13px] font-semibold text-slate-800">{comp.name}</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">{comp.options.length > 0 ? comp.options.join(', ') : 'No options — free text only'}</p>
-                  </div>
-                  {canEdit && (
-                    <div className="flex gap-1 shrink-0">
-                      <button onClick={() => { setEditingComp(comp.id); setCompForm({ name: comp.name, options: comp.options.join('\n') }); }}
-                        className="p-1.5 text-slate-300 hover:text-slate-600"><Edit2 className="w-3.5 h-3.5" /></button>
-                      <button onClick={() => deleteComponent(comp.id)} className="p-1.5 text-slate-300 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button>
-                    </div>
-                  )}
+                  <div><p className="text-[13px] font-semibold text-slate-800">{comp.name}</p><p className="text-[11px] text-slate-400 mt-0.5">{comp.options.length > 0 ? comp.options.join(', ') : 'Free text only'}</p></div>
+                  {canEdit && <div className="flex gap-1 shrink-0"><button onClick={() => { setEditingComp(comp.id); setCompForm({ name: comp.name, options: comp.options.join('\n') }); }} className="p-1.5 text-slate-300 hover:text-slate-600"><Edit2 className="w-3.5 h-3.5" /></button><button onClick={() => deleteComponent(comp.id)} className="p-1.5 text-slate-300 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button></div>}
                 </div>
               )}
             </div>
@@ -356,26 +319,15 @@ const RehabSetupPage = ({ clubId, role }: { clubId: string; role: Role }) => {
           <div className="p-4 border-t border-slate-100">
             {showAddComp ? (
               <div className="space-y-2">
-                <input value={compForm.name} onChange={e => setCompForm({ ...compForm, name: e.target.value })}
-                  placeholder="Component name (e.g. Gym Work, Pool, Pitch)"
-                  className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                <textarea value={compForm.options} onChange={e => setCompForm({ ...compForm, options: e.target.value })}
-                  placeholder="Picklist options — one per line (leave blank for free text only)" rows={4}
-                  className="w-full px-3 py-2 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none" />
+                <input value={compForm.name} onChange={e => setCompForm({ ...compForm, name: e.target.value })} placeholder="Component name" className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                <textarea value={compForm.options} onChange={e => setCompForm({ ...compForm, options: e.target.value })} placeholder="Picklist options — one per line (leave blank for free text)" rows={4} className="w-full px-3 py-2 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none" />
                 <div className="flex gap-2">
-                  <button onClick={saveComponent} disabled={saving || !compForm.name.trim()}
-                    className="h-8 px-4 bg-slate-900 text-white rounded-lg text-[11px] flex items-center gap-1 disabled:opacity-40">
-                    {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}Add Component
-                  </button>
-                  <button onClick={() => { setShowAddComp(false); setCompForm({ name: '', options: '' }); }}
-                    className="h-8 px-4 bg-slate-100 text-slate-600 rounded-lg text-[11px]">Cancel</button>
+                  <button onClick={saveComponent} disabled={saving || !compForm.name.trim()} className="h-8 px-4 bg-slate-900 text-white rounded-lg text-[11px] flex items-center gap-1 disabled:opacity-40">{saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}Add</button>
+                  <button onClick={() => { setShowAddComp(false); setCompForm({ name: '', options: '' }); }} className="h-8 px-4 bg-slate-100 text-slate-600 rounded-lg text-[11px]">Cancel</button>
                 </div>
               </div>
             ) : (
-              <button onClick={() => setShowAddComp(true)}
-                className="flex items-center gap-1.5 h-8 px-3 text-[12px] text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">
-                <Plus className="w-3.5 h-3.5" />Add Component
-              </button>
+              <button onClick={() => setShowAddComp(true)} className="flex items-center gap-1.5 h-8 px-3 text-[12px] text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"><Plus className="w-3.5 h-3.5" />Add Component</button>
             )}
           </div>
         )}
@@ -384,13 +336,9 @@ const RehabSetupPage = ({ clubId, role }: { clubId: string; role: Role }) => {
       {/* Status Thresholds */}
       <SetupSection id="thresholds" expanded={expanded} setExpanded={setExpanded} title="Status Thresholds (weeks)" count={undefined}>
         <div className="p-4 space-y-4">
-          <p className="text-[12px] text-slate-500 leading-relaxed">Define the minimum number of weeks between injury start date and estimated return date to qualify for each status. The highest week count across all active injuries determines the player's section.</p>
+          <p className="text-[12px] text-slate-500 leading-relaxed">Minimum weeks between injury start and ETR to qualify for each section. Highest active injury count determines the player's section.</p>
           <div className="grid grid-cols-3 gap-3">
-            {[
-              { key: 'lti', label: 'Long Term Injured', colour: 'border-red-300 focus:ring-red-400' },
-              { key: 'sti', label: 'Short Term Injured', colour: 'border-orange-300 focus:ring-orange-400' },
-              { key: 'rtt', label: 'Returning to Training', colour: 'border-amber-300 focus:ring-amber-400' },
-            ].map(({ key, label, colour }) => (
+            {[{ key: 'lti', label: 'Long Term Injured', colour: 'border-red-300 focus:ring-red-400' }, { key: 'sti', label: 'Short Term Injured', colour: 'border-orange-300 focus:ring-orange-400' }, { key: 'rtt', label: 'Returning to Training', colour: 'border-amber-300 focus:ring-amber-400' }].map(({ key, label, colour }) => (
               <div key={key}>
                 <label className="block text-[11px] text-slate-500 mb-1">{label}</label>
                 <div className="flex items-center gap-1">
@@ -403,124 +351,191 @@ const RehabSetupPage = ({ clubId, role }: { clubId: string; role: Role }) => {
               </div>
             ))}
           </div>
-          {canEdit && (
-            <button onClick={saveStatusDef} disabled={savingStatus}
-              className="h-9 px-4 bg-slate-900 text-white rounded-lg text-[12px] font-medium hover:bg-slate-700 disabled:opacity-50 flex items-center gap-1.5">
-              {savingStatus ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3.5 h-3.5" />}Save Thresholds
-            </button>
-          )}
+          {canEdit && <button onClick={saveStatusDef} disabled={savingStatus} className="h-9 px-4 bg-slate-900 text-white rounded-lg text-[12px] font-medium hover:bg-slate-700 disabled:opacity-50 flex items-center gap-1.5">{savingStatus ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3.5 h-3.5" />}Save</button>}
         </div>
       </SetupSection>
 
       {/* RTP Phases */}
       <SetupSection id="rtp" expanded={expanded} setExpanded={setExpanded} title="RTP Phases" count={rtpPhases.length}>
-        <SimplePicklist items={rtpPhases} newVal={newRtp} setNewVal={setNewRtp}
-          onAdd={addRtp} onEdit={updateRtp} onDelete={deleteRtp}
-          editingId={editingRtp} setEditingId={setEditingRtp}
-          editVal={editRtpVal} setEditVal={setEditRtpVal} canEdit={canEdit} />
+        <div className="p-4 space-y-2">
+          {rtpPhases.map(item => (
+            <div key={item.id} className="flex items-center gap-2">
+              {editingRtp === item.id ? (
+                <><input value={editRtpVal} onChange={e => setEditRtpVal(e.target.value)} className="flex-1 h-8 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" /><button onClick={() => updateRtp(item.id)} className="h-8 px-3 bg-slate-900 text-white rounded-lg text-[11px]">Save</button><button onClick={() => setEditingRtp(null)} className="h-8 px-3 bg-slate-100 text-slate-600 rounded-lg text-[11px]">Cancel</button></>
+              ) : (
+                <><span className="flex-1 text-[13px] text-slate-700 px-3 py-1.5 bg-slate-50 rounded-lg border border-slate-200">{item.name}</span>{canEdit && <><button onClick={() => { setEditingRtp(item.id); setEditRtpVal(item.name); }} className="p-1.5 text-slate-300 hover:text-slate-600"><Edit2 className="w-3.5 h-3.5" /></button><button onClick={() => deleteRtp(item.id)} className="p-1.5 text-slate-300 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button></>}</>
+              )}
+            </div>
+          ))}
+          {canEdit && (
+            <div className="flex gap-2 pt-1">
+              <input value={newRtp} onChange={e => setNewRtp(e.target.value)} onKeyDown={e => e.key === 'Enter' && addRtp()} placeholder="Add phase…" className="flex-1 h-8 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              <button onClick={addRtp} disabled={!newRtp.trim()} className="h-8 px-3 bg-slate-900 text-white rounded-lg text-[11px] disabled:opacity-40 flex items-center gap-1"><Plus className="w-3 h-3" />Add</button>
+            </div>
+          )}
+        </div>
       </SetupSection>
 
-      {/* Staff Leads */}
+      {/* Staff Leads — name + role, multi-selectable */}
       <SetupSection id="staff" expanded={expanded} setExpanded={setExpanded} title="Staff Leads" count={staffLeads.length}>
-        <SimplePicklist items={staffLeads} newVal={newStaff} setNewVal={setNewStaff}
-          onAdd={addStaff} onEdit={updateStaff} onDelete={deleteStaff}
-          editingId={editingStaff} setEditingId={setEditingStaff}
-          editVal={editStaffVal} setEditVal={setEditStaffVal} canEdit={canEdit} />
+        <div className="p-4 space-y-2">
+          {staffLeads.map(item => (
+            <div key={item.id} className="flex items-center gap-2">
+              {editingStaff === item.id ? (
+                <>
+                  <input value={editStaffName} onChange={e => setEditStaffName(e.target.value)} placeholder="Name" className="flex-1 h-8 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                  <input value={editStaffRole} onChange={e => setEditStaffRole(e.target.value)} placeholder="Role (e.g. Physio)" className="w-28 h-8 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                  <button onClick={() => updateStaff(item.id)} className="h-8 px-3 bg-slate-900 text-white rounded-lg text-[11px]">Save</button>
+                  <button onClick={() => setEditingStaff(null)} className="h-8 px-3 bg-slate-100 text-slate-600 rounded-lg text-[11px]">Cancel</button>
+                </>
+              ) : (
+                <>
+                  <div className="flex-1 flex items-center gap-2 px-3 py-1.5 bg-slate-50 rounded-lg border border-slate-200">
+                    <span className="text-[13px] text-slate-700 font-medium">{item.name}</span>
+                    {item.role && <span className="text-[10px] text-slate-400 bg-white border border-slate-200 rounded px-1.5 py-0.5">{item.role}</span>}
+                  </div>
+                  {canEdit && <>
+                    <button onClick={() => { setEditingStaff(item.id); setEditStaffName(item.name); setEditStaffRole(item.role); }} className="p-1.5 text-slate-300 hover:text-slate-600"><Edit2 className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => deleteStaff(item.id)} className="p-1.5 text-slate-300 hover:text-red-500"><Trash2 className="w-3.5 h-3.5" /></button>
+                  </>}
+                </>
+              )}
+            </div>
+          ))}
+          {canEdit && (
+            <div className="flex gap-2 pt-1">
+              <input value={newStaffName} onChange={e => setNewStaffName(e.target.value)} onKeyDown={e => e.key === 'Enter' && addStaff()} placeholder="Name" className="flex-1 h-8 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              <input value={newStaffRole} onChange={e => setNewStaffRole(e.target.value)} onKeyDown={e => e.key === 'Enter' && addStaff()} placeholder="Role" className="w-28 h-8 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              <button onClick={addStaff} disabled={!newStaffName.trim()} className="h-8 px-3 bg-slate-900 text-white rounded-lg text-[11px] disabled:opacity-40 flex items-center gap-1"><Plus className="w-3 h-3" />Add</button>
+            </div>
+          )}
+        </div>
       </SetupSection>
     </div>
   );
 };
 
-// ── Injury Detail Cell (staff only) ──────────────────────────────────────────
-
-// ── Component Entry Cell ──────────────────────────────────────────────────────
-const ComponentCell = ({ value, options, canEdit, onChange }: {
-  value: string; options: string[]; canEdit: boolean; onChange: (v: string) => void;
-}) => {
-  const [editing, setEditing] = useState(false);
-  const [local, setLocal] = useState(value);
-
-  useEffect(() => { setLocal(value); }, [value]);
-
-  if (!canEdit) {
-    return <span className="text-[11px] text-slate-600">{value || <span className="text-slate-300">—</span>}</span>;
-  }
-
-  if (editing || (!options.length && !value)) {
-    return (
-      <div className="flex flex-col gap-1 min-w-[100px]">
-        {options.length > 0 && (
-          <select value={local} onChange={e => setLocal(e.target.value)}
-            className="h-7 px-2 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 w-full">
-            <option value="">—</option>
-            {options.map(o => <option key={o} value={o}>{o}</option>)}
-          </select>
-        )}
-        <input value={local} onChange={e => setLocal(e.target.value)}
-          placeholder="or type…"
-          className="h-7 px-2 text-[11px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400 w-full" />
-        <div className="flex gap-1">
-          <button onClick={() => { onChange(local); setEditing(false); }}
-            className="flex-1 h-6 bg-slate-800 text-white rounded text-[10px]">✓</button>
-          <button onClick={() => { setLocal(value); setEditing(false); }}
-            className="flex-1 h-6 bg-slate-100 text-slate-600 rounded text-[10px]">✕</button>
-        </div>
-      </div>
-    );
-  }
+// ── Athlete info panel (left column) ─────────────────────────────────────────
+const InfoPanel = ({ row, athlete, weekCommencing, rtpPhases, staffLeads, fixtures, canEdit, onUpdateField }: any) => {
+  const [injExpanded, setInjExpanded] = useState(false);
+  const today = new Date().toISOString().split('T')[0];
+  const futureFixtures = fixtures.filter((f: any) => f.date >= today);
+  const activeInjuries = (athlete?.injuries || []).filter((i: any) => !i.returnDate || i.returnDate >= weekCommencing);
+  const fixture = fixtures.find((f: any) => f.id === row.targetFixtureId);
+  const rtpPhase = rtpPhases.find((r: any) => r.id === row.rtpPhaseId);
 
   return (
-    <button onClick={() => setEditing(true)}
-      className="text-left w-full min-w-[80px] min-h-[28px] px-2 py-1 rounded hover:bg-slate-100 transition-colors text-[11px] text-slate-700 border border-transparent hover:border-slate-200">
-      {value || <span className="text-slate-300 italic">—</span>}
-    </button>
+    <div className="p-2.5 space-y-2.5">
+      {/* Injuries */}
+      {activeInjuries.length > 0 ? (
+        <div>
+          {activeInjuries.map((inj: any) => {
+            const weeksIn  = inj.startDate  ? weeksApart(inj.startDate, weekCommencing)  : null;
+            const weeksRtn = inj.returnDate ? weeksApart(weekCommencing, inj.returnDate) : null;
+            const urgent   = weeksRtn !== null && weeksRtn <= 2 && weeksRtn >= 0;
+            return (
+              <div key={inj.id} className={`rounded-lg px-2 py-1.5 text-[10px] leading-snug mb-1 ${urgent ? 'bg-amber-50 border border-amber-200' : 'bg-red-50 border border-red-100'}`}>
+                <div className="flex items-center justify-between gap-1">
+                  <span className={`font-bold ${urgent ? 'text-amber-700' : 'text-red-700'}`}>{inj.bodyPart}</span>
+                  {inj.returnDate
+                    ? <span className={`font-semibold shrink-0 text-[9px] ${urgent ? 'text-amber-600' : 'text-red-500'}`}>
+                        ETR {fmtShort(inj.returnDate)}{weeksRtn !== null && <span className="ml-0.5 font-normal opacity-70">({weeksRtn > 0 ? `${weeksRtn}w` : 'due'})</span>}
+                      </span>
+                    : <span className="text-red-600 font-bold shrink-0 text-[9px]">Season</span>}
+                </div>
+                {weeksIn !== null && <div className="text-slate-400 mt-0.5">{weeksIn}w since injury</div>}
+                {injExpanded && (
+                  <div className="mt-1.5 pt-1.5 border-t border-slate-200 text-slate-500 space-y-0.5">
+                    <div>Start: {fmtShort(inj.startDate)}</div>
+                    {inj.surgeryDate && <div>Surgery: {fmtShort(inj.surgeryDate)} ({weeksApart(inj.surgeryDate, weekCommencing)}w post-op)</div>}
+                    {inj.notes && <div className="italic opacity-70">{inj.notes}</div>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <button onClick={() => setInjExpanded(!injExpanded)} className="text-[9px] text-blue-400 hover:text-blue-600 font-medium">
+            {injExpanded ? '▲ Less' : '▼ Full detail'}
+          </button>
+        </div>
+      ) : (
+        <div className="text-[10px] text-slate-300 italic px-1">No active injuries</div>
+      )}
+
+      <div className="border-t border-slate-100" />
+
+      {/* RTP + Staff 2-col */}
+      <div className="grid grid-cols-2 gap-1.5">
+        <div>
+          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">RTP Phase</p>
+          {canEdit ? (
+            <select value={row.rtpPhaseId || ''} onChange={e => onUpdateField('rtpPhaseId', e.target.value || null)}
+              className="w-full h-6 px-1 text-[10px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400">
+              <option value="">—</option>
+              {rtpPhases.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          ) : <span className="text-[11px] text-slate-700 font-medium">{rtpPhase?.name || <span className="text-slate-300">—</span>}</span>}
+        </div>
+        <div>
+          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Staff Lead</p>
+          <StaffLeadPicker selectedIds={row.staffLeadIds || []} staffLeads={staffLeads} canEdit={canEdit}
+            onChange={ids => onUpdateField('staffLeadIds', ids)} />
+        </div>
+      </div>
+
+      {/* Target Fixture */}
+      <div>
+        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Target Fixture</p>
+        {canEdit ? (
+          <select value={row.targetFixtureId || ''} onChange={e => onUpdateField('targetFixtureId', e.target.value || null)}
+            className="w-full h-6 px-1 text-[10px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400">
+            <option value="">—</option>
+            {futureFixtures.map((f: any) => <option key={f.id} value={f.id}>{fmtShort(f.date)} · {f.opposition} ({f.homeAway})</option>)}
+          </select>
+        ) : fixture ? (
+          <div className="text-[10px] leading-snug">
+            <span className="font-semibold text-slate-700">{fixture.opposition}</span><span className="text-slate-400 ml-1">({fixture.homeAway})</span>
+            <div className="text-slate-400">{fmtShort(fixture.date)}</div>
+          </div>
+        ) : <span className="text-slate-300 text-[10px]">—</span>}
+      </div>
+
+      {/* Week Overview */}
+      <div>
+        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Overview</p>
+        {canEdit ? (
+          <textarea value={row.weekOverview} onChange={e => onUpdateField('weekOverview', e.target.value)}
+            rows={2} placeholder="Week overview…"
+            className="w-full px-1.5 py-1 text-[10px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-emerald-400 resize-none leading-snug bg-slate-50" />
+        ) : row.weekOverview ? (
+          <p className="text-[10px] text-slate-600 whitespace-pre-wrap leading-snug">{row.weekOverview}</p>
+        ) : <span className="text-slate-300 text-[10px]">—</span>}
+      </div>
+    </div>
   );
 };
 
-// ── Athlete Row ───────────────────────────────────────────────────────────────
-const AthleteRow = ({
-  row, athlete, components, weekDates, rtpPhases, staffLeads, fixtures,
-  canEdit, isPlayer, weekCommencing,
-  onUpdateEntry, onUpdateField, onRemove, onCopyPrev, hasPrevWeek,
-}: any) => {
+// ── Athlete Row (weekly view) ─────────────────────────────────────────────────
+const AthleteRow = ({ row, athlete, components, weekDates, rtpPhases, staffLeads, fixtures, canEdit, isPlayer, weekCommencing, onUpdateEntry, onUpdateField, onRemove, onCopyPrev, hasPrevWeek }: any) => {
   const [collapsed, setCollapsed] = useState(false);
-  const [injExpanded, setInjExpanded] = useState(false);
-
-  const staffLead = staffLeads.find((s: any) => s.id === row.staffLeadId);
-  const rtpPhase  = rtpPhases.find((r: any) => r.id === row.rtpPhaseId);
-  const fixture   = fixtures.find((f: any)  => f.id === row.targetFixtureId);
-  const today = new Date().toISOString().split('T')[0];
-  const futureFixtures = fixtures.filter((f: any) => f.date >= today);
-  const activeInjuries = (athlete?.injuries || []).filter(
-    (i: any) => !i.returnDate || i.returnDate >= weekCommencing
-  );
   const nComp = Math.max(components.length, 1);
 
   return (
     <div className="border-b-2 border-slate-200 last:border-0">
-      {/* ── Athlete name bar ─────────────────────────────────────────── */}
+      {/* Name bar */}
       <div className="flex items-center gap-2 px-3 py-2 bg-slate-800 text-white">
         <button onClick={() => setCollapsed(!collapsed)} className="flex items-center gap-2 flex-1 min-w-0">
-          <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center text-[10px] font-bold shrink-0">
-            {athlete?.avatar || athlete?.name?.[0] || '?'}
-          </div>
+          <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center text-[10px] font-bold shrink-0">{athlete?.avatar || athlete?.name?.[0] || '?'}</div>
           <span className="text-[13px] font-semibold truncate">{athlete?.name}</span>
-          {collapsed
-            ? <ChevronDown className="w-3.5 h-3.5 text-white/50 shrink-0" />
-            : <ChevronUp   className="w-3.5 h-3.5 text-white/50 shrink-0" />}
+          {collapsed ? <ChevronDown className="w-3.5 h-3.5 text-white/50 shrink-0" /> : <ChevronUp className="w-3.5 h-3.5 text-white/50 shrink-0" />}
         </button>
         <div className="flex items-center gap-1.5 shrink-0">
           {hasPrevWeek && canEdit && (
-            <button onClick={onCopyPrev}
-              className="flex items-center gap-1 h-6 px-2 text-[10px] font-medium text-white/60 border border-white/20 rounded hover:bg-white/10 transition-colors">
+            <button onClick={onCopyPrev} className="flex items-center gap-1 h-6 px-2 text-[10px] font-medium text-white/60 border border-white/20 rounded hover:bg-white/10 transition-colors">
               <Copy className="w-3 h-3" />Copy prev
             </button>
           )}
-          {canEdit && (
-            <button onClick={onRemove} className="p-1 text-white/30 hover:text-red-400 transition-colors">
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
+          {canEdit && <button onClick={onRemove} className="p-1 text-white/30 hover:text-red-400"><X className="w-3.5 h-3.5" /></button>}
         </div>
       </div>
 
@@ -529,18 +544,13 @@ const AthleteRow = ({
           <table className="w-full border-collapse text-left" style={{ minWidth: isPlayer ? '560px' : '820px' }}>
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
-                {!isPlayer && (
-                  <th className="px-3 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wider border-r border-slate-200 w-52">
-                    Player Info
-                  </th>
-                )}
-                <th className="px-2 py-1.5 text-[9px] font-bold text-slate-400 uppercase tracking-wider w-28 border-r border-slate-200">
-                  Component
-                </th>
+                {!isPlayer && <th className="px-3 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider border-r border-slate-200 w-52">Player Info</th>}
+                <th className="px-2 py-2 text-[9px] font-bold text-slate-400 uppercase tracking-wider w-28 border-r border-slate-200">Component</th>
                 {weekDates.map((d: string, i: number) => (
-                  <th key={d} className="px-1 py-1.5 text-[9px] font-bold text-slate-400 text-center w-20">
-                    {DAY_LABELS[i]}{' '}
-                    <span className="font-normal text-slate-300">{fmtShort(d)}</span>
+                  <th key={d} className="py-2 text-center w-20 border-r border-slate-100 last:border-0">
+                    <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">{DAY_LABELS[i]}</span>
+                    <span className="block text-[15px] font-bold text-slate-700 leading-tight">{fmtDayNum(d)}</span>
+                    <span className="block text-[9px] text-slate-400">{fmtShort(d).split(' ')[1]}</span>
                   </th>
                 ))}
               </tr>
@@ -548,157 +558,25 @@ const AthleteRow = ({
             <tbody>
               {components.map((comp: RehabComponent, ci: number) => (
                 <tr key={comp.id} className={`border-b border-slate-50 last:border-0 ${ci % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
-
-                  {/* ── Info panel — single cell, rowSpan all components ── */}
                   {!isPlayer && ci === 0 && (
                     <td rowSpan={nComp} className="align-top border-r border-slate-200 p-0 w-52">
-                      <div className="p-2.5 space-y-2.5 h-full">
-
-                        {/* ── Injury badges ──────────────────────────── */}
-                        {activeInjuries.length > 0 ? (
-                          <div>
-                            <div className="space-y-1">
-                              {activeInjuries.map((inj: any) => {
-                                const weeksIn  = inj.startDate  ? weeksApart(inj.startDate, weekCommencing)  : null;
-                                const weeksRtn = inj.returnDate ? weeksApart(weekCommencing, inj.returnDate) : null;
-                                const urgent   = weeksRtn !== null && weeksRtn <= 2 && weeksRtn >= 0;
-                                return (
-                                  <div key={inj.id} className={`rounded-lg px-2 py-1.5 text-[10px] leading-snug ${urgent ? 'bg-amber-50 border border-amber-200' : 'bg-red-50 border border-red-100'}`}>
-                                    <div className="flex items-center justify-between gap-1">
-                                      <span className={`font-bold ${urgent ? 'text-amber-700' : 'text-red-700'}`}>{inj.bodyPart}</span>
-                                      {inj.returnDate
-                                        ? <span className={`font-semibold shrink-0 ${urgent ? 'text-amber-600' : 'text-red-500'}`}>
-                                            ETR {fmtShort(inj.returnDate)}
-                                            {weeksRtn !== null && <span className="ml-1 font-normal opacity-70">({weeksRtn > 0 ? `${weeksRtn}w` : 'due'})</span>}
-                                          </span>
-                                        : <span className="text-red-600 font-bold shrink-0">Season</span>}
-                                    </div>
-                                    {weeksIn !== null && (
-                                      <div className="text-slate-400 mt-0.5">{weeksIn}w since injury</div>
-                                    )}
-                                    {/* Expandable detail */}
-                                    {injExpanded && (
-                                      <div className="mt-1.5 pt-1.5 border-t border-slate-200 text-slate-500 space-y-0.5">
-                                        <div>Start: {fmtShort(inj.startDate)}</div>
-                                        {inj.surgeryDate && (
-                                          <div>Surgery: {fmtShort(inj.surgeryDate)}
-                                            {inj.surgeryDate && <span className="ml-1 opacity-70">({weeksApart(inj.surgeryDate, weekCommencing)}w post-op)</span>}
-                                          </div>
-                                        )}
-                                        {inj.notes && <div className="italic opacity-70">{inj.notes}</div>}
-                                        {inj.event && <div>{inj.event}</div>}
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                            <button onClick={() => setInjExpanded(!injExpanded)}
-                              className="mt-1 text-[9px] text-blue-400 hover:text-blue-600 font-medium">
-                              {injExpanded ? '▲ Less' : '▼ Full detail'}
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="text-[10px] text-slate-300 italic px-1">No active injuries</div>
-                        )}
-
-                        {/* ── Divider ─────────────────────────────────── */}
-                        <div className="border-t border-slate-100" />
-
-                        {/* ── RTP + Staff Lead (2-col grid) ────────────── */}
-                        <div className="grid grid-cols-2 gap-1.5">
-                          <div>
-                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">RTP Phase</p>
-                            {canEdit ? (
-                              <select value={row.rtpPhaseId || ''} onChange={e => onUpdateField('rtpPhaseId', e.target.value || null)}
-                                className="w-full h-6 px-1 text-[10px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400">
-                                <option value="">—</option>
-                                {rtpPhases.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                              </select>
-                            ) : (
-                              <span className="text-[11px] text-slate-700 font-medium">{rtpPhase?.name || <span className="text-slate-300">—</span>}</span>
-                            )}
-                          </div>
-                          <div>
-                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Staff Lead</p>
-                            {canEdit ? (
-                              <select value={row.staffLeadId || ''} onChange={e => onUpdateField('staffLeadId', e.target.value || null)}
-                                className="w-full h-6 px-1 text-[10px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400">
-                                <option value="">—</option>
-                                {staffLeads.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                              </select>
-                            ) : (
-                              <span className="text-[11px] text-slate-700 font-medium">{staffLead?.name || <span className="text-slate-300">—</span>}</span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* ── Target Fixture ───────────────────────────── */}
-                        <div>
-                          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Target Fixture</p>
-                          {canEdit ? (
-                            <select value={row.targetFixtureId || ''} onChange={e => onUpdateField('targetFixtureId', e.target.value || null)}
-                              className="w-full h-6 px-1 text-[10px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400">
-                              <option value="">—</option>
-                              {futureFixtures.map((f: any) => (
-                                <option key={f.id} value={f.id}>{fmtShort(f.date)} · {f.opposition} ({f.homeAway})</option>
-                              ))}
-                            </select>
-                          ) : fixture ? (
-                            <div className="text-[10px] leading-snug">
-                              <span className="font-semibold text-slate-700">{fixture.opposition}</span>
-                              <span className="text-slate-400 ml-1">({fixture.homeAway})</span>
-                              <div className="text-slate-400">{fmtShort(fixture.date)}</div>
-                            </div>
-                          ) : <span className="text-slate-300 text-[10px]">—</span>}
-                        </div>
-
-                        {/* ── Week Overview ────────────────────────────── */}
-                        <div>
-                          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Overview</p>
-                          {canEdit ? (
-                            <textarea value={row.weekOverview} onChange={e => onUpdateField('weekOverview', e.target.value)}
-                              rows={2} placeholder="Week overview…"
-                              className="w-full px-1.5 py-1 text-[10px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-emerald-400 resize-none leading-snug bg-slate-50" />
-                          ) : row.weekOverview ? (
-                            <p className="text-[10px] text-slate-600 whitespace-pre-wrap leading-snug">{row.weekOverview}</p>
-                          ) : <span className="text-slate-300 text-[10px]">—</span>}
-                        </div>
-
-                      </div>
+                      <InfoPanel row={row} athlete={athlete} weekCommencing={weekCommencing} rtpPhases={rtpPhases} staffLeads={staffLeads} fixtures={fixtures} canEdit={canEdit} onUpdateField={onUpdateField} />
                     </td>
                   )}
-
-                  {/* ── Component name ──────────────────────────────────── */}
                   <td className="px-2 py-1.5 text-[11px] font-medium text-slate-600 border-r border-slate-100 max-w-[112px] align-middle">
                     <span className="block truncate" title={comp.name}>{comp.name}</span>
                   </td>
-
-                  {/* ── Day cells ────────────────────────────────────────── */}
                   {weekDates.map((date: string) => (
-                    <td key={date} className="px-1 py-1 text-center align-middle">
-                      <ComponentCell
-                        value={row.entries[comp.id]?.[date] || ''}
-                        options={comp.options}
-                        canEdit={canEdit}
-                        onChange={(v: string) => onUpdateEntry(comp.id, date, v)}
-                      />
+                    <td key={date} className="px-1 py-1 text-center align-middle border-r border-slate-50 last:border-0">
+                      <ComboCell value={row.entries[comp.id]?.[date] || ''} options={comp.options} canEdit={canEdit} onChange={v => onUpdateEntry(comp.id, date, v)} />
                     </td>
                   ))}
                 </tr>
               ))}
-
-              {/* Fallback — no components configured */}
               {components.length === 0 && (
                 <tr>
-                  {!isPlayer && (
-                    <td className="align-top border-r border-slate-200 p-2.5 w-52">
-                      <div className="text-[10px] text-slate-400 italic">No components configured</div>
-                    </td>
-                  )}
-                  <td colSpan={8} className="px-3 py-4 text-[11px] text-slate-300 italic text-center">
-                    Add rehab components in Setup
-                  </td>
+                  {!isPlayer && <td className="align-top border-r border-slate-200 p-0 w-52"><InfoPanel row={row} athlete={athlete} weekCommencing={weekCommencing} rtpPhases={rtpPhases} staffLeads={staffLeads} fixtures={fixtures} canEdit={canEdit} onUpdateField={onUpdateField} /></td>}
+                  <td colSpan={8} className="px-3 py-4 text-[11px] text-slate-300 italic text-center">Add rehab components in Setup</td>
                 </tr>
               )}
             </tbody>
@@ -709,39 +587,112 @@ const AthleteRow = ({
   );
 };
 
+// ── Day View ──────────────────────────────────────────────────────────────────
+const DayView = ({ rows, allAthletes, components, weekDates, staffLeads, canEdit, isPlayer, weekCommencing, onUpdateEntry }: any) => {
+  const today = new Date().toISOString().split('T')[0];
+  const defaultDay = weekDates.find((d: string) => d === today) || weekDates[0];
+  const [activeDay, setActiveDay] = useState(defaultDay);
 
-// ── Add Athlete Modal ────────────────────────────────────────────────────────
+  const activeRows = rows.filter((r: PlanRow) => {
+    const athlete = allAthletes.find((a: Athlete) => a.id === r.athleteId);
+    return !!athlete;
+  });
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      {/* Day tabs — Training Planner style */}
+      <div className="bg-white border-b border-slate-200 px-4 py-2">
+        <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+          <div className="grid grid-cols-7 divide-x divide-slate-100">
+            {weekDates.map((date: string, i: number) => {
+              const isActive = date === activeDay;
+              const isToday  = date === today;
+              const hasData  = rows.some((r: PlanRow) => components.some((c: RehabComponent) => r.entries[c.id]?.[date]));
+              return (
+                <button key={date} onClick={() => setActiveDay(date)}
+                  className={`flex flex-col items-center py-2.5 px-1 transition-colors ${isActive ? 'bg-slate-900 text-white' : 'hover:bg-slate-50 text-slate-600'}`}>
+                  <span className={`text-[10px] font-semibold ${isActive ? 'text-white/60' : 'text-slate-400'}`}>{DAY_LABELS[i]}</span>
+                  <span className={`text-[18px] font-bold leading-tight ${isToday && !isActive ? 'text-blue-600' : ''}`}>{fmtDayNum(date)}</span>
+                  <span className={`text-[9px] ${isActive ? 'text-white/50' : 'text-slate-400'}`}>{fmtShort(date).split(' ')[1]}</span>
+                  {hasData && <span className={`w-1 h-1 rounded-full mt-0.5 ${isActive ? 'bg-white/60' : 'bg-emerald-400'}`} />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Day content */}
+      <div className="flex-1 overflow-y-auto p-4">
+        {activeRows.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-slate-400">
+            <p className="text-[13px]">No athletes on this plan</p>
+          </div>
+        ) : (
+          <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+            {/* Header */}
+            <div className="grid border-b border-slate-200 bg-slate-50" style={{ gridTemplateColumns: `200px repeat(${components.length}, minmax(120px, 1fr))` }}>
+              <div className="px-3 py-2.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-r border-slate-200">Athlete</div>
+              {components.map((c: RehabComponent) => (
+                <div key={c.id} className="px-2 py-2.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-r border-slate-200 last:border-0 truncate">{c.name}</div>
+              ))}
+              {components.length === 0 && <div className="px-3 py-2.5 text-[10px] text-slate-300 italic">No components</div>}
+            </div>
+            {/* Rows */}
+            {activeRows.map((row: PlanRow, ri: number) => {
+              const athlete = allAthletes.find((a: Athlete) => a.id === row.athleteId);
+              if (!athlete) return null;
+              const sectionBg = { LTI: 'bg-red-600', STI: 'bg-orange-500', RTT: 'bg-amber-400', Other: 'bg-slate-400' }[row.section] || 'bg-slate-400';
+              return (
+                <div key={row.id} className={`grid border-b border-slate-100 last:border-0 ${ri % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}
+                  style={{ gridTemplateColumns: `200px repeat(${components.length || 1}, minmax(120px, 1fr))` }}>
+                  {/* Athlete name + section dot */}
+                  <div className="px-3 py-2 flex items-center gap-2 border-r border-slate-100">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${sectionBg}`} />
+                    <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-600 shrink-0">{athlete.avatar || athlete.name[0]}</div>
+                    <span className="text-[12px] font-semibold text-slate-800 truncate">{athlete.name}</span>
+                  </div>
+                  {components.length === 0
+                    ? <div className="px-3 py-2 text-[11px] text-slate-300 italic">—</div>
+                    : components.map((comp: RehabComponent) => (
+                      <div key={comp.id} className="px-1 py-1 border-r border-slate-100 last:border-0 flex items-center">
+                        <ComboCell value={row.entries[comp.id]?.[activeDay] || ''} options={comp.options} canEdit={canEdit} onChange={v => onUpdateEntry(row.id, comp.id, activeDay, v)} />
+                      </div>
+                    ))
+                  }
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ── Add Athlete Modal ─────────────────────────────────────────────────────────
 const AddAthleteModal = ({ athletes, existingIds, onAdd, onClose }: any) => {
   const [search, setSearch] = useState('');
-  const available = athletes.filter((a: Athlete) =>
-    !existingIds.includes(a.id) &&
-    a.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const available = athletes.filter((a: Athlete) => !existingIds.includes(a.id) && a.name.toLowerCase().includes(search.toLowerCase()));
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm">
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-          <h3 className="text-[14px] font-semibold text-slate-900">Add Athlete to Planner</h3>
+          <h3 className="text-[14px] font-semibold text-slate-900">Add Athlete</h3>
           <button onClick={onClose}><X className="w-4 h-4 text-slate-400 hover:text-slate-600" /></button>
         </div>
         <div className="p-3">
-          <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search athletes…"
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search athletes…"
             className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 mb-2" />
           <div className="max-h-64 overflow-y-auto space-y-1">
             {available.length === 0
               ? <p className="text-[12px] text-slate-400 text-center py-4">No athletes found</p>
               : available.map((a: Athlete) => (
-                <button key={a.id} onClick={() => onAdd(a)}
-                  className="w-full text-left flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-50 transition-colors">
+                <button key={a.id} onClick={() => onAdd(a)} className="w-full text-left flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-50 transition-colors">
                   <div className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-600 shrink-0">{a.avatar || a.name[0]}</div>
-                  <div>
-                    <p className="text-[13px] font-medium text-slate-800">{a.name}</p>
-                    <p className="text-[10px] text-slate-400">{a.status}</p>
-                  </div>
+                  <div><p className="text-[13px] font-medium text-slate-800">{a.name}</p><p className="text-[10px] text-slate-400">{a.status}</p></div>
                 </button>
-              ))
-            }
+              ))}
           </div>
         </div>
       </div>
@@ -753,46 +704,29 @@ const AddAthleteModal = ({ athletes, existingIds, onAdd, onClose }: any) => {
 const RehabPlannerPage = ({ clubId, role }: { clubId: string; role: Role }) => {
   const canEdit = canEditRole(role);
   const isPlayer = role === 'Player';
-
   const today = new Date().toISOString().split('T')[0];
   const currentMonday = getMondayOf(today);
 
   const [weekCommencing, setWeekCommencing] = useState(currentMonday);
   const weekDates = useMemo(() => getWeekDates(weekCommencing), [weekCommencing]);
+  const [viewMode, setViewMode] = useState<'week' | 'day'>('week');
 
-  // Setup data
   const [components, setComponents] = useState<RehabComponent[]>([]);
   const [statusDef, setStatusDef] = useState<StatusDefinition | null>(null);
   const [rtpPhases, setRtpPhases] = useState<RTPPhase[]>([]);
   const [staffLeads, setStaffLeads] = useState<StaffLead[]>([]);
   const [fixtures, setFixtures] = useState<Fixture[]>([]);
-
-  // Athletes data
   const [allAthletes, setAllAthletes] = useState<Athlete[]>([]);
-
-  // Planner data
   const [planId, setPlanId] = useState<string | null>(null);
   const [rows, setRows] = useState<PlanRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [creating, setCreating] = useState(false);
-
-  // UI state
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [showAddAthlete, setShowAddAthlete] = useState(false);
+  const [prevWeekAthleteIds, setPrevWeekAthleteIds] = useState<Set<string>>(new Set());
 
-  // Load static data once
   const loadSetup = useCallback(async () => {
-    const [
-      { data: compData },
-      { data: statusData },
-      { data: rtpData },
-      { data: staffData },
-      { data: fixtureData },
-      { data: athleteData },
-      { data: posData },
-      { data: injData },
-    ] = await Promise.all([
+    const [{ data: compData }, { data: statusData }, { data: rtpData }, { data: staffData }, { data: fixtureData }, { data: athleteData }, { data: injData }] = await Promise.all([
       supabase.from('rehab_components').select('*').eq('club_id', clubId).order('sort_order'),
       supabase.from('rehab_status_definitions').select('*').eq('club_id', clubId).maybeSingle(),
       supabase.from('rtp_phases').select('*').eq('club_id', clubId).order('sort_order'),
@@ -800,325 +734,178 @@ const RehabPlannerPage = ({ clubId, role }: { clubId: string; role: Role }) => {
       supabase.from('fixtures').select('*').eq('club_id', clubId).order('date'),
       supabase.from('athletes').select('*').order('name'),
       supabase.from('athlete_injuries').select('*'),
-      supabase.from('athlete_injuries').select('*'),
     ]);
-
-    setComponents((compData || []).map((c: any) => ({
-      id: c.id, name: c.name,
-      options: Array.isArray(c.options) ? c.options : JSON.parse(c.options || '[]'),
-      sortOrder: c.sort_order,
-    })));
+    setComponents((compData || []).map((c: any) => ({ id: c.id, name: c.name, options: Array.isArray(c.options) ? c.options : JSON.parse(c.options || '[]'), sortOrder: c.sort_order })));
     if (statusData) setStatusDef({ id: statusData.id, ltiWeeksMin: statusData.lti_weeks_min, stiWeeksMin: statusData.sti_weeks_min, rttWeeksMin: statusData.rtt_weeks_min });
     setRtpPhases((rtpData || []).map((r: any) => ({ id: r.id, name: r.name, sortOrder: r.sort_order })));
-    setStaffLeads((staffData || []).map((s: any) => ({ id: s.id, name: s.name, sortOrder: s.sort_order })));
+    setStaffLeads((staffData || []).map((s: any) => ({ id: s.id, name: s.name, role: s.role || '', sortOrder: s.sort_order })));
     setFixtures((fixtureData || []).map((f: any) => ({ id: f.id, date: f.date, opposition: f.opposition, homeAway: f.home_away })));
-
     const injuries = injData || [];
-    setAllAthletes((athleteData || []).map((a: any) => ({
-      id: a.id, name: a.name, status: a.status, avatar: a.avatar,
-      injuries: injuries.filter((i: any) => i.athlete_id === a.id).map((i: any) => ({
-        id: i.id, bodyPart: i.body_part, startDate: i.start_date,
-        returnDate: i.return_date, surgeryDate: i.surgery_date || null,
-        notes: i.notes || '', event: i.event,
-      })),
-    })));
+    setAllAthletes((athleteData || []).map((a: any) => ({ id: a.id, name: a.name, status: a.status, avatar: a.avatar, injuries: injuries.filter((i: any) => i.athlete_id === a.id).map((i: any) => ({ id: i.id, bodyPart: i.body_part, startDate: i.start_date, returnDate: i.return_date, surgeryDate: i.surgery_date || null, notes: i.notes || '', event: i.event })) })));
   }, [clubId]);
 
-  // Load plan for a specific week
   const loadWeekPlan = useCallback(async (wc: string) => {
     setLoading(true);
-    const { data: plan } = await supabase
-      .from('rehab_plans')
-      .select('id')
-      .eq('club_id', clubId)
-      .eq('week_commencing', wc)
-      .maybeSingle();
-
-    if (!plan) {
-      setPlanId(null);
-      setRows([]);
-      setLoading(false);
-      return;
-    }
-
+    const { data: plan } = await supabase.from('rehab_plans').select('id').eq('club_id', clubId).eq('week_commencing', wc).maybeSingle();
+    if (!plan) { setPlanId(null); setRows([]); setLoading(false); return; }
     setPlanId(plan.id);
-
-    const { data: rowData } = await supabase
-      .from('rehab_plan_rows')
-      .select('*')
-      .eq('plan_id', plan.id)
-      .order('sort_order');
-
+    const { data: rowData } = await supabase.from('rehab_plan_rows').select('*').eq('plan_id', plan.id).order('sort_order');
     if (!rowData?.length) { setRows([]); setLoading(false); return; }
-
     const rowIds = rowData.map((r: any) => r.id);
-    const { data: entryData } = await supabase
-      .from('rehab_component_entries')
-      .select('*')
-      .in('plan_row_id', rowIds);
-
+    const { data: entryData } = await supabase.from('rehab_component_entries').select('*').in('plan_row_id', rowIds);
     const entries: Record<string, Record<string, Record<string, string>>> = {};
     for (const e of (entryData || [])) {
       if (!entries[e.plan_row_id]) entries[e.plan_row_id] = {};
       if (!entries[e.plan_row_id][e.component_id]) entries[e.plan_row_id][e.component_id] = {};
       entries[e.plan_row_id][e.component_id][e.day_date] = e.value;
     }
-
     setRows(rowData.map((r: any) => ({
-      id: r.id, planId: r.plan_id, athleteId: r.athlete_id,
-      section: r.section, rtpPhaseId: r.rtp_phase_id,
-      staffLeadId: r.staff_lead_id, targetFixtureId: r.target_fixture_id,
-      weekOverview: r.week_overview || '', sortOrder: r.sort_order,
-      entries: entries[r.id] || {},
+      id: r.id, planId: r.plan_id, athleteId: r.athlete_id, section: r.section,
+      rtpPhaseId: r.rtp_phase_id,
+      staffLeadIds: Array.isArray(r.staff_lead_ids) ? r.staff_lead_ids : (r.staff_lead_id ? [r.staff_lead_id] : []),
+      targetFixtureId: r.target_fixture_id, weekOverview: r.week_overview || '',
+      sortOrder: r.sort_order, entries: entries[r.id] || {},
     })));
     setLoading(false);
   }, [clubId]);
 
-  useEffect(() => {
-    loadSetup().then(() => loadWeekPlan(weekCommencing));
-  }, []);
+  useEffect(() => { loadSetup().then(() => loadWeekPlan(weekCommencing)); }, []);
+  useEffect(() => { loadWeekPlan(weekCommencing); }, [weekCommencing]);
 
-  useEffect(() => {
-    loadWeekPlan(weekCommencing);
-  }, [weekCommencing]);
-
-  // Create a new plan for this week
-  const createPlan = async () => {
-    setCreating(true);
-    const { data: newPlan } = await supabase
-      .from('rehab_plans')
-      .insert({ club_id: clubId, week_commencing: weekCommencing })
-      .select()
-      .single();
-    if (!newPlan) { setCreating(false); return; }
-    setPlanId(newPlan.id);
-
-    // Auto-populate with unavailable athletes
-    const unavailable = allAthletes.filter(a => a.status === 'Unavailable');
-    const newRows: PlanRow[] = [];
-    for (let i = 0; i < unavailable.length; i++) {
-      const a = unavailable[i];
-      const section = getInjurySection(a, weekCommencing, statusDef);
-      const { data: rowData } = await supabase
-        .from('rehab_plan_rows')
-        .insert({ plan_id: newPlan.id, athlete_id: a.id, section, sort_order: i, week_overview: '' })
-        .select()
-        .single();
-      if (rowData) newRows.push({
-        id: rowData.id, planId: newPlan.id, athleteId: a.id,
-        section, rtpPhaseId: null, staffLeadId: null, targetFixtureId: null,
-        weekOverview: '', sortOrder: i, entries: {},
-      });
-    }
-    setRows(newRows);
-    setCreating(false);
-  };
-
-  // Auto-save a row field to DB
-  const saveRowField = async (rowId: string, field: string, value: any) => {
-    const dbField: Record<string, string> = {
-      rtpPhaseId: 'rtp_phase_id', staffLeadId: 'staff_lead_id',
-      targetFixtureId: 'target_fixture_id', weekOverview: 'week_overview',
-    };
-    await supabase.from('rehab_plan_rows').update({ [dbField[field]]: value }).eq('id', rowId);
-  };
-
-  const updateRowField = (rowId: string, field: string, value: any) => {
-    setRows(prev => prev.map(r => r.id === rowId ? { ...r, [field]: value } : r));
-    saveRowField(rowId, field, value);
-  };
-
-  // Save a component entry
-  const saveEntry = async (rowId: string, componentId: string, date: string, value: string) => {
-    if (value) {
-      await supabase.from('rehab_component_entries').upsert(
-        { plan_row_id: rowId, component_id: componentId, day_date: date, value },
-        { onConflict: 'plan_row_id,component_id,day_date' }
-      );
-    } else {
-      await supabase.from('rehab_component_entries')
-        .delete()
-        .eq('plan_row_id', rowId)
-        .eq('component_id', componentId)
-        .eq('day_date', date);
-    }
-  };
-
-  const updateEntry = (rowId: string, componentId: string, date: string, value: string) => {
-    setRows(prev => prev.map(r => {
-      if (r.id !== rowId) return r;
-      const newEntries = { ...r.entries };
-      if (!newEntries[componentId]) newEntries[componentId] = {};
-      newEntries[componentId] = { ...newEntries[componentId], [date]: value };
-      return { ...r, entries: newEntries };
-    }));
-    saveEntry(rowId, componentId, date, value);
-  };
-
-  // Add athlete manually
-  const addAthlete = async (athlete: Athlete) => {
-    if (!planId) return;
-    const section = getInjurySection(athlete, weekCommencing, statusDef);
-    const { data: rowData } = await supabase
-      .from('rehab_plan_rows')
-      .insert({ plan_id: planId, athlete_id: athlete.id, section, sort_order: rows.length, week_overview: '' })
-      .select()
-      .single();
-    if (rowData) {
-      setRows(prev => [...prev, {
-        id: rowData.id, planId, athleteId: athlete.id,
-        section, rtpPhaseId: null, staffLeadId: null, targetFixtureId: null,
-        weekOverview: '', sortOrder: rows.length, entries: {},
-      }]);
-    }
-    setShowAddAthlete(false);
-  };
-
-  // Remove a row
-  const removeRow = async (rowId: string) => {
-    await supabase.from('rehab_plan_rows').delete().eq('id', rowId);
-    setRows(prev => prev.filter(r => r.id !== rowId));
-  };
-
-  // Copy from previous week
-  const copyFromPrevWeek = async (row: PlanRow) => {
-    const prevMonday = (() => {
-      const d = new Date(weekCommencing + 'T00:00:00');
-      d.setDate(d.getDate() - 7);
-      return d.toISOString().split('T')[0];
-    })();
-    const prevDates = getWeekDates(prevMonday);
-
-    // Load prev plan
-    const { data: prevPlan } = await supabase
-      .from('rehab_plans').select('id').eq('club_id', clubId).eq('week_commencing', prevMonday).maybeSingle();
-    if (!prevPlan) return;
-
-    const { data: prevRow } = await supabase
-      .from('rehab_plan_rows').select('*').eq('plan_id', prevPlan.id).eq('athlete_id', row.athleteId).maybeSingle();
-    if (!prevRow) return;
-
-    const { data: prevEntries } = await supabase
-      .from('rehab_component_entries').select('*').eq('plan_row_id', prevRow.id);
-
-    // Copy staff fields
-    await supabase.from('rehab_plan_rows').update({
-      rtp_phase_id: prevRow.rtp_phase_id,
-      staff_lead_id: prevRow.staff_lead_id,
-      target_fixture_id: prevRow.target_fixture_id,
-      week_overview: prevRow.week_overview,
-    }).eq('id', row.id);
-
-    // Copy entries — shifting dates by 7 days
-    const newEntries: Record<string, Record<string, string>> = {};
-    for (const e of (prevEntries || [])) {
-      const prevDate = e.day_date;
-      const prevIdx = prevDates.indexOf(prevDate);
-      if (prevIdx === -1) continue;
-      const newDate = weekDates[prevIdx];
-      if (!newEntries[e.component_id]) newEntries[e.component_id] = {};
-      newEntries[e.component_id][newDate] = e.value;
-      await supabase.from('rehab_component_entries').upsert(
-        { plan_row_id: row.id, component_id: e.component_id, day_date: newDate, value: e.value },
-        { onConflict: 'plan_row_id,component_id,day_date' }
-      );
-    }
-
-    setRows(prev => prev.map(r => r.id === row.id ? {
-      ...r,
-      rtpPhaseId: prevRow.rtp_phase_id,
-      staffLeadId: prevRow.staff_lead_id,
-      targetFixtureId: prevRow.target_fixture_id,
-      weekOverview: prevRow.week_overview || '',
-      entries: newEntries,
-    } : r));
-  };
-
-  // Check if previous week has data for an athlete
-  const [prevWeekAthleteIds, setPrevWeekAthleteIds] = useState<Set<string>>(new Set());
   useEffect(() => {
     const check = async () => {
-      const prevMonday = (() => {
-        const d = new Date(weekCommencing + 'T00:00:00');
-        d.setDate(d.getDate() - 7);
-        return d.toISOString().split('T')[0];
-      })();
-      const { data: prevPlan } = await supabase
-        .from('rehab_plans').select('id').eq('club_id', clubId).eq('week_commencing', prevMonday).maybeSingle();
+      const d = new Date(weekCommencing + 'T00:00:00'); d.setDate(d.getDate() - 7);
+      const prevMonday = d.toISOString().split('T')[0];
+      const { data: prevPlan } = await supabase.from('rehab_plans').select('id').eq('club_id', clubId).eq('week_commencing', prevMonday).maybeSingle();
       if (!prevPlan) { setPrevWeekAthleteIds(new Set()); return; }
-      const { data: prevRows } = await supabase
-        .from('rehab_plan_rows').select('athlete_id').eq('plan_id', prevPlan.id);
+      const { data: prevRows } = await supabase.from('rehab_plan_rows').select('athlete_id').eq('plan_id', prevPlan.id);
       setPrevWeekAthleteIds(new Set((prevRows || []).map((r: any) => r.athlete_id)));
     };
     check();
   }, [weekCommencing, clubId]);
 
-  // Group rows by section
+  const createPlan = async () => {
+    setCreating(true);
+    const { data: newPlan } = await supabase.from('rehab_plans').insert({ club_id: clubId, week_commencing: weekCommencing }).select().single();
+    if (!newPlan) { setCreating(false); return; }
+    setPlanId(newPlan.id);
+    const unavailable = allAthletes.filter(a => a.status === 'Unavailable');
+    const newRows: PlanRow[] = [];
+    for (let i = 0; i < unavailable.length; i++) {
+      const a = unavailable[i];
+      const section = getInjurySection(a, weekCommencing, statusDef);
+      const { data: rowData } = await supabase.from('rehab_plan_rows').insert({ plan_id: newPlan.id, athlete_id: a.id, section, sort_order: i, week_overview: '', staff_lead_ids: [] }).select().single();
+      if (rowData) newRows.push({ id: rowData.id, planId: newPlan.id, athleteId: a.id, section, rtpPhaseId: null, staffLeadIds: [], targetFixtureId: null, weekOverview: '', sortOrder: i, entries: {} });
+    }
+    setRows(newRows); setCreating(false);
+  };
+
+  const saveRowField = async (rowId: string, field: string, value: any) => {
+    const map: Record<string, string> = { rtpPhaseId: 'rtp_phase_id', staffLeadIds: 'staff_lead_ids', targetFixtureId: 'target_fixture_id', weekOverview: 'week_overview' };
+    await supabase.from('rehab_plan_rows').update({ [map[field]]: value }).eq('id', rowId);
+  };
+  const updateRowField = (rowId: string, field: string, value: any) => {
+    setRows(prev => prev.map(r => r.id === rowId ? { ...r, [field]: value } : r));
+    saveRowField(rowId, field, value);
+  };
+
+  const saveEntry = async (rowId: string, componentId: string, date: string, value: string) => {
+    if (value) await supabase.from('rehab_component_entries').upsert({ plan_row_id: rowId, component_id: componentId, day_date: date, value }, { onConflict: 'plan_row_id,component_id,day_date' });
+    else await supabase.from('rehab_component_entries').delete().eq('plan_row_id', rowId).eq('component_id', componentId).eq('day_date', date);
+  };
+  const updateEntry = (rowId: string, componentId: string, date: string, value: string) => {
+    setRows(prev => prev.map(r => {
+      if (r.id !== rowId) return r;
+      const e = { ...r.entries };
+      if (!e[componentId]) e[componentId] = {};
+      e[componentId] = { ...e[componentId], [date]: value };
+      return { ...r, entries: e };
+    }));
+    saveEntry(rowId, componentId, date, value);
+  };
+
+  const addAthlete = async (athlete: Athlete) => {
+    if (!planId) return;
+    const section = getInjurySection(athlete, weekCommencing, statusDef);
+    const { data: rowData } = await supabase.from('rehab_plan_rows').insert({ plan_id: planId, athlete_id: athlete.id, section, sort_order: rows.length, week_overview: '', staff_lead_ids: [] }).select().single();
+    if (rowData) setRows(prev => [...prev, { id: rowData.id, planId, athleteId: athlete.id, section, rtpPhaseId: null, staffLeadIds: [], targetFixtureId: null, weekOverview: '', sortOrder: rows.length, entries: {} }]);
+    setShowAddAthlete(false);
+  };
+
+  const removeRow = async (rowId: string) => { await supabase.from('rehab_plan_rows').delete().eq('id', rowId); setRows(prev => prev.filter(r => r.id !== rowId)); };
+
+  const copyFromPrevWeek = async (row: PlanRow) => {
+    const d = new Date(weekCommencing + 'T00:00:00'); d.setDate(d.getDate() - 7);
+    const prevMonday = d.toISOString().split('T')[0];
+    const prevDates = getWeekDates(prevMonday);
+    const { data: prevPlan } = await supabase.from('rehab_plans').select('id').eq('club_id', clubId).eq('week_commencing', prevMonday).maybeSingle();
+    if (!prevPlan) return;
+    const { data: prevRow } = await supabase.from('rehab_plan_rows').select('*').eq('plan_id', prevPlan.id).eq('athlete_id', row.athleteId).maybeSingle();
+    if (!prevRow) return;
+    const { data: prevEntries } = await supabase.from('rehab_component_entries').select('*').eq('plan_row_id', prevRow.id);
+    await supabase.from('rehab_plan_rows').update({ rtp_phase_id: prevRow.rtp_phase_id, staff_lead_ids: prevRow.staff_lead_ids || [], target_fixture_id: prevRow.target_fixture_id, week_overview: prevRow.week_overview }).eq('id', row.id);
+    const newEntries: Record<string, Record<string, string>> = {};
+    for (const e of (prevEntries || [])) {
+      const prevIdx = prevDates.indexOf(e.day_date);
+      if (prevIdx === -1) continue;
+      const newDate = weekDates[prevIdx];
+      if (!newEntries[e.component_id]) newEntries[e.component_id] = {};
+      newEntries[e.component_id][newDate] = e.value;
+      await supabase.from('rehab_component_entries').upsert({ plan_row_id: row.id, component_id: e.component_id, day_date: newDate, value: e.value }, { onConflict: 'plan_row_id,component_id,day_date' });
+    }
+    setRows(prev => prev.map(r => r.id === row.id ? { ...r, rtpPhaseId: prevRow.rtp_phase_id, staffLeadIds: prevRow.staff_lead_ids || [], targetFixtureId: prevRow.target_fixture_id, weekOverview: prevRow.week_overview || '', entries: newEntries } : r));
+  };
+
   const rowsBySection = useMemo(() => {
     const grouped: Record<string, PlanRow[]> = { LTI: [], STI: [], RTT: [], Other: [] };
     for (const row of rows) {
       const athlete = allAthletes.find(a => a.id === row.athleteId);
-      // Recalculate live from current statusDef so thresholds always apply correctly
-      const section = athlete && statusDef
-        ? getInjurySection(athlete, weekCommencing, statusDef)
-        : row.section;
+      const section = athlete && statusDef ? getInjurySection(athlete, weekCommencing, statusDef) : row.section;
       grouped[section]?.push(row);
     }
     return grouped;
   }, [rows, allAthletes, statusDef, weekCommencing]);
 
-  // Week navigation
-  const prevWeek = () => {
-    const d = new Date(weekCommencing + 'T00:00:00');
-    d.setDate(d.getDate() - 7);
-    setWeekCommencing(d.toISOString().split('T')[0]);
-  };
-  const nextWeek = () => {
-    const d = new Date(weekCommencing + 'T00:00:00');
-    d.setDate(d.getDate() + 7);
-    setWeekCommencing(d.toISOString().split('T')[0]);
-  };
+  const prevWeek = () => { const d = new Date(weekCommencing + 'T00:00:00'); d.setDate(d.getDate() - 7); setWeekCommencing(d.toISOString().split('T')[0]); };
+  const nextWeek = () => { const d = new Date(weekCommencing + 'T00:00:00'); d.setDate(d.getDate() + 7); setWeekCommencing(d.toISOString().split('T')[0]); };
+  const toggleSection = (s: string) => setCollapsedSections(prev => { const n = new Set(prev); n.has(s) ? n.delete(s) : n.add(s); return n; });
 
-  const toggleSection = (s: string) => setCollapsedSections(prev => {
-    const n = new Set(prev);
-    n.has(s) ? n.delete(s) : n.add(s);
-    return n;
-  });
-
-  if (loading) return (
-    <div className="flex-1 flex items-center justify-center">
-      <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
-    </div>
-  );
+  if (loading) return <div className="flex-1 flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>;
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      {/* Week navigation bar */}
+      {/* Week nav + view toggle */}
       <div className="bg-white border-b border-slate-200 px-4 py-3 flex items-center gap-3 sticky top-0 z-20">
-        <button onClick={prevWeek} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
-          <ChevronLeft className="w-4 h-4 text-slate-600" />
-        </button>
+        <button onClick={prevWeek} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"><ChevronLeft className="w-4 h-4 text-slate-600" /></button>
         <div className="flex-1 text-center">
           <p className="text-[14px] font-semibold text-slate-900">w/c {fmtWC(weekCommencing)}</p>
           {weekCommencing === currentMonday && <span className="text-[10px] text-blue-500 font-medium">Current week</span>}
         </div>
-        <button onClick={nextWeek} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
-          <ChevronRight className="w-4 h-4 text-slate-600" />
-        </button>
+        <button onClick={nextWeek} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"><ChevronRight className="w-4 h-4 text-slate-600" /></button>
+
+        {/* View toggle */}
+        <div className="flex items-center bg-slate-100 rounded-lg p-0.5 ml-1">
+          <button onClick={() => setViewMode('week')}
+            className={`flex items-center gap-1 h-7 px-2.5 rounded-md text-[11px] font-medium transition-colors ${viewMode === 'week' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+            <List className="w-3.5 h-3.5" />Week
+          </button>
+          <button onClick={() => setViewMode('day')}
+            className={`flex items-center gap-1 h-7 px-2.5 rounded-md text-[11px] font-medium transition-colors ${viewMode === 'day' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+            <LayoutGrid className="w-3.5 h-3.5" />Day
+          </button>
+        </div>
+
         {planId && canEdit && (
-          <button onClick={() => setShowAddAthlete(true)}
-            className="flex items-center gap-1.5 h-8 px-3 bg-slate-900 text-white rounded-lg text-[12px] font-medium hover:bg-slate-700 transition-colors ml-2">
+          <button onClick={() => setShowAddAthlete(true)} className="flex items-center gap-1.5 h-8 px-3 bg-slate-900 text-white rounded-lg text-[12px] font-medium hover:bg-slate-700 transition-colors">
             <Plus className="w-3.5 h-3.5" />Add Athlete
           </button>
         )}
       </div>
 
-      {/* No plan state */}
+      {/* No plan */}
       {!planId ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
-          <div className="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center">
-            <Target className="w-6 h-6 text-emerald-600" />
-          </div>
+          <div className="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center"><Target className="w-6 h-6 text-emerald-600" /></div>
           <div className="text-center">
             <p className="text-[15px] font-semibold text-slate-800 mb-1">No plan for this week</p>
             <p className="text-[13px] text-slate-400">w/c {fmtWC(weekCommencing)}</p>
@@ -1131,54 +918,37 @@ const RehabPlannerPage = ({ clubId, role }: { clubId: string; role: Role }) => {
             </button>
           )}
         </div>
+      ) : viewMode === 'day' ? (
+        <DayView rows={rows} allAthletes={allAthletes} components={components} weekDates={weekDates} staffLeads={staffLeads} canEdit={canEdit} isPlayer={isPlayer} weekCommencing={weekCommencing}
+          onUpdateEntry={(rowId: string, compId: string, date: string, v: string) => updateEntry(rowId, compId, date, v)} />
       ) : (
         <div className="flex-1 overflow-y-auto">
-          {rows.length === 0 && (
-            <div className="p-8 text-center text-[13px] text-slate-400">
-              No athletes on this plan.{canEdit && ' Use "Add Athlete" to add players.'}
-            </div>
-          )}
+          {rows.length === 0 && <div className="p-8 text-center text-[13px] text-slate-400">No athletes on this plan.{canEdit && ' Use "Add Athlete" to add players.'}</div>}
           {SECTION_ORDER.map(section => {
             const sectionRows = rowsBySection[section];
             if (!sectionRows.length) return null;
             const collapsed = collapsedSections.has(section);
             return (
               <div key={section} className="mb-2">
-                {/* Section header */}
-                <button
-                  onClick={() => toggleSection(section)}
-                  className={`w-full flex items-center justify-between px-4 py-2.5 ${SECTION_COLOURS[section]} text-white`}>
+                <button onClick={() => toggleSection(section)} className={`w-full flex items-center justify-between px-4 py-2.5 ${SECTION_BG[section]} text-white`}>
                   <div className="flex items-center gap-2">
                     <span className="text-[13px] font-bold">{SECTION_LABELS[section]}</span>
-                    <span className="text-[11px] text-white/70 font-normal">{sectionRows.length} athlete{sectionRows.length !== 1 ? 's' : ''}</span>
+                    <span className="text-[11px] text-white/70">{sectionRows.length} athlete{sectionRows.length !== 1 ? 's' : ''}</span>
                   </div>
                   {collapsed ? <ChevronDown className="w-4 h-4 text-white/70" /> : <ChevronUp className="w-4 h-4 text-white/70" />}
                 </button>
-
                 {!collapsed && (
-                  <div className={`border-l-4 ${SECTION_LIGHT[section]}`} style={{ borderLeftColor: '' }}>
+                  <div className={`border-l-4 ${SECTION_BORDER[section]}`}>
                     {sectionRows.map(row => {
                       const athlete = allAthletes.find(a => a.id === row.athleteId);
                       if (!athlete) return null;
                       return (
-                        <AthleteRow
-                          key={row.id}
-                          row={row}
-                          athlete={athlete}
-                          components={components}
-                          weekDates={weekDates}
-                          rtpPhases={rtpPhases}
-                          staffLeads={staffLeads}
-                          fixtures={fixtures}
-                          canEdit={canEdit}
-                          isPlayer={isPlayer}
-                          weekCommencing={weekCommencing}
+                        <AthleteRow key={row.id} row={row} athlete={athlete} components={components} weekDates={weekDates} rtpPhases={rtpPhases} staffLeads={staffLeads} fixtures={fixtures} canEdit={canEdit} isPlayer={isPlayer} weekCommencing={weekCommencing}
                           hasPrevWeek={prevWeekAthleteIds.has(row.athleteId)}
-                          onUpdateEntry={(compId: string, date: string, val: string) => updateEntry(row.id, compId, date, val)}
-                          onUpdateField={(field: string, val: any) => updateRowField(row.id, field, val)}
+                          onUpdateEntry={(compId: string, date: string, v: string) => updateEntry(row.id, compId, date, v)}
+                          onUpdateField={(field: string, v: any) => updateRowField(row.id, field, v)}
                           onRemove={() => removeRow(row.id)}
-                          onCopyPrev={() => copyFromPrevWeek(row)}
-                        />
+                          onCopyPrev={() => copyFromPrevWeek(row)} />
                       );
                     })}
                   </div>
@@ -1189,42 +959,26 @@ const RehabPlannerPage = ({ clubId, role }: { clubId: string; role: Role }) => {
         </div>
       )}
 
-      {showAddAthlete && (
-        <AddAthleteModal
-          athletes={allAthletes}
-          existingIds={rows.map(r => r.athleteId)}
-          onAdd={addAthlete}
-          onClose={() => setShowAddAthlete(false)}
-        />
-      )}
+      {showAddAthlete && <AddAthleteModal athletes={allAthletes} existingIds={rows.map(r => r.athleteId)} onAdd={addAthlete} onClose={() => setShowAddAthlete(false)} />}
     </div>
   );
 };
 
 // ── App Shell ─────────────────────────────────────────────────────────────────
-export function RehabPlanner({ role, clubId, authUser, onBack }: {
-  role: Role; clubId: string; authUser: any; onBack: () => void;
-}) {
+export function RehabPlanner({ role, clubId, authUser, onBack }: { role: Role; clubId: string; authUser: any; onBack: () => void }) {
   const [page, setPage] = useState<'planner' | 'setup'>('planner');
   const showSetup = canEditRole(role);
-
   const navItems = [
     { id: 'planner', label: 'Rehab Planner', Icon: Target },
     ...(showSetup ? [{ id: 'setup', label: 'Setup', Icon: Settings }] : []),
   ];
-
   return (
     <div className="min-h-screen bg-slate-50 flex">
-      {/* Desktop sidebar */}
       <aside className="hidden md:flex flex-col w-52 shrink-0 bg-slate-900 sticky top-0 h-screen">
         <div className="px-4 py-5 border-b border-white/[0.06]">
-          <button onClick={onBack} className="flex items-center gap-1.5 text-white/40 hover:text-white/70 text-[11px] mb-3 transition-colors">
-            <ArrowLeft className="w-3 h-3" />All Apps
-          </button>
+          <button onClick={onBack} className="flex items-center gap-1.5 text-white/40 hover:text-white/70 text-[11px] mb-3 transition-colors"><ArrowLeft className="w-3 h-3" />All Apps</button>
           <div className="flex items-center gap-2.5">
-            <div className="w-6 h-6 rounded bg-emerald-600 flex items-center justify-center shrink-0">
-              <Target className="w-3.5 h-3.5 text-white" strokeWidth={2.5} />
-            </div>
+            <div className="w-6 h-6 rounded bg-emerald-600 flex items-center justify-center shrink-0"><Target className="w-3.5 h-3.5 text-white" strokeWidth={2.5} /></div>
             <span className="text-[13px] font-semibold text-slate-100 tracking-tight">Rehab Planner</span>
           </div>
         </div>
@@ -1242,46 +996,22 @@ export function RehabPlanner({ role, clubId, authUser, onBack }: {
           <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] mb-1">Signed in</p>
           <p className="text-[11px] text-white/50 truncate">{authUser?.email}</p>
           <p className="text-[10px] text-white/30 mt-0.5">{role}</p>
-          <button onClick={() => supabase.auth.signOut()}
-            className="mt-2 w-full flex items-center gap-2 px-2.5 py-1.5 text-[12px] text-white/40 hover:text-white/70 hover:bg-white/[0.06] rounded transition-colors">
-            <X className="w-3 h-3" />Sign out
-          </button>
+          <button onClick={() => supabase.auth.signOut()} className="mt-2 w-full flex items-center gap-2 px-2.5 py-1.5 text-[12px] text-white/40 hover:text-white/70 hover:bg-white/[0.06] rounded transition-colors"><X className="w-3 h-3" />Sign out</button>
         </div>
       </aside>
-
-      {/* Main content */}
       <div className="flex-1 flex flex-col min-h-screen min-w-0">
-        {/* Mobile header */}
         <header className="md:hidden bg-white border-b border-slate-200 px-4 py-3 flex items-center gap-3 sticky top-0 z-10">
-          <button onClick={onBack} className="p-1.5 hover:bg-slate-100 rounded-lg">
-            <ChevronLeft className="w-5 h-5 text-slate-600" />
-          </button>
+          <button onClick={onBack} className="p-1.5 hover:bg-slate-100 rounded-lg"><ChevronLeft className="w-5 h-5 text-slate-600" /></button>
           <h1 className="text-[15px] font-semibold text-slate-900 flex-1">Rehab Planner</h1>
-          {showSetup && (
-            <button onClick={() => setPage(page === 'setup' ? 'planner' : 'setup')}
-              className={`p-1.5 rounded-lg transition-colors ${page === 'setup' ? 'bg-slate-100 text-slate-900' : 'text-slate-400 hover:bg-slate-100'}`}>
-              <Settings className="w-4.5 h-4.5" />
-            </button>
-          )}
+          {showSetup && <button onClick={() => setPage(page === 'setup' ? 'planner' : 'setup')} className={`p-1.5 rounded-lg ${page === 'setup' ? 'bg-slate-100 text-slate-900' : 'text-slate-400 hover:bg-slate-100'}`}><Settings className="w-4 h-4" /></button>}
         </header>
-
-        {/* Desktop page header */}
         <div className="hidden md:flex items-center justify-between bg-white border-b border-slate-200 px-6 py-3.5">
           <div>
-            <h2 className="text-[15px] font-semibold text-slate-900 leading-none">
-              {page === 'setup' ? 'Rehab Setup' : 'Rehab Planner'}
-            </h2>
-            <p className="text-[11px] text-slate-400 mt-1 font-light">
-              {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-            </p>
+            <h2 className="text-[15px] font-semibold text-slate-900 leading-none">{page === 'setup' ? 'Rehab Setup' : 'Rehab Planner'}</h2>
+            <p className="text-[11px] text-slate-400 mt-1 font-light">{new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
           </div>
         </div>
-
-        {/* Page content */}
-        {page === 'setup'
-          ? <RehabSetupPage clubId={clubId} role={role} />
-          : <RehabPlannerPage clubId={clubId} role={role} />
-        }
+        {page === 'setup' ? <RehabSetupPage clubId={clubId} role={role} /> : <RehabPlannerPage clubId={clubId} role={role} />}
       </div>
     </div>
   );
