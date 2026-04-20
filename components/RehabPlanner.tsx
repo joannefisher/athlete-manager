@@ -532,15 +532,23 @@ const MetaStrip = ({ row, athlete, weekCommencing, rtpPhases, staffLeads, fixtur
         {/* Divider */}
         <span className="w-px h-3 bg-slate-200 mx-0.5 shrink-0 self-center" />
 
-        {/* RTP Phase */}
-        {canEdit ? (
-          <select value={row.rtpPhaseId || ''} onChange={e => onUpdateField('rtpPhaseId', e.target.value || null)}
-            className="h-5 px-1 text-[9px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-[100px] self-center">
-            <option value="">RTP —</option>
+        {/* RTP Phase — show select when editing, badge when set, nothing when empty+readonly */}
+        {rtpPhase ? (
+          canEdit ? (
+            <select value={row.rtpPhaseId || ''} onChange={e => onUpdateField('rtpPhaseId', e.target.value || null)}
+              className="h-5 px-1 text-[9px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-[100px] self-center">
+              <option value="">— clear —</option>
+              {rtpPhases.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          ) : (
+            <span className="bg-slate-100 text-slate-600 rounded px-1.5 py-0.5 text-[9px] font-medium self-center">{rtpPhase.name}</span>
+          )
+        ) : canEdit ? (
+          <select value="" onChange={e => onUpdateField('rtpPhaseId', e.target.value || null)}
+            className="h-5 px-1 text-[9px] border border-dashed border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-[80px] self-center text-slate-300">
+            <option value="">+ RTP</option>
             {rtpPhases.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
-        ) : rtpPhase ? (
-          <span className="bg-slate-100 text-slate-600 rounded px-1.5 py-0.5 text-[9px] font-medium self-center">{rtpPhase.name}</span>
         ) : null}
 
         {/* Staff Lead pills */}
@@ -549,15 +557,23 @@ const MetaStrip = ({ row, athlete, weekCommencing, rtpPhases, staffLeads, fixtur
             onChange={ids => onUpdateField('staffLeadIds', ids)} compact={true} />
         </span>
 
-        {/* Target Fixture */}
-        {canEdit ? (
-          <select value={row.targetFixtureId || ''} onChange={e => onUpdateField('targetFixtureId', e.target.value || null)}
-            className="h-5 px-1 text-[9px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-[130px] self-center">
-            <option value="">Fixture —</option>
+        {/* Target Fixture — same pattern: compact + when empty */}
+        {fixture ? (
+          canEdit ? (
+            <select value={row.targetFixtureId || ''} onChange={e => onUpdateField('targetFixtureId', e.target.value || null)}
+              className="h-5 px-1 text-[9px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-[130px] self-center">
+              <option value="">— clear —</option>
+              {futureFixtures.map((f: any) => <option key={f.id} value={f.id}>{fmtShort(f.date)} {f.opposition}</option>)}
+            </select>
+          ) : (
+            <span className="bg-slate-100 text-slate-600 rounded px-1.5 py-0.5 text-[9px] self-center">{fmtShort(fixture.date)} {fixture.opposition}</span>
+          )
+        ) : canEdit ? (
+          <select value="" onChange={e => onUpdateField('targetFixtureId', e.target.value || null)}
+            className="h-5 px-1 text-[9px] border border-dashed border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-[80px] self-center text-slate-300">
+            <option value="">+ Fixture</option>
             {futureFixtures.map((f: any) => <option key={f.id} value={f.id}>{fmtShort(f.date)} {f.opposition}</option>)}
           </select>
-        ) : fixture ? (
-          <span className="bg-slate-100 text-slate-600 rounded px-1.5 py-0.5 text-[9px] self-center">{fmtShort(fixture.date)} {fixture.opposition}</span>
         ) : null}
 
       </div>
