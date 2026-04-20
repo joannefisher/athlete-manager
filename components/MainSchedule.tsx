@@ -30,9 +30,9 @@ const FixturesSetup = ({ clubId, canEdit }: { clubId: string; canEdit: boolean }
   const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const blank = { date: '', opposition: '', homeAway: 'Home' as const };
-  const [form, setForm] = useState(blank);
-  const [editForm, setEditForm] = useState(blank);
+  const blank: { date: string; opposition: string; homeAway: 'Home' | 'Away' | 'Neutral' } = { date: '', opposition: '', homeAway: 'Home' };
+  const [form, setForm] = useState<{ date: string; opposition: string; homeAway: 'Home' | 'Away' | 'Neutral' }>(blank);
+  const [editForm, setEditForm] = useState<{ date: string; opposition: string; homeAway: 'Home' | 'Away' | 'Neutral' }>(blank);
 
   const load = async () => {
     setLoading(true);
