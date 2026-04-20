@@ -565,9 +565,12 @@ const MetaStrip = ({ row, athlete, weekCommencing, rtpPhases, staffLeads, fixtur
       {/* ── Week Overview — always visible ─────────────────────────── */}
       <div className="px-2 py-1.5 border-b border-slate-100">
         {canEdit ? (
-          <textarea value={row.weekOverview} onChange={e => onUpdateField('weekOverview', e.target.value)}
-            rows={2} placeholder="Week overview…"
-            className="w-full px-2 py-1 text-[10px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-emerald-400 resize-none leading-snug bg-white" />
+          <textarea value={row.weekOverview}
+            onChange={e => { onUpdateField('weekOverview', e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }}
+            onFocus={e => { e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }}
+            rows={1} placeholder="Week overview…"
+            style={{ minHeight: '22px' }}
+            className="w-full px-2 py-1 text-[10px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-emerald-400 resize-none leading-snug bg-white overflow-hidden" />
         ) : row.weekOverview ? (
           <p className="text-[10px] text-slate-600 whitespace-pre-wrap leading-snug">{row.weekOverview}</p>
         ) : (
