@@ -709,7 +709,8 @@ const AthleteRow = ({
   );
 };
 
- ─────────────────────────────────────────────────────────
+
+// ── Add Athlete Modal ────────────────────────────────────────────────────────
 const AddAthleteModal = ({ athletes, existingIds, onAdd, onClose }: any) => {
   const [search, setSearch] = useState('');
   const available = athletes.filter((a: Athlete) =>
