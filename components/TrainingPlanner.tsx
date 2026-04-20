@@ -3959,7 +3959,7 @@ const [photo, setPhoto] = useState(athlete?.photo || '');
         <div className="bg-white rounded-lg border border-slate-200 p-4">
           <div className="flex justify-between items-center mb-3">
             <h3 className="font-semibold text-sm">Injuries</h3>
-            {!showAddInjury && canAddInjury(role) && <button onClick={() => { setShowAddInjury(true); setEditingInjuryId(null); setInjuryData({ bodyPart: 'Head', startDate: today, returnDate: '', notes: '', event: 'Training', surface: '4G', contact: 'Contact' }); }} className="text-xs text-blue-600 font-medium">+ Add</button>}
+            {!showAddInjury && canAddInjury(role) && <button onClick={() => { setShowAddInjury(true); setEditingInjuryId(null); setInjuryData({ bodyPart: 'Head', startDate: today, returnDate: '', surgeryDate: '', notes: '', event: 'Training', surface: '4G', contact: 'Contact' }); }} className="text-xs text-blue-600 font-medium">+ Add</button>}
           </div>
           {showAddInjury && canAddInjury(role) && (
             <div className="mb-4 p-3 bg-slate-50 rounded-lg space-y-3">
@@ -3996,7 +3996,7 @@ const [photo, setPhoto] = useState(athlete?.photo || '');
                   </div>
                   {canAddInjury(role) && (
                     <div className="flex gap-1">
-                      <button onClick={() => { setInjuryData({ bodyPart: inj.bodyPart, startDate: inj.startDate, returnDate: inj.returnDate || '', notes: inj.notes || '', event: inj.event || 'Training', surface: inj.surface || '4G', contact: inj.contact || 'Contact' }); setEditingInjuryId(inj.id); setShowAddInjury(true); }} className="p-1 hover:bg-red-100 rounded"><Edit2 className="w-3 h-3 text-red-600" /></button>
+                      <button onClick={() => { setInjuryData({ bodyPart: inj.bodyPart, startDate: inj.startDate, returnDate: inj.returnDate || '', surgeryDate: (inj as any).surgeryDate || '', notes: inj.notes || '', event: inj.event || 'Training', surface: inj.surface || '4G', contact: inj.contact || 'Contact' }); setEditingInjuryId(inj.id); setShowAddInjury(true); }} className="p-1 hover:bg-red-100 rounded"><Edit2 className="w-3 h-3 text-red-600" /></button>
                       <button onClick={() => setInjuries(injuries.filter(i => i.id !== inj.id))} className="p-1 hover:bg-red-100 rounded"><Trash2 className="w-3 h-3 text-red-600" /></button>
                     </div>
                   )}
@@ -4016,7 +4016,7 @@ const [photo, setPhoto] = useState(athlete?.photo || '');
                   </div>
                   {canAddInjury(role) && (
                     <div className="flex gap-1">
-                      <button onClick={() => { setInjuryData({ bodyPart: inj.bodyPart, startDate: inj.startDate, returnDate: inj.returnDate || '', notes: inj.notes || '', event: inj.event || 'Training', surface: inj.surface || '4G', contact: inj.contact || 'Contact' }); setEditingInjuryId(inj.id); setShowAddInjury(true); }} className="p-1 hover:bg-slate-100 rounded"><Edit2 className="w-3 h-3 text-slate-500" /></button>
+                      <button onClick={() => { setInjuryData({ bodyPart: inj.bodyPart, startDate: inj.startDate, returnDate: inj.returnDate || '', surgeryDate: (inj as any).surgeryDate || '', notes: inj.notes || '', event: inj.event || 'Training', surface: inj.surface || '4G', contact: inj.contact || 'Contact' }); setEditingInjuryId(inj.id); setShowAddInjury(true); }} className="p-1 hover:bg-slate-100 rounded"><Edit2 className="w-3 h-3 text-slate-500" /></button>
                       <button onClick={() => setInjuries(injuries.filter(i => i.id !== inj.id))} className="p-1 hover:bg-slate-100 rounded"><Trash2 className="w-3 h-3 text-slate-500" /></button>
                     </div>
                   )}
