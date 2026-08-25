@@ -7,19 +7,22 @@
 // highlighted so it's clear which row the right-hand panel reflects.
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { ChevronRight, Dumbbell, Loader2, Plus, Trash2, Users } from 'lucide-react';
+import { ChevronRight, Dumbbell, HeartPulse, Loader2, Plus, Trash2, Users } from 'lucide-react';
 import type { GymAthlete as Athlete } from './types';
-import type { GymExerciseGroup, GymExerciseGroupType, GymSession, GymSessionGroup } from './types';
-import { fetchSessionsForDate, deleteSession } from './gymApi';
+import type { GymExercise, GymExerciseGroup, GymExerciseGroupType, GymSession, GymSessionGroup } from './types';
+import { fetchSessionsForDate, deleteSession, getOrCreateSession, saveSessionItem } from './gymApi';
+import { useGymUndo } from './GymUndoContext';
 
 export const StaffDailyView = ({
   date,
   clubId,
   athletes,
   sessionGroups,
+  exercises,
   canEdit,
   userId,
   activeAthleteId,
+  rehabAthleteIds,
   onOpenSession,
   onOpenGroupSession,
   onManageGroups,
@@ -30,13 +33,16 @@ export const StaffDailyView = ({
   sessionGroups: GymSessionGroup[];
   exerciseGroups: GymExerciseGroup[];
   exerciseGroupTypes: GymExerciseGroupType[];
+  exercises: GymExercise[];
   canEdit: boolean;
   userId: string;
   activeAthleteId?: string | null;
+  rehabAthleteIds?: Set<string>;
   onOpenSession: (athleteId: string, date: string) => void;
   onOpenGroupSession: (groupId: string, date: string) => void;
   onManageGroups: () => void;
 }) => {
+  const { pushUndo } = useGymUndo();
   const [sessions, setSessions] = useState<GymSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [showGroupMenu, setShowGroupMenu] = useState(false);
@@ -56,11 +62,33 @@ export const StaffDailyView = ({
 
   const sessionByAthlete = new Map(sessions.map(s => [s.athleteId, s]));
 
-  const handleDelete = async (e: React.MouseEvent, sessionId: string) => {
+  const handleDelete = async (e: React.MouseEvent, session: GymSession, athleteName: string) => {
     e.stopPropagation();
     if (!window.confirm('Delete this session?')) return;
-    await deleteSession(sessionId);
+    const itemsSnapshot = [...(session.items || [])].sort((a, b) => a.sortOrder - b.sortOrder);
+    await deleteSession(session.id);
     load();
+    pushUndo({
+      label: `Restore ${athleteName}'s session`,
+      run: async () => {
+        const restored = await getOrCreateSession(clubId, session.athleteId, session.date, userId, session.sourceGroupId);
+        for (const item of itemsSnapshot) {
+          const draft = {
+            itemType: item.itemType,
+            exerciseId: item.exerciseId,
+            sets: item.sets,
+            reps: item.reps,
+            load: item.load,
+            isPrimary: item.isPrimary,
+            side: item.side,
+            noteText: item.noteText,
+          };
+          const exerciseGroupId = item.itemType === 'exercise' ? exercises.find(ex => ex.id === item.exerciseId)?.exerciseGroupId || null : null;
+          await saveSessionItem(restored.id, session.athleteId, draft, exerciseGroupId, item.sortOrder, userId);
+        }
+        load();
+      },
+    });
   };
 
   if (loading) {
@@ -124,14 +152,21 @@ export const StaffDailyView = ({
                 {athlete.avatar}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-[13px] font-medium text-slate-800 truncate">{athlete.name}</p>
+                <p className="text-[13px] font-medium text-slate-800 truncate flex items-center gap-1.5">
+                  {athlete.name}
+                  {rehabAthleteIds?.has(athlete.id) && (
+                    <span title="On the rehab plan this week" className="flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-rose-50 text-rose-600 border border-rose-200">
+                      <HeartPulse className="w-2.5 h-2.5" /> Rehab
+                    </span>
+                  )}
+                </p>
                 <p className="text-[11px] text-slate-400 flex items-center gap-1">
                   <Dumbbell className="w-3 h-3" />
                   {itemCount > 0 ? `${itemCount} item${itemCount !== 1 ? 's' : ''} planned` : 'No session planned'}
                 </p>
               </div>
               {canEdit && session && (
-                <span onClick={e => handleDelete(e, session.id)} className="p-1.5 rounded hover:bg-red-50 text-slate-300 hover:text-red-500">
+                <span onClick={e => handleDelete(e, session, athlete.name)} className="p-1.5 rounded hover:bg-red-50 text-slate-300 hover:text-red-500">
                   <Trash2 className="w-3.5 h-3.5" />
                 </span>
               )}

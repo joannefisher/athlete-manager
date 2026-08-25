@@ -10,6 +10,18 @@ export interface GymAthlete {
   id: string;
   name: string;
   avatar?: string | null;
+  // Position numbers from the shared `athlete_positions`/`team_structure`
+  // tables (same model TrainingPlanner.tsx uses) — resolved to names/groups
+  // via GymTeamPosition, used by GroupPicker's position filter.
+  positionNumbers?: number[];
+}
+
+/** Mirrors TrainingPlanner.tsx's `team_structure` shape, fetched by Gym.tsx for the group-member position filter. */
+export interface GymTeamPosition {
+  id: string;
+  number: number;
+  name: string;
+  group: string; // e.g. "Forward" / "Back"
 }
 
 export interface GymExerciseGroupType {
@@ -101,6 +113,9 @@ export interface GymSession {
 
 export type GymSessionItemType = 'exercise' | 'note';
 
+/** 'both' (default, one combined entry) or an independent 'left'/'right' half of a split exercise. */
+export type GymSessionItemSide = 'both' | 'left' | 'right';
+
 export interface GymSessionItem {
   id: string;
   sessionId: string;
@@ -114,6 +129,7 @@ export interface GymSessionItem {
   reps: number | null;
   load: string | null;
   isPrimary: boolean;
+  side: GymSessionItemSide;
   effectiveExerciseId: string | null;
   effectiveExerciseName?: string;
   wasSwapped: boolean;
@@ -139,5 +155,6 @@ export interface GymSessionItemDraft {
   reps: number | null;
   load: string | null;
   isPrimary: boolean;
+  side: GymSessionItemSide;
   noteText: string | null;
 }

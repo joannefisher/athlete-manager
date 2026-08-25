@@ -374,6 +374,7 @@ function mapSessionItem(r: any): GymSessionItem {
     reps: r.reps,
     load: r.load,
     isPrimary: r.is_primary,
+    side: r.side || 'both',
     effectiveExerciseId: r.effective_exercise_id,
     effectiveExerciseName: r.effective_exercise?.name,
     wasSwapped: r.was_swapped,
@@ -387,7 +388,7 @@ function mapSessionItem(r: any): GymSessionItem {
 }
 
 const SESSION_ITEM_SELECT =
-  'id, session_id, sort_order, item_type, exercise_id, sets, reps, load, is_primary, effective_exercise_id, was_swapped, note_text, created_by, created_at, updated_by, updated_at, ' +
+  'id, session_id, sort_order, item_type, exercise_id, sets, reps, load, is_primary, side, effective_exercise_id, was_swapped, note_text, created_by, created_at, updated_by, updated_at, ' +
   'exercise:gym_exercises!gym_session_items_exercise_id_fkey(name), ' +
   'effective_exercise:gym_exercises!gym_session_items_effective_exercise_id_fkey(name), ' +
   'creator:user_profiles!gym_session_items_created_by_fkey(full_name)';
@@ -609,6 +610,7 @@ export async function saveSessionItem(
     reps: draft.itemType === 'exercise' ? draft.reps : null,
     load: draft.itemType === 'exercise' ? draft.load : null,
     is_primary: draft.itemType === 'exercise' ? draft.isPrimary : false,
+    side: draft.itemType === 'exercise' ? draft.side : 'both',
     effective_exercise_id: effectiveExerciseId,
     was_swapped: wasSwapped,
     note_text: draft.itemType === 'note' ? draft.noteText : null,
@@ -657,6 +659,7 @@ function itemToDraft(item: GymSessionItem): GymSessionItemDraft {
     reps: item.reps,
     load: item.load,
     isPrimary: item.isPrimary,
+    side: item.side,
     noteText: item.noteText,
   };
 }
@@ -669,23 +672,33 @@ function itemToDraft(item: GymSessionItem): GymSessionItemDraft {
  * athlete — a copied Primary exercise resolves against *that* athlete's own
  * default, not the source athlete's, which is what we want.
  */
+export interface CopySessionResult {
+  athleteId: string;
+  date: string;
+  items: GymSessionItem[]; // newly created items at this destination — used to undo the copy
+}
+
 export async function copySessionItems(
   items: GymSessionItem[],
   destinations: { athleteId: string; date: string }[],
   exerciseGroupIdFor: (exerciseId: string) => string | null,
   clubId: string,
   userId: string
-): Promise<void> {
+): Promise<CopySessionResult[]> {
+  const results: CopySessionResult[] = [];
   for (const dest of destinations) {
     const session = await getOrCreateSession(clubId, dest.athleteId, dest.date, userId);
     const existing = await fetchAthleteSessionsForDateRange(dest.athleteId, [dest.date]);
     let sortOrder = existing[0]?.items?.length ?? 0;
+    const created: GymSessionItem[] = [];
     for (const item of items) {
       const exerciseGroupId = item.itemType === 'exercise' && item.exerciseId ? exerciseGroupIdFor(item.exerciseId) : null;
-      await saveSessionItem(session.id, dest.athleteId, itemToDraft(item), exerciseGroupId, sortOrder, userId);
+      created.push(await saveSessionItem(session.id, dest.athleteId, itemToDraft(item), exerciseGroupId, sortOrder, userId));
       sortOrder++;
     }
+    results.push({ athleteId: dest.athleteId, date: dest.date, items: created });
   }
+  return results;
 }
 
 /**
@@ -694,6 +707,25 @@ export async function copySessionItems(
  * created if needed and each item save is independent, so the swap rule
  * still resolves per-athlete.
  */
+// ── Rehab filter (reuses RehabPlanner.tsx's own definition of "on rehab") ──
+// An athlete is "on rehab" for a week if they have a rehab_plan_rows row
+// under that week's rehab_plans row — exactly how RehabPlanner.tsx's
+// loadWeekPlan() determines its own roster. weekCommencing must be the
+// Monday of the week (same as WeekStrip.getWeekDates(date)[0]).
+export async function fetchRehabAthleteIds(clubId: string, weekCommencing: string): Promise<Set<string>> {
+  const { data: plan, error: planErr } = await supabase
+    .from('rehab_plans')
+    .select('id')
+    .eq('club_id', clubId)
+    .eq('week_commencing', weekCommencing)
+    .maybeSingle();
+  if (planErr) throw planErr;
+  if (!plan) return new Set();
+  const { data: rows, error: rowsErr } = await supabase.from('rehab_plan_rows').select('athlete_id').eq('plan_id', plan.id);
+  if (rowsErr) throw rowsErr;
+  return new Set((rows || []).map((r: any) => r.athlete_id));
+}
+
 export async function addItemToGroupSession(
   clubId: string,
   groupId: string,

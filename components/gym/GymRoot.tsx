@@ -10,7 +10,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { ChevronDown, Loader2, Users } from 'lucide-react';
 import type { Role } from '../AthleteManager';
-import { WeekStrip, GymViewMode, todayIso } from './WeekStrip';
+import { WeekStrip, GymViewMode, getWeekDates, todayIso } from './WeekStrip';
 import { StaffDailyView } from './StaffDailyView';
 import { StaffWeeklyView } from './StaffWeeklyView';
 import { SessionEditor } from './SessionEditor';
@@ -21,13 +21,27 @@ import {
   fetchExerciseGroupTypes,
   fetchExercises,
   fetchSessionGroups,
+  fetchRehabAthleteIds,
 } from './gymApi';
-import type { GymAthlete as Athlete, GymExerciseGroup, GymExerciseGroupType, GymExercise, GymSessionGroup } from './types';
+import type { GymAthlete as Athlete, GymExerciseGroup, GymExerciseGroupType, GymExercise, GymSessionGroup, GymTeamPosition } from './types';
 import { gymCanEdit } from './permissions';
 
-export const GymRoot = ({ athletes, role, userId, clubId }: { athletes: Athlete[]; role: Role; userId: string; clubId: string }) => {
+export const GymRoot = ({
+  athletes,
+  teamStructure,
+  role,
+  userId,
+  clubId,
+}: {
+  athletes: Athlete[];
+  teamStructure: GymTeamPosition[];
+  role: Role;
+  userId: string;
+  clubId: string;
+}) => {
   const [selectedDate, setSelectedDate] = useState(todayIso());
-  const [viewMode, setViewMode] = useState<GymViewMode>('day');
+  // Default view lands on the current week with today selected, per feedback.
+  const [viewMode, setViewMode] = useState<GymViewMode>('week');
   const [loading, setLoading] = useState(true);
 
   const [exerciseGroups, setExerciseGroups] = useState<GymExerciseGroup[]>([]);
@@ -47,8 +61,11 @@ export const GymRoot = ({ athletes, role, userId, clubId }: { athletes: Athlete[
   // Player selector — null means "show all" (the default).
   const [selectedAthleteIds, setSelectedAthleteIds] = useState<string[] | null>(null);
   const [showPlayerFilter, setShowPlayerFilter] = useState(false);
+  const [rehabOnly, setRehabOnly] = useState(false);
+  const [rehabAthleteIds, setRehabAthleteIds] = useState<Set<string>>(new Set());
 
   const canEditGym = gymCanEdit(role);
+  const weekCommencing = getWeekDates(selectedDate)[0];
 
   const loadReferenceData = useCallback(async () => {
     setLoading(true);
@@ -73,6 +90,17 @@ export const GymRoot = ({ athletes, role, userId, clubId }: { athletes: Athlete[
   useEffect(() => {
     loadReferenceData();
   }, [loadReferenceData]);
+
+  // Rehab filter — same definition RehabPlanner.tsx uses for its own weekly
+  // roster: an athlete is "on rehab" if they have a row under that week's
+  // rehab_plans entry. Re-fetched whenever the visible week changes.
+  useEffect(() => {
+    let cancelled = false;
+    fetchRehabAthleteIds(clubId, weekCommencing)
+      .then(ids => { if (!cancelled) setRehabAthleteIds(ids); })
+      .catch(err => console.error('[GymRoot] failed to load rehab roster', err));
+    return () => { cancelled = true; };
+  }, [clubId, weekCommencing]);
 
   // Default-select the first athlete once the roster loads, so a session is
   // visible in the right-hand pane immediately without clicking anything.
@@ -100,7 +128,9 @@ export const GymRoot = ({ athletes, role, userId, clubId }: { athletes: Athlete[
     });
   };
 
-  const visibleAthletes = selectedAthleteIds === null ? athletes : athletes.filter(a => selectedAthleteIds.includes(a.id));
+  const visibleAthletes = athletes
+    .filter(a => selectedAthleteIds === null || selectedAthleteIds.includes(a.id))
+    .filter(a => !rehabOnly || rehabAthleteIds.has(a.id));
 
   if (loading) {
     return (
@@ -116,6 +146,7 @@ export const GymRoot = ({ athletes, role, userId, clubId }: { athletes: Athlete[
         clubId={clubId}
         userId={userId}
         athletes={athletes}
+        teamStructure={teamStructure}
         sessionGroups={sessionGroups}
         onChanged={loadReferenceData}
         onBack={() => setScreen('roster')}
@@ -200,7 +231,7 @@ export const GymRoot = ({ athletes, role, userId, clubId }: { athletes: Athlete[
                     <button onClick={() => setSelectedAthleteIds(null)} className="text-[11px] text-blue-600 hover:underline">Show all</button>
                   )}
                 </div>
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-1.5 mb-2.5">
                   {athletes.map(a => {
                     const active = selectedAthleteIds === null || selectedAthleteIds.includes(a.id);
                     return (
@@ -214,6 +245,10 @@ export const GymRoot = ({ athletes, role, userId, clubId }: { athletes: Athlete[
                     );
                   })}
                 </div>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input type="checkbox" checked={rehabOnly} onChange={e => setRehabOnly(e.target.checked)} className="w-3.5 h-3.5 accent-blue-600" />
+                  <span className="text-[11px] font-medium text-slate-500">Rehab only — same players shown in Rehab Planner this week ({rehabAthleteIds.size})</span>
+                </label>
               </div>
             )}
           </div>
@@ -230,9 +265,11 @@ export const GymRoot = ({ athletes, role, userId, clubId }: { athletes: Athlete[
                   sessionGroups={sessionGroups}
                   exerciseGroups={exerciseGroups}
                   exerciseGroupTypes={exerciseGroupTypes}
+                  exercises={exercises}
                   canEdit={canEditGym}
                   userId={userId}
                   activeAthleteId={editingAthleteId}
+                  rehabAthleteIds={rehabAthleteIds}
                   onOpenSession={openSession}
                   onOpenGroupSession={openGroupSession}
                   onManageGroups={() => setScreen('groups')}
@@ -243,6 +280,7 @@ export const GymRoot = ({ athletes, role, userId, clubId }: { athletes: Athlete[
                   clubId={clubId}
                   athletes={visibleAthletes}
                   activeAthleteId={editingAthleteId}
+                  rehabAthleteIds={rehabAthleteIds}
                   onSelectDay={date => { setSelectedDate(date); setViewMode('day'); }}
                   onOpenSession={openSession}
                 />

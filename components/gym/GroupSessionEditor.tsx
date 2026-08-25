@@ -9,8 +9,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { ArrowLeft, Check, ChevronRight, Loader2, Plus, Users } from 'lucide-react';
 import type { GymAthlete as Athlete } from './types';
-import type { GymExercise, GymExerciseGroup, GymSessionGroup, GymSessionItemDraft } from './types';
-import { addItemToGroupSession, createExercise, fetchSessionsForDateRange, searchExercises } from './gymApi';
+import type { GymExercise, GymExerciseGroup, GymSessionGroup, GymSessionItem, GymSessionItemDraft } from './types';
+import { addItemToGroupSession, createExercise, deleteSessionItem, fetchSessionsForDateRange, searchExercises } from './gymApi';
+import { useGymUndo } from './GymUndoContext';
 
 const emptyDraft: GymSessionItemDraft = {
   itemType: 'exercise',
@@ -19,6 +20,7 @@ const emptyDraft: GymSessionItemDraft = {
   reps: null,
   load: null,
   isPrimary: false,
+  side: 'both',
   noteText: null,
 };
 
@@ -47,6 +49,7 @@ export const GroupSessionEditor = ({
   onEditIndividual: (athleteId: string, date: string) => void;
   onBack: () => void;
 }) => {
+  const { pushUndo } = useGymUndo();
   const members = athletes.filter(a => group.memberAthleteIds.includes(a.id));
   const [itemCounts, setItemCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
@@ -58,6 +61,8 @@ export const GroupSessionEditor = ({
   const [showPicker, setShowPicker] = useState(false);
   const [addingNewExercise, setAddingNewExercise] = useState(false);
   const [newExerciseGroupId, setNewExerciseGroupId] = useState('');
+  const [splitSide, setSplitSide] = useState(false);
+  const [rightDraft, setRightDraft] = useState<{ sets: number | null; reps: number | null; load: string | null }>({ sets: null, reps: null, load: null });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -84,6 +89,8 @@ export const GroupSessionEditor = ({
     setShowPicker(false);
     setAddingNewExercise(false);
     setNewExerciseGroupId('');
+    setSplitSide(false);
+    setRightDraft({ sets: null, reps: null, load: null });
   };
 
   const matches = searchExercises(exercises, exerciseQuery);
@@ -105,8 +112,28 @@ export const GroupSessionEditor = ({
     try {
       const exerciseGroupId =
         draft.itemType === 'exercise' ? exercises.find(e => e.id === draft.exerciseId)?.exerciseGroupId || null : null;
-      await addItemToGroupSession(clubId, group.id, group.memberAthleteIds, date, draft, exerciseGroupId, userId);
-      setAddedCount(c => c + 1);
+
+      let created: GymSessionItem[];
+      if (draft.itemType === 'exercise' && splitSide) {
+        const leftDraft: GymSessionItemDraft = { ...draft, side: 'left' };
+        const rightDraftFull: GymSessionItemDraft = { ...draft, side: 'right', sets: rightDraft.sets, reps: rightDraft.reps, load: rightDraft.load };
+        // Sequential, not parallel — each call reads every member's current item count to
+        // pick a sort_order, so running Left and Right concurrently could race on that count.
+        const createdLeft = await addItemToGroupSession(clubId, group.id, group.memberAthleteIds, date, leftDraft, exerciseGroupId, userId);
+        const createdRight = await addItemToGroupSession(clubId, group.id, group.memberAthleteIds, date, rightDraftFull, exerciseGroupId, userId);
+        created = [...createdLeft, ...createdRight];
+      } else {
+        created = await addItemToGroupSession(clubId, group.id, group.memberAthleteIds, date, draft, exerciseGroupId, userId);
+      }
+
+      setAddedCount(c => c + created.length);
+      pushUndo({
+        label: `Remove "${draft.exerciseName || draft.noteText || 'item'}" from ${group.name}`,
+        run: async () => {
+          for (const item of created) await deleteSessionItem(item.id);
+          await load();
+        },
+      });
       resetDraft();
       await load();
     } catch (err: any) {
@@ -181,20 +208,53 @@ export const GroupSessionEditor = ({
               </div>
             )}
 
-            <div className="grid grid-cols-3 gap-2">
-              <div>
-                <label className="block text-[11px] font-medium text-slate-500 mb-1">Sets</label>
-                <input type="number" min={0} value={draft.sets ?? ''} onChange={e => setDraft(d => ({ ...d, sets: e.target.value ? Number(e.target.value) : null }))} className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer">
+              <input type="checkbox" checked={splitSide} onChange={e => setSplitSide(e.target.checked)} className="w-3.5 h-3.5" />
+              Split left / right
+              <span className="text-slate-400">— separate sets/reps/load for each side</span>
+            </label>
+
+            {splitSide ? (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <p className="text-[11px] font-semibold text-slate-500">Left</p>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <input type="number" min={0} placeholder="Sets" value={draft.sets ?? ''} onChange={e => setDraft(d => ({ ...d, sets: e.target.value ? Number(e.target.value) : null }))}
+                      className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                    <input type="number" min={0} placeholder="Reps" value={draft.reps ?? ''} onChange={e => setDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))}
+                      className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                    <input placeholder="Load" value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))}
+                      className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <p className="text-[11px] font-semibold text-slate-500">Right</p>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <input type="number" min={0} placeholder="Sets" value={rightDraft.sets ?? ''} onChange={e => setRightDraft(d => ({ ...d, sets: e.target.value ? Number(e.target.value) : null }))}
+                      className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                    <input type="number" min={0} placeholder="Reps" value={rightDraft.reps ?? ''} onChange={e => setRightDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))}
+                      className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                    <input placeholder="Load" value={rightDraft.load ?? ''} onChange={e => setRightDraft(d => ({ ...d, load: e.target.value || null }))}
+                      className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className="block text-[11px] font-medium text-slate-500 mb-1">Reps</label>
-                <input type="number" min={0} value={draft.reps ?? ''} onChange={e => setDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))} className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            ) : (
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-500 mb-1">Sets</label>
+                  <input type="number" min={0} value={draft.sets ?? ''} onChange={e => setDraft(d => ({ ...d, sets: e.target.value ? Number(e.target.value) : null }))} className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-500 mb-1">Reps</label>
+                  <input type="number" min={0} value={draft.reps ?? ''} onChange={e => setDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))} className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-500 mb-1">Load</label>
+                  <input value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))} placeholder="e.g. 60kg" className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
               </div>
-              <div>
-                <label className="block text-[11px] font-medium text-slate-500 mb-1">Load</label>
-                <input value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))} placeholder="e.g. 60kg" className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-            </div>
+            )}
 
             <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer">
               <input type="checkbox" checked={draft.isPrimary} onChange={e => setDraft(d => ({ ...d, isPrimary: e.target.checked }))} className="w-3.5 h-3.5" />
@@ -218,7 +278,7 @@ export const GroupSessionEditor = ({
           className="mt-3 w-full h-9 flex items-center justify-center gap-1.5 bg-slate-900 text-white rounded-lg text-[13px] font-semibold hover:bg-slate-800 disabled:opacity-40"
         >
           {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-          Add to all {members.length} sessions
+          {splitSide ? `Add both sides to all ${members.length} sessions` : `Add to all ${members.length} sessions`}
         </button>
         {addedCount > 0 && <p className="text-[11px] text-green-600 mt-2">Added {addedCount} item{addedCount !== 1 ? 's' : ''} to this group's sessions so far.</p>}
       </div>

@@ -16,7 +16,8 @@ import { GymRoot } from './gym/GymRoot';
 import { PlayerSessionsView, PlayerDefaultsView } from './gym/PlayerGymView';
 import { ExerciseBankAdmin } from './gym/ExerciseBankAdmin';
 import { gymCanEdit } from './gym/permissions';
-import type { GymAthlete } from './gym/types';
+import { GymUndoProvider, GymUndoButton } from './gym/GymUndoContext';
+import type { GymAthlete, GymTeamPosition } from './gym/types';
 
 type Page = 'sessions' | 'exercise-bank' | 'defaults';
 
@@ -26,21 +27,48 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
 
   const [loading, setLoading] = useState(true);
   const [athletes, setAthletes] = useState<GymAthlete[]>([]);
+  const [teamStructure, setTeamStructure] = useState<GymTeamPosition[]>([]);
   const [linkedAthleteId, setLinkedAthleteId] = useState<string | null>(null);
+  const [myName, setMyName] = useState<string | null>(null);
   const [page, setPage] = useState<Page>('sessions');
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       setLoading(true);
+      const { data: profile, error: profileErr } = await supabase
+        .from('user_profiles')
+        .select('full_name, linked_athlete_id')
+        .eq('id', authUser.id)
+        .maybeSingle();
+      if (profileErr) console.error('[Gym] failed to load profile', profileErr.message);
+      if (!cancelled) setMyName(profile?.full_name ?? null);
+
       if (isPlayer) {
-        const { data, error } = await supabase.from('user_profiles').select('linked_athlete_id').eq('id', authUser.id).maybeSingle();
-        if (error) console.error('[Gym] failed to load linked_athlete_id', error.message);
-        if (!cancelled) setLinkedAthleteId(data?.linked_athlete_id ?? null);
+        if (!cancelled) setLinkedAthleteId(profile?.linked_athlete_id ?? null);
       } else {
-        const { data, error } = await supabase.from('athletes').select('id, name, avatar').eq('club_id', clubId).order('name');
-        if (error) console.error('[Gym] failed to load athletes', error.message);
-        if (!cancelled) setAthletes((data || []).map((a: any) => ({ id: a.id, name: a.name, avatar: a.avatar })));
+        // Position data (team_structure/athlete_positions) mirrors TrainingPlanner.tsx's own
+        // fetch — no explicit club_id filter there either (RLS-scoped), so athlete_positions
+        // rows are filtered client-side to this club's athlete ids as a defensive measure.
+        const [{ data: athleteRows, error: athErr }, { data: positionRows }, { data: teamStructureRows }] = await Promise.all([
+          supabase.from('athletes').select('id, name, avatar').eq('club_id', clubId).order('name'),
+          supabase.from('athlete_positions').select('*'),
+          supabase.from('team_structure').select('*').order('number'),
+        ]);
+        if (athErr) console.error('[Gym] failed to load athletes', athErr.message);
+        const athleteIds = new Set((athleteRows || []).map((a: any) => a.id));
+        const positionsByAthlete = new Map<string, number[]>();
+        for (const p of positionRows || []) {
+          if (!athleteIds.has(p.athlete_id)) continue;
+          if (!positionsByAthlete.has(p.athlete_id)) positionsByAthlete.set(p.athlete_id, []);
+          positionsByAthlete.get(p.athlete_id)!.push(p.position_number);
+        }
+        if (!cancelled) {
+          setAthletes(
+            (athleteRows || []).map((a: any) => ({ id: a.id, name: a.name, avatar: a.avatar, positionNumbers: positionsByAthlete.get(a.id) || [] }))
+          );
+          setTeamStructure((teamStructureRows || []).map((t: any) => ({ id: t.id, number: t.number, name: t.name, group: t.position_group })));
+        }
       }
       if (!cancelled) setLoading(false);
     };
@@ -61,6 +89,7 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
   const pageTitle = { sessions: isPlayer ? 'My Sessions' : 'Gym Sessions', 'exercise-bank': 'Exercise Bank', defaults: 'My Defaults' }[page];
 
   return (
+    <GymUndoProvider>
     <div className="min-h-screen bg-slate-50 flex">
       {/* Sidebar — same shell pattern as RehabPlanner/MainSchedule, shown to every role including Player */}
       <aside className="hidden md:flex flex-col w-52 shrink-0 bg-slate-900 sticky top-0 h-screen">
@@ -85,9 +114,14 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
             </button>
           ))}
         </nav>
+        {!isPlayer && (
+          <div className="px-2 pb-1">
+            <GymUndoButton variant="sidebar" />
+          </div>
+        )}
         <div className="p-3 border-t border-white/[0.06]">
           <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] mb-1">Signed in</p>
-          <p className="text-[11px] text-white/50 truncate">{authUser?.email}</p>
+          <p className="text-[11px] text-white/50 truncate">{myName || authUser?.email}</p>
           <p className="text-[10px] text-white/30 mt-0.5">{role}</p>
           <button onClick={() => supabase.auth.signOut()} className="mt-2 w-full flex items-center gap-2 px-2.5 py-1.5 text-[12px] text-white/40 hover:text-white/70 hover:bg-white/[0.06] rounded transition-colors">
             <X className="w-3 h-3" />Sign out
@@ -109,6 +143,7 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
               </button>
             ))}
           </div>
+          {!isPlayer && <GymUndoButton variant="mobile" />}
         </header>
 
         {/* Desktop page header */}
@@ -143,9 +178,10 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
             <ExerciseBankAdmin clubId={clubId} currentUserId={authUser.id} canEdit={canEdit} role={role} />
           </div>
         ) : (
-          <GymRoot athletes={athletes} role={role} userId={authUser.id} clubId={clubId} />
+          <GymRoot athletes={athletes} teamStructure={teamStructure} role={role} userId={authUser.id} clubId={clubId} />
         )}
       </div>
     </div>
+    </GymUndoProvider>
   );
 }

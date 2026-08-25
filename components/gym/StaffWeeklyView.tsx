@@ -5,7 +5,7 @@
 // cell to open that athlete's session directly.
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Loader2 } from 'lucide-react';
+import { HeartPulse, Loader2 } from 'lucide-react';
 import type { GymAthlete as Athlete } from './types';
 import type { GymSession } from './types';
 import { fetchSessionsForDateRange } from './gymApi';
@@ -19,6 +19,7 @@ export const StaffWeeklyView = ({
   clubId,
   athletes,
   activeAthleteId,
+  rehabAthleteIds,
   onSelectDay,
   onOpenSession,
 }: {
@@ -26,6 +27,7 @@ export const StaffWeeklyView = ({
   clubId: string;
   athletes: Athlete[];
   activeAthleteId?: string | null;
+  rehabAthleteIds?: Set<string>;
   onSelectDay: (date: string) => void;
   onOpenSession: (athleteId: string, date: string) => void;
 }) => {
@@ -77,7 +79,14 @@ export const StaffWeeklyView = ({
           <tbody className="divide-y divide-slate-50">
             {athletes.map(athlete => (
               <tr key={athlete.id} className={athlete.id === activeAthleteId ? 'bg-blue-50/70' : undefined}>
-                <td className={`px-3 py-2 font-medium whitespace-nowrap sticky left-0 ${athlete.id === activeAthleteId ? 'bg-blue-50/70 text-blue-700' : 'bg-white text-slate-700'}`}>{athlete.name}</td>
+                <td className={`px-3 py-2 font-medium whitespace-nowrap sticky left-0 ${athlete.id === activeAthleteId ? 'bg-blue-50/70 text-blue-700' : 'bg-white text-slate-700'}`}>
+                  <span className="flex items-center gap-1">
+                    {athlete.name}
+                    {rehabAthleteIds?.has(athlete.id) && (
+                      <span title="On the rehab plan this week"><HeartPulse className="w-3 h-3 text-rose-500 flex-shrink-0" /></span>
+                    )}
+                  </span>
+                </td>
                 {weekDates.map(date => {
                   const session = sessionFor(athlete.id, date);
                   const count = session?.items?.length ?? 0;
