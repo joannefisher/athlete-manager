@@ -156,6 +156,14 @@ export async function approveExercise(exerciseId: string): Promise<void> {
   if (error) throw error;
 }
 
+/** Rename an exercise bank entry in place (its group assignment is unchanged). */
+export async function updateExerciseName(exerciseId: string, name: string): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  const { error } = await supabase.from('gym_exercises').update({ name: trimmed }).eq('id', exerciseId);
+  if (error) throw error;
+}
+
 /**
  * Admin merges `mergedExerciseId` into `survivorExerciseId`: every session
  * item, swap-effective reference, and player default pointing at the merged
@@ -250,6 +258,36 @@ export function bestMatch(exercise: GymExercise, candidates: GymExercise[], thre
     if (score >= threshold && (!best || score > best.score)) best = { exercise, candidate: c, score };
   }
   return best;
+}
+
+// ── Exercise-bank cleanup: "keep both" duplicate dismissals ────────────────
+// A pair of exercises an Admin has looked at in the possible-duplicates list
+// and confirmed really are two different exercises, not a merge candidate.
+// Stored in canonical (sorted-id) order so the pair matches regardless of
+// which side suggestMerges() happens to list first.
+
+/** Canonical key for an unordered exercise pair — also used to check a suggested pair against the dismissed set. */
+export function duplicatePairKey(idA: string, idB: string): string {
+  return [idA, idB].sort().join('|');
+}
+
+/** Pair-keys an Admin has already reviewed and dismissed as "not duplicates" — filter suggestMerges()'s output against this. */
+export async function fetchDismissedDuplicatePairs(clubId: string): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from('gym_exercise_duplicate_dismissals')
+    .select('exercise_a_id, exercise_b_id')
+    .eq('club_id', clubId);
+  if (error) throw error;
+  return new Set((data || []).map((r: any) => duplicatePairKey(r.exercise_a_id, r.exercise_b_id)));
+}
+
+/** Admin marks a suggested duplicate pair as "keep both — these are unique entities". */
+export async function dismissDuplicatePair(clubId: string, exerciseAId: string, exerciseBId: string, dismissedBy: string): Promise<void> {
+  const [a, b] = [exerciseAId, exerciseBId].sort();
+  const { error } = await supabase
+    .from('gym_exercise_duplicate_dismissals')
+    .insert({ club_id: clubId, exercise_a_id: a, exercise_b_id: b, dismissed_by: dismissedBy });
+  if (error) throw error;
 }
 
 // ── Player default primary exercise (per exercise group) ───────────────────

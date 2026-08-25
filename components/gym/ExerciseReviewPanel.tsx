@@ -8,19 +8,31 @@
 // so past sessions/defaults stay consistent — see that function's comment.
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Check, ChevronDown, ChevronUp, GitMerge, ShieldAlert } from 'lucide-react';
-import { fetchExercises, approveExercise, mergeExercises, suggestMerges, bestMatch } from './gymApi';
+import { Check, ChevronDown, ChevronUp, GitMerge, ShieldAlert, Users2 } from 'lucide-react';
+import {
+  fetchExercises,
+  approveExercise,
+  mergeExercises,
+  suggestMerges,
+  bestMatch,
+  fetchDismissedDuplicatePairs,
+  dismissDuplicatePair,
+  duplicatePairKey,
+} from './gymApi';
 import type { GymExercise } from './types';
 
 export const ExerciseReviewPanel = ({ clubId, currentUserId, onChanged }: { clubId: string; currentUserId: string; onChanged: () => void }) => {
   const [expanded, setExpanded] = useState(false);
   const [exercises, setExercises] = useState<GymExercise[]>([]);
+  const [dismissedPairs, setDismissedPairs] = useState<Set<string>>(new Set());
   const [loaded, setLoaded] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [manualPick, setManualPick] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
-    setExercises(await fetchExercises(clubId));
+    const [exs, dismissed] = await Promise.all([fetchExercises(clubId), fetchDismissedDuplicatePairs(clubId)]);
+    setExercises(exs);
+    setDismissedPairs(dismissed);
     setLoaded(true);
   }, [clubId]);
 
@@ -30,7 +42,10 @@ export const ExerciseReviewPanel = ({ clubId, currentUserId, onChanged }: { club
 
   const pending = exercises.filter(e => e.status === 'pending');
   const approved = exercises.filter(e => e.status === 'approved');
-  const duplicates = suggestMerges(approved);
+  // Already-reviewed pairs (merged away, or explicitly "keep both") shouldn't
+  // keep reappearing — a merge already removes itself since one side is
+  // archived out of `approved`; dismissedPairs covers the "keep both" case.
+  const duplicates = suggestMerges(approved).filter(d => !dismissedPairs.has(duplicatePairKey(d.exercise.id, d.candidate.id)));
 
   const refresh = async () => {
     await load();
@@ -61,12 +76,24 @@ export const ExerciseReviewPanel = ({ clubId, currentUserId, onChanged }: { club
     }
   };
 
+  const handleDismiss = async (exerciseAId: string, exerciseBId: string) => {
+    setBusyId(exerciseAId);
+    try {
+      await dismissDuplicatePair(clubId, exerciseAId, exerciseBId, currentUserId);
+      await refresh();
+    } catch (err: any) {
+      window.alert(err?.message || 'Failed to save.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
     <div className="bg-white rounded-lg border border-slate-200 overflow-hidden mt-3">
       <button onClick={() => setExpanded(v => !v)} className="w-full p-4 flex justify-between items-center hover:bg-slate-50">
         <div>
           <h3 className="font-semibold text-sm text-left flex items-center gap-1.5">
-            <ShieldAlert className="w-4 h-4 text-amber-500" /> Gym: Exercise Review (Admin)
+            <ShieldAlert className="w-4 h-4 text-amber-500" /> Exercise Review
           </h3>
           <p className="text-xs text-slate-500">
             {loaded ? `${pending.length} new entr${pending.length !== 1 ? 'ies' : 'y'}, ${duplicates.length} possible duplicate${duplicates.length !== 1 ? 's' : ''}` : 'New entries + possible duplicate merges'}
@@ -144,6 +171,14 @@ export const ExerciseReviewPanel = ({ clubId, currentUserId, onChanged }: { club
                     </button>
                     <button onClick={() => handleMerge(exercise.id, candidate.id)} disabled={busyId !== null} className="px-2 py-1 text-xs border rounded hover:bg-slate-50 disabled:opacity-40">
                       Keep "{candidate.name}"
+                    </button>
+                    <button
+                      onClick={() => handleDismiss(exercise.id, candidate.id)}
+                      disabled={busyId !== null}
+                      title="Not a duplicate — keep both as separate exercises"
+                      className="flex items-center gap-1 px-2 py-1 text-xs border rounded hover:bg-slate-50 disabled:opacity-40 text-slate-500"
+                    >
+                      <Users2 className="w-3 h-3" /> Keep both
                     </button>
                   </div>
                 </div>

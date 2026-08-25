@@ -17,6 +17,7 @@ import {
   deleteExerciseGroup,
   fetchExercises,
   createExercise,
+  updateExerciseName,
 } from './gymApi';
 import type { GymExercise, GymExerciseGroup, GymExerciseGroupType } from './types';
 import type { Role } from '../AthleteManager';
@@ -38,6 +39,8 @@ export const ExerciseBankAdmin = ({ clubId, currentUserId, canEdit, role }: { cl
   const [showAddExercise, setShowAddExercise] = useState(false);
   const [newExerciseName, setNewExerciseName] = useState('');
   const [newExerciseGroupId, setNewExerciseGroupId] = useState('');
+  const [editingExerciseId, setEditingExerciseId] = useState<string | null>(null);
+  const [editExerciseName, setEditExerciseName] = useState('');
 
   const load = useCallback(async () => {
     const [t, g, e] = await Promise.all([fetchExerciseGroupTypes(clubId), fetchExerciseGroups(clubId), fetchExercises(clubId)]);
@@ -59,8 +62,8 @@ export const ExerciseBankAdmin = ({ clubId, currentUserId, canEdit, role }: { cl
       <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
         <button onClick={() => toggle('types')} className="w-full p-4 flex justify-between items-center hover:bg-slate-50">
           <div>
-            <h3 className="font-semibold text-sm text-left">Gym: Exercise Group Types</h3>
-            <p className="text-xs text-slate-500">{types.length} types (e.g. Anterior / Posterior)</p>
+            <h3 className="font-semibold text-sm text-left">Exercise Group Types</h3>
+            <p className="text-xs text-slate-500">{types.length} types</p>
           </div>
           {expanded === 'types' ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
         </button>
@@ -89,7 +92,7 @@ export const ExerciseBankAdmin = ({ clubId, currentUserId, canEdit, role }: { cl
       <div className="bg-white rounded-lg border border-slate-200 overflow-hidden mt-3">
         <button onClick={() => toggle('groups')} className="w-full p-4 flex justify-between items-center hover:bg-slate-50">
           <div>
-            <h3 className="font-semibold text-sm text-left">Gym: Exercise Groups</h3>
+            <h3 className="font-semibold text-sm text-left">Exercise Groups</h3>
             <p className="text-xs text-slate-500">{groups.length} groups</p>
           </div>
           {expanded === 'groups' ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
@@ -167,7 +170,7 @@ export const ExerciseBankAdmin = ({ clubId, currentUserId, canEdit, role }: { cl
       <div className="bg-white rounded-lg border border-slate-200 overflow-hidden mt-3">
         <button onClick={() => toggle('exercises')} className="w-full p-4 flex justify-between items-center hover:bg-slate-50">
           <div>
-            <h3 className="font-semibold text-sm text-left">Gym: Exercise Bank</h3>
+            <h3 className="font-semibold text-sm text-left">Exercise Bank</h3>
             <p className="text-xs text-slate-500">{exercises.length} exercises</p>
           </div>
           {expanded === 'exercises' ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
@@ -175,13 +178,46 @@ export const ExerciseBankAdmin = ({ clubId, currentUserId, canEdit, role }: { cl
         {expanded === 'exercises' && (
           <div className="border-t">
             {exercises.map(ex => (
-              <div key={ex.id} className="p-3 border-b last:border-b-0 flex justify-between items-center">
-                <span className="text-sm">
-                  {ex.name} <span className="text-xs text-slate-400">({ex.exerciseGroupName})</span>
-                  {ex.status === 'pending' && (
-                    <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200">Pending review</span>
-                  )}
-                </span>
+              <div key={ex.id} className="p-3 border-b last:border-b-0">
+                {editingExerciseId === ex.id ? (
+                  <div className="flex gap-2">
+                    <input
+                      value={editExerciseName}
+                      onChange={e => setEditExerciseName(e.target.value)}
+                      className="flex-1 px-2 py-1 text-sm border rounded"
+                      autoFocus
+                    />
+                    <button
+                      onClick={async () => {
+                        if (!editExerciseName.trim()) return;
+                        await updateExerciseName(ex.id, editExerciseName.trim());
+                        setEditingExerciseId(null);
+                        load();
+                      }}
+                      className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs"
+                    >
+                      Save
+                    </button>
+                    <button onClick={() => setEditingExerciseId(null)} className="px-2 py-1 bg-slate-100 rounded text-xs">Cancel</button>
+                  </div>
+                ) : (
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm">
+                      {ex.name} <span className="text-xs text-slate-400">({ex.exerciseGroupName})</span>
+                      {ex.status === 'pending' && (
+                        <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200">Pending review</span>
+                      )}
+                    </span>
+                    {canEdit && (
+                      <button
+                        onClick={() => { setEditingExerciseId(ex.id); setEditExerciseName(ex.name); }}
+                        className="p-1 hover:bg-slate-100 rounded flex-shrink-0"
+                      >
+                        <Edit2 className="w-4 h-4 text-slate-500" />
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
             {canEdit && (showAddExercise ? (
