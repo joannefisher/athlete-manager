@@ -18,12 +18,14 @@ export const StaffWeeklyView = ({
   selectedDate,
   clubId,
   athletes,
+  activeAthleteId,
   onSelectDay,
   onOpenSession,
 }: {
   selectedDate: string;
   clubId: string;
   athletes: Athlete[];
+  activeAthleteId?: string | null;
   onSelectDay: (date: string) => void;
   onOpenSession: (athleteId: string, date: string) => void;
 }) => {
@@ -74,8 +76,8 @@ export const StaffWeeklyView = ({
           </thead>
           <tbody className="divide-y divide-slate-50">
             {athletes.map(athlete => (
-              <tr key={athlete.id}>
-                <td className="px-3 py-2 text-slate-700 font-medium whitespace-nowrap sticky left-0 bg-white">{athlete.name}</td>
+              <tr key={athlete.id} className={athlete.id === activeAthleteId ? 'bg-blue-50/70' : undefined}>
+                <td className={`px-3 py-2 font-medium whitespace-nowrap sticky left-0 ${athlete.id === activeAthleteId ? 'bg-blue-50/70 text-blue-700' : 'bg-white text-slate-700'}`}>{athlete.name}</td>
                 {weekDates.map(date => {
                   const session = sessionFor(athlete.id, date);
                   const count = session?.items?.length ?? 0;

@@ -1,13 +1,16 @@
 // components/gym/StaffDailyView.tsx
-// Daily roster for staff: every athlete, whether they have a Gym session
+// Daily roster for staff: every athlete (or a filtered subset, via the
+// player selector above this in GymRoot), whether they have a Gym session
 // planned for the selected date, and quick actions to create/edit/delete a
-// session or assign a whole gym-group's session in one go.
+// session or open a whole gym-group's session in the bulk group editor.
+// The currently-open athlete (shown in the desktop split-pane) is
+// highlighted so it's clear which row the right-hand panel reflects.
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { ChevronRight, Dumbbell, Loader2, Plus, Trash2, Users } from 'lucide-react';
 import type { GymAthlete as Athlete } from './types';
 import type { GymExerciseGroup, GymExerciseGroupType, GymSession, GymSessionGroup } from './types';
-import { fetchSessionsForDate, deleteSession, assignSessionToGroup } from './gymApi';
+import { fetchSessionsForDate, deleteSession } from './gymApi';
 
 export const StaffDailyView = ({
   date,
@@ -16,7 +19,9 @@ export const StaffDailyView = ({
   sessionGroups,
   canEdit,
   userId,
+  activeAthleteId,
   onOpenSession,
+  onOpenGroupSession,
   onManageGroups,
 }: {
   date: string;
@@ -27,12 +32,13 @@ export const StaffDailyView = ({
   exerciseGroupTypes: GymExerciseGroupType[];
   canEdit: boolean;
   userId: string;
+  activeAthleteId?: string | null;
   onOpenSession: (athleteId: string, date: string) => void;
+  onOpenGroupSession: (groupId: string, date: string) => void;
   onManageGroups: () => void;
 }) => {
   const [sessions, setSessions] = useState<GymSession[]>([]);
   const [loading, setLoading] = useState(true);
-  const [assigningGroupId, setAssigningGroupId] = useState<string | null>(null);
   const [showGroupMenu, setShowGroupMenu] = useState(false);
 
   const load = useCallback(async () => {
@@ -57,17 +63,6 @@ export const StaffDailyView = ({
     load();
   };
 
-  const handleAssignGroup = async (group: GymSessionGroup) => {
-    setShowGroupMenu(false);
-    setAssigningGroupId(group.id);
-    try {
-      await assignSessionToGroup(clubId, group.id, group.memberAthleteIds, date, userId);
-      await load();
-    } finally {
-      setAssigningGroupId(null);
-    }
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -83,18 +78,18 @@ export const StaffDailyView = ({
           <div className="relative flex-1">
             <button
               onClick={() => setShowGroupMenu(v => !v)}
-              disabled={sessionGroups.length === 0 || assigningGroupId !== null}
+              disabled={sessionGroups.length === 0}
               className="w-full h-9 flex items-center justify-center gap-1.5 text-[13px] font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40"
             >
-              {assigningGroupId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Users className="w-3.5 h-3.5" />}
-              Assign to group…
+              <Users className="w-3.5 h-3.5" />
+              Group session…
             </button>
             {showGroupMenu && (
               <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
                 {sessionGroups.map(g => (
                   <button
                     key={g.id}
-                    onClick={() => handleAssignGroup(g)}
+                    onClick={() => { setShowGroupMenu(false); onOpenGroupSession(g.id, date); }}
                     className="w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50 flex items-center justify-between"
                   >
                     <span>{g.name}</span>
@@ -117,12 +112,14 @@ export const StaffDailyView = ({
         {athletes.map(athlete => {
           const session = sessionByAthlete.get(athlete.id);
           const itemCount = session?.items?.length ?? 0;
+          const active = athlete.id === activeAthleteId;
           return (
             <button
               key={athlete.id}
               onClick={() => onOpenSession(athlete.id, date)}
-              className="w-full flex items-center gap-3 px-3.5 py-3 hover:bg-slate-50 text-left"
+              className={`w-full flex items-center gap-3 px-3.5 py-3 text-left relative ${active ? 'bg-blue-50/70' : 'hover:bg-slate-50'}`}
             >
+              {active && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-500" />}
               <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-[12px] font-semibold text-slate-500 flex-shrink-0">
                 {athlete.avatar}
               </div>
@@ -139,11 +136,11 @@ export const StaffDailyView = ({
                 </span>
               )}
               {canEdit && !session && <Plus className="w-4 h-4 text-slate-300" />}
-              <ChevronRight className="w-4 h-4 text-slate-300" />
+              <ChevronRight className="w-4 h-4 text-slate-300 md:hidden" />
             </button>
           );
         })}
-        {athletes.length === 0 && <div className="p-6 text-center text-[13px] text-slate-400">No athletes yet.</div>}
+        {athletes.length === 0 && <div className="p-6 text-center text-[13px] text-slate-400">No players match the current filter.</div>}
       </div>
     </div>
   );

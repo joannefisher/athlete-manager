@@ -140,7 +140,7 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
           )
         ) : page === 'exercise-bank' ? (
           <div className="max-w-2xl mx-auto p-4 md:p-6 space-y-3 w-full">
-            <ExerciseBankAdmin clubId={clubId} currentUserId={authUser.id} canEdit={canEdit} />
+            <ExerciseBankAdmin clubId={clubId} currentUserId={authUser.id} canEdit={canEdit} role={role} />
           </div>
         ) : (
           <GymRoot athletes={athletes} role={role} userId={authUser.id} clubId={clubId} />

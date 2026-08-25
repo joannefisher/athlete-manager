@@ -26,6 +26,8 @@ export interface GymExerciseGroup {
   typeName?: string; // convenience, joined in for display
 }
 
+export type GymExerciseStatus = 'pending' | 'approved';
+
 export interface GymExercise {
   id: string;
   clubId: string;
@@ -33,7 +35,34 @@ export interface GymExercise {
   exerciseGroupId: string;
   exerciseGroupName?: string; // convenience, joined in for display
   createdBy: string | null;
+  createdByName?: string; // convenience, joined in for display (Admin review queue)
   createdAt: string;
+  // Exercise-bank cleanup: every new exercise starts 'pending' so it's
+  // flagged to Admins, but stays usable immediately (non-blocking). Merging
+  // one exercise into another archives the merged-away row instead of
+  // deleting it, so history stays intact.
+  status: GymExerciseStatus;
+  archived: boolean;
+  mergedIntoId: string | null;
+}
+
+/** Audit trail row for a completed exercise merge (see gymApi.mergeExercises). */
+export interface GymExerciseMerge {
+  id: string;
+  clubId: string;
+  mergedExerciseId: string;
+  mergedExerciseName: string;
+  survivorExerciseId: string;
+  survivorExerciseName?: string;
+  mergedBy: string | null;
+  mergedAt: string;
+}
+
+/** A same-group candidate pair suggested by client-side name similarity. */
+export interface GymExerciseMergeSuggestion {
+  exercise: GymExercise;
+  candidate: GymExercise;
+  score: number; // 0..1, higher = more similar
 }
 
 export interface GymPlayerDefaultPrimary {

@@ -19,8 +19,10 @@ import {
   createExercise,
 } from './gymApi';
 import type { GymExercise, GymExerciseGroup, GymExerciseGroupType } from './types';
+import type { Role } from '../AthleteManager';
+import { ExerciseReviewPanel } from './ExerciseReviewPanel';
 
-export const ExerciseBankAdmin = ({ clubId, currentUserId, canEdit }: { clubId: string; currentUserId: string; canEdit: boolean }) => {
+export const ExerciseBankAdmin = ({ clubId, currentUserId, canEdit, role }: { clubId: string; currentUserId: string; canEdit: boolean; role: Role }) => {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [types, setTypes] = useState<GymExerciseGroupType[]>([]);
   const [groups, setGroups] = useState<GymExerciseGroup[]>([]);
@@ -174,7 +176,12 @@ export const ExerciseBankAdmin = ({ clubId, currentUserId, canEdit }: { clubId: 
           <div className="border-t">
             {exercises.map(ex => (
               <div key={ex.id} className="p-3 border-b last:border-b-0 flex justify-between items-center">
-                <span className="text-sm">{ex.name} <span className="text-xs text-slate-400">({ex.exerciseGroupName})</span></span>
+                <span className="text-sm">
+                  {ex.name} <span className="text-xs text-slate-400">({ex.exerciseGroupName})</span>
+                  {ex.status === 'pending' && (
+                    <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200">Pending review</span>
+                  )}
+                </span>
               </div>
             ))}
             {canEdit && (showAddExercise ? (
@@ -211,6 +218,8 @@ export const ExerciseBankAdmin = ({ clubId, currentUserId, canEdit }: { clubId: 
           </div>
         )}
       </div>
+
+      {role === 'Admin' && <ExerciseReviewPanel clubId={clubId} currentUserId={currentUserId} onChanged={load} />}
     </>
   );
 };
