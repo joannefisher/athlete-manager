@@ -61,6 +61,8 @@ export const GroupSessionEditor = ({
   const [showPicker, setShowPicker] = useState(false);
   const [addingNewExercise, setAddingNewExercise] = useState(false);
   const [newExerciseGroupId, setNewExerciseGroupId] = useState('');
+  const [creatingExercise, setCreatingExercise] = useState(false);
+  const [createExerciseError, setCreateExerciseError] = useState<string | null>(null);
   const [splitSide, setSplitSide] = useState(false);
   const [rightDraft, setRightDraft] = useState<{ sets: number | null; reps: number | null; load: string | null }>({ sets: null, reps: null, load: null });
 
@@ -97,11 +99,25 @@ export const GroupSessionEditor = ({
 
   const handleCreateExercise = async () => {
     if (!exerciseQuery.trim() || !newExerciseGroupId) return;
-    const created = await createExercise(clubId, exerciseQuery.trim(), newExerciseGroupId, userId);
-    onExercisesChanged();
-    setDraft(d => ({ ...d, exerciseId: created.id, exerciseName: created.name }));
-    setAddingNewExercise(false);
-    setShowPicker(false);
+    setCreatingExercise(true);
+    setCreateExerciseError(null);
+    try {
+      const created = await createExercise(clubId, exerciseQuery.trim(), newExerciseGroupId, userId);
+      onExercisesChanged();
+      setDraft(d => ({ ...d, exerciseId: created.id, exerciseName: created.name }));
+      setAddingNewExercise(false);
+      setShowPicker(false);
+    } catch (err: any) {
+      // Postgres unique-violation — most commonly this name was used by an
+      // exercise that's since been merged away (see migration 0006).
+      if (err?.code === '23505') {
+        setCreateExerciseError('An exercise with this name already exists in this group\'s exercise bank.');
+      } else {
+        setCreateExerciseError(err?.message || 'Failed to create this exercise — please try again.');
+      }
+    } finally {
+      setCreatingExercise(false);
+    }
   };
 
   const handleAddToGroup = async () => {
@@ -201,9 +217,15 @@ export const GroupSessionEditor = ({
                   <option value="">Select a group…</option>
                   {exerciseGroups.map(g => <option key={g.id} value={g.id}>{g.name}{g.typeName ? ` (${g.typeName})` : ''}</option>)}
                 </select>
+                {createExerciseError && (
+                  <p className="text-[11px] text-red-600">{createExerciseError}</p>
+                )}
                 <div className="flex gap-2">
-                  <button onClick={handleCreateExercise} disabled={!newExerciseGroupId} className="h-8 px-3 text-[12px] font-medium bg-slate-900 text-white rounded disabled:opacity-40">Create exercise</button>
-                  <button onClick={() => setAddingNewExercise(false)} className="h-8 px-3 text-[12px] text-slate-500">Cancel</button>
+                  <button onClick={handleCreateExercise} disabled={!newExerciseGroupId || creatingExercise} className="h-8 px-3 text-[12px] font-medium bg-slate-900 text-white rounded disabled:opacity-40 flex items-center gap-1.5">
+                    {creatingExercise && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                    {creatingExercise ? 'Creating…' : 'Create exercise'}
+                  </button>
+                  <button onClick={() => { setAddingNewExercise(false); setCreateExerciseError(null); }} disabled={creatingExercise} className="h-8 px-3 text-[12px] text-slate-500 disabled:opacity-40">Cancel</button>
                 </div>
               </div>
             )}
