@@ -1,40 +1,29 @@
 -- ============================================================================
 -- Gym module — initial schema
 -- ============================================================================
--- This is the FIRST migration file in this repo (no supabase/ folder existed
--- before). Run this by hand in the Supabase SQL editor (or via `supabase db
--- push` if you set up the CLI locally) against your project.
+-- This is the first Gym-related migration. Run it by hand in the Supabase
+-- SQL editor (or via `supabase db push` if you use the CLI) against your
+-- project.
 --
--- IMPORTANT — please read before running:
---   1. This repo has no other migrations checked in, so the RLS policies
---      below are written from scratch to mirror what the existing app
---      implies (every row is scoped to a club via `user_profiles.club_id`,
---      looked up from `auth.uid()`). Please skim these against whatever
---      policies you already have on `athletes`, `availability_records`, etc.
---      and adjust if your real convention differs.
---   2. `gen_random_uuid()` requires the `pgcrypto` extension, which Supabase
---      enables by default. If you get a "function does not exist" error,
---      run `create extension if not exists pgcrypto;` first.
---   3. `club_id` columns below are left WITHOUT a foreign key, because this
---      repo has no visible `clubs` table to reference. If you have one, add
---      `references clubs(id)` to each `club_id` column.
---   4. If `user_profiles.role` has a CHECK constraint limiting it to
---      ('Admin','S&C','Physio','Coach'), you'll need to drop and recreate
---      that constraint to also allow 'Player' — this migration does NOT do
---      that automatically since the constraint's exact name isn't known
---      here. Find it with:
---        select conname, pg_get_constraintdef(oid) from pg_constraint
---        where conrelid = 'user_profiles'::regclass and contype = 'c';
---      then `alter table user_profiles drop constraint <name>, add
---      constraint <name> check (role in ('Admin','S&C','Physio','Coach','Player'));`
+-- Confirmed against the real app code (AthleteManager.tsx / RehabPlanner.tsx)
+-- before writing this:
+--   - user_profiles already has role, club_id, full_name, linked_athlete_id
+--     (used to tie a 'Player' login to one row in athletes) — nothing to add
+--     there, this migration only reads it.
+--   - role already accepts 'Player' in production (RehabPlanner already
+--     serves that role), so there's no CHECK constraint to touch.
+--   - club_id columns are left WITHOUT a foreign key below, since no `clubs`
+--     table is visible in this repo. Add `references clubs(id)` if you have
+--     one.
+--   - `gen_random_uuid()` needs the `pgcrypto` extension, on by default on
+--     Supabase. If you hit "function does not exist", run
+--     `create extension if not exists pgcrypto;` first.
+--   - The RLS policies below are written from scratch (no other table's
+--     policies are visible in this repo to copy) to match the club_id /
+--     linked_athlete_id scoping the app code implies. Please skim them
+--     against your real policies on athletes/rehab_plans/etc. and adjust if
+--     your convention differs.
 -- ============================================================================
-
--- ── Player accounts ─────────────────────────────────────────────────────────
--- Lets a 'Player' role login resolve to exactly one athlete record.
-alter table user_profiles
-  add column if not exists athlete_id uuid references athletes(id) on delete set null;
-
-create index if not exists idx_user_profiles_athlete_id on user_profiles(athlete_id);
 
 -- ── Exercise group "types" (Anterior / Posterior today, editable list) ─────
 create table if not exists gym_exercise_group_types (
@@ -154,11 +143,10 @@ create index if not exists idx_gym_session_items_session on gym_session_items(se
 -- ============================================================================
 -- Row Level Security
 -- ============================================================================
--- Template pattern: every table is scoped to the caller's club via
--- user_profiles.club_id, and gym_sessions/gym_session_items additionally
--- restrict Players to their own athlete_id. Adjust to match your existing
--- policy style if it differs (e.g. if you use a security-definer helper
--- function elsewhere instead of an inline subquery).
+-- Every table is scoped to the caller's club via user_profiles.club_id;
+-- gym_sessions/gym_session_items additionally restrict Players to their own
+-- athlete via user_profiles.linked_athlete_id. Adjust to match your real
+-- policy style if it differs.
 
 alter table gym_exercise_group_types enable row level security;
 alter table gym_exercise_groups enable row level security;
@@ -170,8 +158,8 @@ alter table gym_sessions enable row level security;
 alter table gym_session_items enable row level security;
 
 -- Everyone in a club can read exercise groups/types/bank; only Admin/Coach
--- write (mirrors gymCanEdit in the app — adjust the role list here if you
--- change that helper).
+-- write (mirrors gymCanEdit in components/gym/permissions.ts — keep in sync
+-- if you change that helper).
 create policy gym_exercise_group_types_select on gym_exercise_group_types
   for select using (
     club_id in (select club_id from user_profiles where id = auth.uid())
@@ -205,19 +193,19 @@ create policy gym_exercises_write on gym_exercises
     club_id in (select club_id from user_profiles where id = auth.uid() and role in ('Admin','Coach'))
   );
 
--- Players may only see/set their own default primary; staff (Admin/Coach)
--- can see and set defaults for any athlete in their club.
+-- Players may only see/set their own default primary; staff can see any,
+-- Admin/Coach can set any.
 create policy gym_player_default_primary_select on gym_player_default_primary
   for select using (
-    athlete_id in (select athlete_id from user_profiles where id = auth.uid() and athlete_id is not null)
+    athlete_id in (select linked_athlete_id from user_profiles where id = auth.uid() and linked_athlete_id is not null)
     or club_id in (select club_id from user_profiles where id = auth.uid() and role in ('Admin','Coach','S&C','Physio'))
   );
 create policy gym_player_default_primary_write on gym_player_default_primary
   for all using (
-    athlete_id in (select athlete_id from user_profiles where id = auth.uid() and athlete_id is not null)
+    athlete_id in (select linked_athlete_id from user_profiles where id = auth.uid() and linked_athlete_id is not null)
     or club_id in (select club_id from user_profiles where id = auth.uid() and role in ('Admin','Coach'))
   ) with check (
-    athlete_id in (select athlete_id from user_profiles where id = auth.uid() and athlete_id is not null)
+    athlete_id in (select linked_athlete_id from user_profiles where id = auth.uid() and linked_athlete_id is not null)
     or club_id in (select club_id from user_profiles where id = auth.uid() and role in ('Admin','Coach'))
   );
 
@@ -244,12 +232,12 @@ create policy gym_session_group_members_all on gym_session_group_members
   );
 
 -- Staff (Admin/S&C/Physio/Coach) see every session in their club; a Player
--- only ever sees sessions for their own athlete_id. Writes limited to
+-- only ever sees sessions for their own linked athlete. Writes limited to
 -- Admin/Coach per gymCanEdit.
 create policy gym_sessions_select on gym_sessions
   for select using (
     club_id in (select club_id from user_profiles where id = auth.uid() and role in ('Admin','S&C','Physio','Coach'))
-    or athlete_id in (select athlete_id from user_profiles where id = auth.uid() and athlete_id is not null)
+    or athlete_id in (select linked_athlete_id from user_profiles where id = auth.uid() and linked_athlete_id is not null)
   );
 create policy gym_sessions_write on gym_sessions
   for all using (
@@ -263,7 +251,7 @@ create policy gym_session_items_select on gym_session_items
     session_id in (
       select id from gym_sessions where
         club_id in (select club_id from user_profiles where id = auth.uid() and role in ('Admin','S&C','Physio','Coach'))
-        or athlete_id in (select athlete_id from user_profiles where id = auth.uid() and athlete_id is not null)
+        or athlete_id in (select linked_athlete_id from user_profiles where id = auth.uid() and linked_athlete_id is not null)
     )
   );
 create policy gym_session_items_write on gym_session_items

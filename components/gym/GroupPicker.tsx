@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react';
 import { ArrowLeft, Check, Loader2, Plus, Trash2, X } from 'lucide-react';
-import type { Athlete } from '../AthleteManager';
+import type { GymAthlete as Athlete } from './types';
 import type { GymSessionGroup } from './types';
 import { createSessionGroup, setSessionGroupMembers, deleteSessionGroup } from './gymApi';
 

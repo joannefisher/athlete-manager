@@ -6,7 +6,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { Loader2 } from 'lucide-react';
-import type { Athlete, Role } from '../AthleteManager';
+import type { Role } from '../AthleteManager';
 import { WeekStrip, GymViewMode, todayIso } from './WeekStrip';
 import { StaffDailyView } from './StaffDailyView';
 import { StaffWeeklyView } from './StaffWeeklyView';
@@ -18,8 +18,8 @@ import {
   fetchExercises,
   fetchSessionGroups,
 } from './gymApi';
-import type { GymExerciseGroup, GymExerciseGroupType, GymExercise, GymSessionGroup } from './types';
-import { gymCanEdit } from '../AthleteManager';
+import type { GymAthlete as Athlete, GymExerciseGroup, GymExerciseGroupType, GymExercise, GymSessionGroup } from './types';
+import { gymCanEdit } from './permissions';
 
 export const GymRoot = ({ athletes, role, userId, clubId }: { athletes: Athlete[]; role: Role; userId: string; clubId: string }) => {
   const [selectedDate, setSelectedDate] = useState(todayIso());

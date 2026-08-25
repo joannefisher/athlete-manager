@@ -6,7 +6,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { Loader2 } from 'lucide-react';
-import type { Athlete } from '../AthleteManager';
+import type { GymAthlete as Athlete } from './types';
 import type { GymSession } from './types';
 import { fetchSessionsForDateRange } from './gymApi';
 import { getWeekDates, todayIso } from './WeekStrip';

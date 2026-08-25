@@ -1,7 +1,16 @@
 // components/gym/types.ts
-// Shared types for the Gym module. Kept separate from AthleteManager.tsx's
-// own interfaces (Athlete, TeamPosition, etc.) — imported alongside them
-// where needed.
+// Shared types for the Gym module. Gym is its own top-level app (a sibling
+// of TrainingPlanner/RehabPlanner/MainSchedule under the AthleteManager.tsx
+// app selector), so it deliberately does NOT import Athlete/etc. from those
+// other apps' internal (unexported) types — it fetches and shapes its own
+// minimal athlete data instead.
+
+/** Minimal athlete shape Gym needs for rosters — fetched independently by Gym.tsx. */
+export interface GymAthlete {
+  id: string;
+  name: string;
+  avatar?: string | null;
+}
 
 export interface GymExerciseGroupType {
   id: string;

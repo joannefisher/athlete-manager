@@ -5,7 +5,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { ChevronRight, Dumbbell, Loader2, Plus, Trash2, Users } from 'lucide-react';
-import type { Athlete } from '../AthleteManager';
+import type { GymAthlete as Athlete } from './types';
 import type { GymExerciseGroup, GymExerciseGroupType, GymSession, GymSessionGroup } from './types';
 import { fetchSessionsForDate, deleteSession, assignSessionToGroup } from './gymApi';
 

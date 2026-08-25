@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Target, Zap, Calendar, Loader2, X, AlertCircle, Check, Plus, Trash2, Users, Link } from 'lucide-react';
+import { Target, Zap, Calendar, Loader2, X, AlertCircle, Check, Plus, Trash2, Users, Link, Dumbbell } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { TrainingPlanner } from './TrainingPlanner';
 import { MainSchedule } from './MainSchedule';
 import { RehabPlanner } from './RehabPlanner';
+import { Gym } from './Gym';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 export type Role = 'Admin' | 'S&C' | 'Physio' | 'Coach' | 'Player';
@@ -44,6 +45,14 @@ const APPS: AppDef[] = [
     Icon: Calendar,
     color: 'bg-violet-600',
     allowedRoles: ['Admin', 'S&C', 'Physio', 'Coach'],
+  },
+  {
+    id: 'gym',
+    label: 'Gym',
+    description: 'Strength & conditioning session plans',
+    Icon: Dumbbell,
+    color: 'bg-orange-600',
+    allowedRoles: ['Admin', 'S&C', 'Physio', 'Coach', 'Player'],
   },
 ];
 
@@ -363,8 +372,12 @@ export default function AthleteManager() {
           ? (data.role.trim() as Role) : 'Coach';
         setRole(loadedRole);
         setClubId(data.club_id);
-        // Players only have one app — skip landing page
-        if (loadedRole === 'Player') setActiveApp('rehab-planner');
+        // If this role only has one app available, skip straight to it
+        // instead of showing a landing page with a single tile. (Players
+        // used to be hardcoded to Rehab Planner here — now that they can
+        // also have Gym, this generalizes to whatever the role can see.)
+        const roleApps = APPS.filter(a => a.allowedRoles.includes(loadedRole));
+        if (roleApps.length === 1) setActiveApp(roleApps[0].id);
         setAuthLoading(false);
         return;
       }
@@ -406,6 +419,8 @@ export default function AthleteManager() {
     return <MainSchedule role={role} clubId={clubId} authUser={authUser} onBack={() => setActiveApp(null)} />;
   if (activeApp === 'rehab-planner')
     return <RehabPlanner role={role} clubId={clubId} authUser={authUser} onBack={() => setActiveApp(null)} />;
+  if (activeApp === 'gym')
+    return <Gym role={role} clubId={clubId} authUser={authUser} onBack={() => setActiveApp(null)} />;
 
   return (
     <LandingPage role={role} clubId={clubId} currentUserId={authUser.id} onOpenApp={setActiveApp} />

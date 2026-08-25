@@ -3,8 +3,8 @@
 // exercise-group "types" (Anterior/Posterior + whatever else gets added
 // later), the exercise groups themselves (e.g. "Squat", "Hinge"), and the
 // exercise bank (individual exercises, each belonging to one group).
-// Rendered as three collapsible cards inside SetupPage, matching its
-// existing Team Structure / Drill Types / Season Dates sections.
+// Rendered as three collapsible cards inside Gym's own "Exercise Bank" tab.
+// Read-only (no Add/Edit/Delete controls) when canEdit is false.
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { ChevronDown, ChevronUp, Edit2, Plus, Trash2 } from 'lucide-react';
@@ -20,7 +20,7 @@ import {
 } from './gymApi';
 import type { GymExercise, GymExerciseGroup, GymExerciseGroupType } from './types';
 
-export const ExerciseBankAdmin = ({ clubId, currentUserId }: { clubId: string; currentUserId: string }) => {
+export const ExerciseBankAdmin = ({ clubId, currentUserId, canEdit }: { clubId: string; currentUserId: string; canEdit: boolean }) => {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [types, setTypes] = useState<GymExerciseGroupType[]>([]);
   const [groups, setGroups] = useState<GymExerciseGroup[]>([]);
@@ -67,16 +67,18 @@ export const ExerciseBankAdmin = ({ clubId, currentUserId }: { clubId: string; c
             {types.map(t => (
               <div key={t.id} className="p-3 border-b last:border-b-0 text-sm">{t.name}</div>
             ))}
-            <div className="p-3 border-t flex gap-2">
-              <input value={newTypeName} onChange={e => setNewTypeName(e.target.value)} placeholder="New type name"
-                className="flex-1 px-2 py-1.5 text-sm border rounded" />
-              <button
-                onClick={async () => { if (!newTypeName.trim()) return; await createExerciseGroupType(clubId, newTypeName.trim()); setNewTypeName(''); load(); }}
-                className="px-3 py-1.5 bg-slate-800 text-white rounded text-xs font-medium"
-              >
-                Add
-              </button>
-            </div>
+            {canEdit && (
+              <div className="p-3 border-t flex gap-2">
+                <input value={newTypeName} onChange={e => setNewTypeName(e.target.value)} placeholder="New type name"
+                  className="flex-1 px-2 py-1.5 text-sm border rounded" />
+                <button
+                  onClick={async () => { if (!newTypeName.trim()) return; await createExerciseGroupType(clubId, newTypeName.trim()); setNewTypeName(''); load(); }}
+                  className="px-3 py-1.5 bg-slate-800 text-white rounded text-xs font-medium"
+                >
+                  Add
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -114,22 +116,24 @@ export const ExerciseBankAdmin = ({ clubId, currentUserId }: { clubId: string; c
                 ) : (
                   <div className="flex justify-between items-center">
                     <span className="text-sm">{g.name} {g.typeName && <span className="text-xs text-slate-400">({g.typeName})</span>}</span>
-                    <div className="flex gap-1">
-                      <button onClick={() => { setEditingGroupId(g.id); setEditGroupData({ name: g.name, typeId: g.typeId || '' }); }} className="p-1 hover:bg-slate-100 rounded">
-                        <Edit2 className="w-4 h-4 text-slate-500" />
-                      </button>
-                      <button
-                        onClick={async () => { if (!window.confirm('Delete this group? Exercises in it will need reassigning first.')) return; await deleteExerciseGroup(g.id); load(); }}
-                        className="p-1 hover:bg-red-50 rounded"
-                      >
-                        <Trash2 className="w-4 h-4 text-red-500" />
-                      </button>
-                    </div>
+                    {canEdit && (
+                      <div className="flex gap-1">
+                        <button onClick={() => { setEditingGroupId(g.id); setEditGroupData({ name: g.name, typeId: g.typeId || '' }); }} className="p-1 hover:bg-slate-100 rounded">
+                          <Edit2 className="w-4 h-4 text-slate-500" />
+                        </button>
+                        <button
+                          onClick={async () => { if (!window.confirm('Delete this group? Exercises in it will need reassigning first.')) return; await deleteExerciseGroup(g.id); load(); }}
+                          className="p-1 hover:bg-red-50 rounded"
+                        >
+                          <Trash2 className="w-4 h-4 text-red-500" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
             ))}
-            {showAddGroup ? (
+            {canEdit && (showAddGroup ? (
               <div className="p-3 border-t space-y-2">
                 <input value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder="Group name (e.g. Squat)" className="w-full px-2 py-1.5 text-sm border rounded" />
                 <select value={newGroupTypeId} onChange={e => setNewGroupTypeId(e.target.value)} className="w-full px-2 py-1.5 text-sm border rounded">
@@ -152,7 +156,7 @@ export const ExerciseBankAdmin = ({ clubId, currentUserId }: { clubId: string; c
                   <Plus className="w-4 h-4 inline mr-1" />Add Exercise Group
                 </button>
               </div>
-            )}
+            ))}
           </div>
         )}
       </div>
@@ -173,7 +177,7 @@ export const ExerciseBankAdmin = ({ clubId, currentUserId }: { clubId: string; c
                 <span className="text-sm">{ex.name} <span className="text-xs text-slate-400">({ex.exerciseGroupName})</span></span>
               </div>
             ))}
-            {showAddExercise ? (
+            {canEdit && (showAddExercise ? (
               <div className="p-3 border-t space-y-2">
                 <input value={newExerciseName} onChange={e => setNewExerciseName(e.target.value)} placeholder="Exercise name" className="w-full px-2 py-1.5 text-sm border rounded" />
                 <select value={newExerciseGroupId} onChange={e => setNewExerciseGroupId(e.target.value)} className="w-full px-2 py-1.5 text-sm border rounded">
@@ -203,7 +207,7 @@ export const ExerciseBankAdmin = ({ clubId, currentUserId }: { clubId: string; c
                   <Plus className="w-4 h-4 inline mr-1" />Add Exercise
                 </button>
               </div>
-            )}
+            ))}
           </div>
         )}
       </div>

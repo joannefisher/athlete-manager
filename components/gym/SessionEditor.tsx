@@ -6,7 +6,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { ArrowLeft, Check, Loader2, Plus, RefreshCw, StickyNote, Trash2 } from 'lucide-react';
-import type { Athlete } from '../AthleteManager';
+import type { GymAthlete as Athlete } from './types';
 import type { GymExercise, GymExerciseGroup, GymSession, GymSessionItem, GymSessionItemDraft } from './types';
 import {
   fetchAthleteSessionsForDateRange,
