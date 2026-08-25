@@ -7,11 +7,12 @@
 // highlighted so it's clear which row the right-hand panel reflects.
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { ChevronRight, Dumbbell, HeartPulse, Loader2, Plus, Trash2, Users } from 'lucide-react';
+import { ChevronRight, HeartPulse, Loader2, Plus, Trash2, Users } from 'lucide-react';
 import type { GymAthlete as Athlete } from './types';
 import type { GymExercise, GymExerciseGroup, GymExerciseGroupType, GymSession, GymSessionGroup } from './types';
 import { fetchSessionsForDate, deleteSession, getOrCreateSession, saveSessionItem } from './gymApi';
 import { useGymUndo } from './GymUndoContext';
+import { SessionItemChip } from './SessionItemChip';
 
 export const StaffDailyView = ({
   date,
@@ -145,33 +146,38 @@ export const StaffDailyView = ({
             <button
               key={athlete.id}
               onClick={() => onOpenSession(athlete.id, date)}
-              className={`w-full flex items-center gap-3 px-3.5 py-3 text-left relative ${active ? 'bg-blue-50/70' : 'hover:bg-slate-50'}`}
+              className={`w-full flex items-start gap-3 px-3.5 py-3 text-left relative ${active ? 'bg-blue-50/70' : 'hover:bg-slate-50'}`}
             >
               {active && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-500" />}
-              <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-[12px] font-semibold text-slate-500 flex-shrink-0">
+              <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-[12px] font-semibold text-slate-500 flex-shrink-0 mt-0.5">
                 {athlete.avatar}
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-[13px] font-medium text-slate-800 truncate flex items-center gap-1.5">
+              <div className="flex-1 min-w-0 text-left">
+                <p className="text-[13px] font-medium text-slate-800 truncate flex items-center gap-1.5 mb-1">
                   {athlete.name}
                   {rehabAthleteIds?.has(athlete.id) && (
-                    <span title="On the rehab plan this week" className="flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-rose-50 text-rose-600 border border-rose-200">
+                    <span title="On the rehab plan this week" className="flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-rose-50 text-rose-600 border border-rose-200 flex-shrink-0">
                       <HeartPulse className="w-2.5 h-2.5" /> Rehab
                     </span>
                   )}
                 </p>
-                <p className="text-[11px] text-slate-400 flex items-center gap-1">
-                  <Dumbbell className="w-3 h-3" />
-                  {itemCount > 0 ? `${itemCount} item${itemCount !== 1 ? 's' : ''} planned` : 'No session planned'}
-                </p>
+                {itemCount > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {(session!.items || []).map(item => (
+                      <SessionItemChip key={item.id} item={item} />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-300 italic">No session planned</p>
+                )}
               </div>
               {canEdit && session && (
-                <span onClick={e => handleDelete(e, session, athlete.name)} className="p-1.5 rounded hover:bg-red-50 text-slate-300 hover:text-red-500">
+                <span onClick={e => handleDelete(e, session, athlete.name)} className="p-1.5 rounded hover:bg-red-50 text-slate-300 hover:text-red-500 flex-shrink-0 mt-0.5">
                   <Trash2 className="w-3.5 h-3.5" />
                 </span>
               )}
-              {canEdit && !session && <Plus className="w-4 h-4 text-slate-300" />}
-              <ChevronRight className="w-4 h-4 text-slate-300 md:hidden" />
+              {canEdit && !session && <Plus className="w-4 h-4 text-slate-300 flex-shrink-0 mt-1.5" />}
+              <ChevronRight className="w-4 h-4 text-slate-300 md:hidden flex-shrink-0 mt-1.5" />
             </button>
           );
         })}

@@ -40,6 +40,7 @@ export const WeekStrip = ({
   viewMode,
   onViewModeChange,
   countForDate,
+  extraControls,
 }: {
   selectedDate: string;
   onDateChange: (date: string) => void;
@@ -47,6 +48,8 @@ export const WeekStrip = ({
   onViewModeChange: (mode: GymViewMode) => void;
   /** Optional per-date badge count (e.g. number of sessions planned that day). */
   countForDate?: (date: string) => number;
+  /** Optional extra control(s) rendered at the end of the Day/Week toolbar row — e.g. a compact player filter. */
+  extraControls?: React.ReactNode;
 }) => {
   const today = todayIso();
   const weekDates = getWeekDates(selectedDate);
@@ -55,7 +58,7 @@ export const WeekStrip = ({
   return (
     <div className="mb-3">
       {/* Day / Week toggle + date picker + Today */}
-      <div className="bg-white rounded-lg border border-slate-200 p-3 mb-3 flex items-center gap-2">
+      <div className="bg-white rounded-lg border border-slate-200 p-3 mb-3 flex items-center gap-2 flex-wrap">
         <div className="flex bg-slate-100 rounded-md p-0.5 text-[12px] font-medium">
           <button
             onClick={() => onViewModeChange('day')}
@@ -89,6 +92,8 @@ export const WeekStrip = ({
         >
           <RotateCcw className="w-3 h-3" /> Today
         </button>
+
+        {extraControls}
       </div>
 
       {/* 7-day tab strip */}

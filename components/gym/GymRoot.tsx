@@ -8,7 +8,7 @@
 // full-screen session view, since a two-pane layout doesn't fit a phone.
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { ChevronDown, Loader2, Users } from 'lucide-react';
+import { Filter, Loader2 } from 'lucide-react';
 import type { Role } from '../AthleteManager';
 import { WeekStrip, GymViewMode, getWeekDates, todayIso } from './WeekStrip';
 import { StaffDailyView } from './StaffDailyView';
@@ -182,6 +182,57 @@ export const GymRoot = ({
     );
   }
 
+  // Player selection is a narrowing tool used occasionally, not the main event —
+  // it lives as a compact icon button + popover inside WeekStrip's toolbar rather
+  // than a full-width panel above the roster (round 4 feedback).
+  const isFiltered = selectedAthleteIds !== null || rehabOnly;
+  const playerFilterControl = (
+    <div className="relative">
+      <button
+        onClick={() => setShowPlayerFilter(v => !v)}
+        className={`flex items-center gap-1.5 h-8 px-2.5 rounded-md border text-[11.5px] font-medium ${
+          isFiltered ? 'border-slate-300 text-slate-700 bg-white' : 'border-slate-200 text-slate-500 bg-white hover:bg-slate-50'
+        }`}
+      >
+        <Filter className="w-3.5 h-3.5" />
+        Players
+        {isFiltered && (
+          <span className="bg-slate-900 text-white text-[9.5px] font-bold rounded-full px-1.5 py-0.5 leading-none">
+            {visibleAthletes.length}/{athletes.length}
+          </span>
+        )}
+      </button>
+      {showPlayerFilter && (
+        <div className="absolute right-0 top-9 z-20 w-72 bg-white border border-slate-200 rounded-lg shadow-lg p-3">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Players</span>
+            {selectedAthleteIds !== null && (
+              <button onClick={() => setSelectedAthleteIds(null)} className="text-[11px] text-blue-600 hover:underline">Show all</button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1.5 mb-3 max-h-40 overflow-y-auto">
+            {athletes.map(a => {
+              const active = selectedAthleteIds === null || selectedAthleteIds.includes(a.id);
+              return (
+                <button
+                  key={a.id}
+                  onClick={() => togglePlayerFilter(a.id)}
+                  className={`text-[11px] px-2 py-1 rounded-full border ${active ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-400 border-slate-200'}`}
+                >
+                  {a.name}
+                </button>
+              );
+            })}
+          </div>
+          <label className="flex items-center gap-1.5 cursor-pointer">
+            <input type="checkbox" checked={rehabOnly} onChange={e => setRehabOnly(e.target.checked)} className="w-3.5 h-3.5 accent-blue-600" />
+            <span className="text-[11px] font-medium text-slate-500">Rehab only — same players shown in Rehab Planner this week ({rehabAthleteIds.size})</span>
+          </label>
+        </div>
+      )}
+    </div>
+  );
+
   const sessionEditor = editingAthleteId ? (
     <SessionEditor
       athlete={athletes.find(a => a.id === editingAthleteId)}
@@ -212,48 +263,13 @@ export const GymRoot = ({
 
       <div className={mobileEditorOpen ? 'hidden md:block' : ''}>
         <div className="max-w-full xl:max-w-7xl mx-auto p-4 md:p-6">
-          <div className="bg-white rounded-lg border border-slate-200 mb-3 overflow-hidden">
-            <button
-              onClick={() => setShowPlayerFilter(v => !v)}
-              className="w-full flex items-center justify-between px-3 py-2 text-[12px] font-medium text-slate-600 hover:bg-slate-50"
-            >
-              <span className="flex items-center gap-1.5">
-                <Users className="w-3.5 h-3.5 text-slate-400" />
-                {selectedAthleteIds === null ? `All players (${athletes.length})` : `${selectedAthleteIds.length} of ${athletes.length} players`}
-              </span>
-              <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${showPlayerFilter ? 'rotate-180' : ''}`} />
-            </button>
-            {showPlayerFilter && (
-              <div className="px-3 pb-3 pt-1 border-t border-slate-100">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[11px] text-slate-400">Tap to narrow the roster down</span>
-                  {selectedAthleteIds !== null && (
-                    <button onClick={() => setSelectedAthleteIds(null)} className="text-[11px] text-blue-600 hover:underline">Show all</button>
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-1.5 mb-2.5">
-                  {athletes.map(a => {
-                    const active = selectedAthleteIds === null || selectedAthleteIds.includes(a.id);
-                    return (
-                      <button
-                        key={a.id}
-                        onClick={() => togglePlayerFilter(a.id)}
-                        className={`text-[11px] px-2 py-1 rounded-full border ${active ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-400 border-slate-200'}`}
-                      >
-                        {a.name}
-                      </button>
-                    );
-                  })}
-                </div>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input type="checkbox" checked={rehabOnly} onChange={e => setRehabOnly(e.target.checked)} className="w-3.5 h-3.5 accent-blue-600" />
-                  <span className="text-[11px] font-medium text-slate-500">Rehab only — same players shown in Rehab Planner this week ({rehabAthleteIds.size})</span>
-                </label>
-              </div>
-            )}
-          </div>
-
-          <WeekStrip selectedDate={selectedDate} onDateChange={setSelectedDate} viewMode={viewMode} onViewModeChange={setViewMode} />
+          <WeekStrip
+            selectedDate={selectedDate}
+            onDateChange={setSelectedDate}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+            extraControls={playerFilterControl}
+          />
 
           <div className="flex flex-col md:flex-row gap-4 items-start">
             <div className="flex-1 min-w-0 w-full">
