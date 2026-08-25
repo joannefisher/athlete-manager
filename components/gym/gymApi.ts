@@ -16,6 +16,9 @@ import type {
   GymSession,
   GymSessionItem,
   GymSessionItemDraft,
+  GymGroupSessionPlan,
+  GymGroupPlanItem,
+  GymGroupPlanConflict,
 } from './types';
 
 // ── Exercise group types (Anterior / Posterior / …) ─────────────────────────
@@ -417,6 +420,7 @@ function mapSessionItem(r: any): GymSessionItem {
     effectiveExerciseName: r.effective_exercise?.name,
     wasSwapped: r.was_swapped,
     noteText: r.note_text,
+    planItemId: r.plan_item_id ?? null,
     createdBy: r.created_by,
     createdByName: r.creator?.full_name,
     createdAt: r.created_at,
@@ -426,7 +430,7 @@ function mapSessionItem(r: any): GymSessionItem {
 }
 
 const SESSION_ITEM_SELECT =
-  'id, session_id, sort_order, item_type, exercise_id, sets, reps, load, is_primary, side, effective_exercise_id, was_swapped, note_text, created_by, created_at, updated_by, updated_at, ' +
+  'id, session_id, sort_order, item_type, exercise_id, sets, reps, load, is_primary, side, effective_exercise_id, was_swapped, note_text, plan_item_id, created_by, created_at, updated_by, updated_at, ' +
   'exercise:gym_exercises!gym_session_items_exercise_id_fkey(name), ' +
   'effective_exercise:gym_exercises!gym_session_items_effective_exercise_id_fkey(name), ' +
   'creator:user_profiles!gym_session_items_created_by_fkey(full_name)';
@@ -689,7 +693,7 @@ export async function reorderSessionItems(items: { id: string; sortOrder: number
   }
 }
 
-function itemToDraft(item: GymSessionItem): GymSessionItemDraft {
+export function itemToDraft(item: GymSessionItem): GymSessionItemDraft {
   return {
     itemType: item.itemType,
     exerciseId: item.exerciseId,
@@ -781,4 +785,333 @@ export async function addItemToGroupSession(
     saved.push(await saveSessionItem(session.id, athleteId, draft, exerciseGroupId, sortOrder, userId));
   }
   return saved;
+}
+
+// ── Group session plans (UI 2 "All" mode) ───────────────────────────────
+// A canonical, per-group-per-date exercise list, separate from each member's
+// own gym_sessions/gym_session_items row. Editing it fans changes out to
+// every member — see syncGroupPlanItemChange()/resolveGroupPlanConflict()
+// below for exactly what auto-applies vs needs a manual decision.
+
+function mapGroupPlanItem(r: any): GymGroupPlanItem {
+  return {
+    id: r.id,
+    planId: r.plan_id,
+    sortOrder: r.sort_order,
+    itemType: r.item_type,
+    exerciseId: r.exercise_id,
+    exerciseName: r.exercise?.name,
+    sets: r.sets,
+    reps: r.reps,
+    load: r.load,
+    isPrimary: r.is_primary,
+    side: r.side || 'both',
+    noteText: r.note_text,
+    createdBy: r.created_by,
+    createdByName: r.creator?.full_name,
+    createdAt: r.created_at,
+    updatedBy: r.updated_by,
+    updatedAt: r.updated_at,
+  };
+}
+
+const GROUP_PLAN_ITEM_SELECT =
+  'id, plan_id, sort_order, item_type, exercise_id, sets, reps, load, is_primary, side, note_text, created_by, created_at, updated_by, updated_at, ' +
+  'exercise:gym_exercises!gym_group_plan_items_exercise_id_fkey(name), ' +
+  'creator:user_profiles!gym_group_plan_items_created_by_fkey(full_name)';
+
+export function groupPlanItemToDraft(item: GymGroupPlanItem): GymSessionItemDraft {
+  return {
+    itemType: item.itemType,
+    exerciseId: item.exerciseId,
+    exerciseName: item.exerciseName,
+    sets: item.sets,
+    reps: item.reps,
+    load: item.load,
+    isPrimary: item.isPrimary,
+    side: item.side,
+    noteText: item.noteText,
+  };
+}
+
+/** Get-or-create the plan "container" row for one group on one date. */
+export async function getOrCreateGroupPlan(clubId: string, groupId: string, date: string, createdBy: string): Promise<GymGroupSessionPlan> {
+  const { data: existing, error: findErr } = await supabase
+    .from('gym_group_session_plans')
+    .select('id, club_id, group_id, date, created_by, created_at, updated_by, updated_at')
+    .eq('group_id', groupId)
+    .eq('date', date)
+    .maybeSingle();
+  if (findErr) throw findErr;
+  if (existing) {
+    return {
+      id: existing.id,
+      clubId: existing.club_id,
+      groupId: existing.group_id,
+      date: existing.date,
+      createdBy: existing.created_by,
+      createdAt: existing.created_at,
+      updatedBy: existing.updated_by,
+      updatedAt: existing.updated_at,
+    };
+  }
+  const { data, error } = await supabase
+    .from('gym_group_session_plans')
+    .insert({ club_id: clubId, group_id: groupId, date, created_by: createdBy })
+    .select('id, club_id, group_id, date, created_by, created_at, updated_by, updated_at')
+    .single();
+  if (error) throw error;
+  return {
+    id: data.id,
+    clubId: data.club_id,
+    groupId: data.group_id,
+    date: data.date,
+    createdBy: data.created_by,
+    createdAt: data.created_at,
+    updatedBy: data.updated_by,
+    updatedAt: data.updated_at,
+  };
+}
+
+export async function fetchGroupPlanItems(planId: string): Promise<GymGroupPlanItem[]> {
+  const { data, error } = await supabase
+    .from('gym_group_plan_items')
+    .select(GROUP_PLAN_ITEM_SELECT)
+    .eq('plan_id', planId)
+    .order('sort_order');
+  if (error) throw error;
+  return (data || []).map(mapGroupPlanItem);
+}
+
+/** Save (create or update) one group plan item. Pass `draft.id` as the plan item's own id to edit it. */
+export async function saveGroupPlanItem(
+  planId: string,
+  draft: GymSessionItemDraft,
+  sortOrder: number,
+  userId: string
+): Promise<GymGroupPlanItem> {
+  const payload: any = {
+    plan_id: planId,
+    sort_order: sortOrder,
+    item_type: draft.itemType,
+    exercise_id: draft.itemType === 'exercise' ? draft.exerciseId : null,
+    sets: draft.itemType === 'exercise' ? draft.sets : null,
+    reps: draft.itemType === 'exercise' ? draft.reps : null,
+    load: draft.itemType === 'exercise' ? draft.load : null,
+    is_primary: draft.itemType === 'exercise' ? draft.isPrimary : false,
+    side: draft.itemType === 'exercise' ? draft.side : 'both',
+    note_text: draft.itemType === 'note' ? draft.noteText : null,
+    updated_by: userId,
+    updated_at: new Date().toISOString(),
+  };
+  if (draft.id) {
+    const { data, error } = await supabase.from('gym_group_plan_items').update(payload).eq('id', draft.id).select(GROUP_PLAN_ITEM_SELECT).single();
+    if (error) throw error;
+    return mapGroupPlanItem(data);
+  }
+  const { data, error } = await supabase.from('gym_group_plan_items').insert({ ...payload, created_by: userId }).select(GROUP_PLAN_ITEM_SELECT).single();
+  if (error) throw error;
+  return mapGroupPlanItem(data);
+}
+
+export async function deleteGroupPlanItem(itemId: string): Promise<void> {
+  const { error } = await supabase.from('gym_group_plan_items').delete().eq('id', itemId);
+  if (error) throw error;
+}
+
+export async function reorderGroupPlanItems(items: { id: string; sortOrder: number }[]): Promise<void> {
+  for (const item of items) {
+    const { error } = await supabase.from('gym_group_plan_items').update({ sort_order: item.sortOrder }).eq('id', item.id);
+    if (error) throw error;
+  }
+}
+
+/**
+ * Called right after a plan item is added, edited, or deleted — pass `before`
+ * as null for a brand-new item, `after` as null for a deletion. Immediately
+ * applies the change to every member whose own item still matches the OLD
+ * plan values (safe — they never touched it) and returns a conflict for
+ * anyone who'd modified or removed their own copy, so the caller can show a
+ * per-athlete accept-new/keep-current confirmation. An individual's own
+ * additions (items with no plan_item_id at all) are never touched.
+ */
+export async function syncGroupPlanItemChange(
+  clubId: string,
+  groupId: string,
+  memberAthleteIds: string[],
+  date: string,
+  planItemId: string,
+  before: GymGroupPlanItem | null,
+  after: GymGroupPlanItem | null,
+  exerciseGroupIdFor: (exerciseId: string) => string | null,
+  userId: string
+): Promise<{ appliedCount: number; conflicts: GymGroupPlanConflict[] }> {
+  const memberSessions = await fetchSessionsForDateRange(clubId, [date]);
+  const conflicts: GymGroupPlanConflict[] = [];
+  let appliedCount = 0;
+
+  const sameAsPlan = (item: GymSessionItem, plan: GymGroupPlanItem) =>
+    item.itemType === plan.itemType &&
+    item.exerciseId === plan.exerciseId &&
+    item.sets === plan.sets &&
+    item.reps === plan.reps &&
+    item.load === plan.load &&
+    item.isPrimary === plan.isPrimary &&
+    item.side === plan.side &&
+    item.noteText === plan.noteText;
+
+  for (const athleteId of memberAthleteIds) {
+    const session = memberSessions.find(s => s.athleteId === athleteId);
+    const memberItem = session?.items?.find(i => i.planItemId === planItemId) || null;
+
+    if (!before) {
+      // Brand-new plan item — nothing to conflict with, add it for everyone.
+      if (!after) continue;
+      const s = await getOrCreateSession(clubId, athleteId, date, userId, groupId);
+      const sortOrder = session?.items?.length ?? 0;
+      const eg = after.itemType === 'exercise' && after.exerciseId ? exerciseGroupIdFor(after.exerciseId) : null;
+      const saved = await saveSessionItem(s.id, athleteId, groupPlanItemToDraft(after), eg, sortOrder, userId);
+      const { error } = await supabase.from('gym_session_items').update({ plan_item_id: planItemId }).eq('id', saved.id);
+      if (error) throw error;
+      appliedCount++;
+      continue;
+    }
+
+    if (!memberItem) {
+      // The member already removed their own copy of this item.
+      if (!after) continue; // plan deleted it too — nothing left to reconcile
+      conflicts.push({
+        athleteId,
+        planItemId,
+        groupId,
+        date,
+        kind: 'edit',
+        memberItemId: null,
+        memberSortOrder: null,
+        currentDraft: null,
+        newDraft: groupPlanItemToDraft(after),
+        exerciseGroupId: after.itemType === 'exercise' && after.exerciseId ? exerciseGroupIdFor(after.exerciseId) : null,
+      });
+      continue;
+    }
+
+    const unmodified = sameAsPlan(memberItem, before);
+
+    if (!after) {
+      // Plan item deleted.
+      if (unmodified) {
+        await deleteSessionItem(memberItem.id);
+        appliedCount++;
+      } else {
+        conflicts.push({
+          athleteId,
+          planItemId,
+          groupId,
+          date,
+          kind: 'delete',
+          memberItemId: memberItem.id,
+          memberSortOrder: memberItem.sortOrder,
+          currentDraft: itemToDraft(memberItem),
+          newDraft: null,
+          exerciseGroupId: null,
+        });
+      }
+      continue;
+    }
+
+    // Plan item edited.
+    if (unmodified) {
+      const eg = after.itemType === 'exercise' && after.exerciseId ? exerciseGroupIdFor(after.exerciseId) : null;
+      const saved = await saveSessionItem(memberItem.sessionId, athleteId, { ...groupPlanItemToDraft(after), id: memberItem.id }, eg, memberItem.sortOrder, userId);
+      const { error } = await supabase.from('gym_session_items').update({ plan_item_id: planItemId }).eq('id', saved.id);
+      if (error) throw error;
+      appliedCount++;
+    } else {
+      conflicts.push({
+        athleteId,
+        planItemId,
+        groupId,
+        date,
+        kind: 'edit',
+        memberItemId: memberItem.id,
+        memberSortOrder: memberItem.sortOrder,
+        currentDraft: itemToDraft(memberItem),
+        newDraft: groupPlanItemToDraft(after),
+        exerciseGroupId: after.itemType === 'exercise' && after.exerciseId ? exerciseGroupIdFor(after.exerciseId) : null,
+      });
+    }
+  }
+
+  return { appliedCount, conflicts };
+}
+
+/** Apply one conflict's decision — `accept: true` takes the plan's new value, `false` leaves the member's own item exactly as it is. */
+export async function resolveGroupPlanConflict(clubId: string, conflict: GymGroupPlanConflict, accept: boolean, userId: string): Promise<void> {
+  if (!accept) return; // "keep current" — member's existing state (including "already removed") is left untouched
+  if (!conflict.newDraft) {
+    // The plan removed this item and the coach accepted that for a member who'd customized it.
+    if (conflict.memberItemId) await deleteSessionItem(conflict.memberItemId);
+    return;
+  }
+  const session = await getOrCreateSession(clubId, conflict.athleteId, conflict.date, userId, conflict.groupId);
+  let sortOrder = conflict.memberSortOrder;
+  if (sortOrder == null) {
+    const existing = await fetchAthleteSessionsForDateRange(conflict.athleteId, [conflict.date]);
+    sortOrder = existing[0]?.items?.length ?? 0;
+  }
+  const draft: GymSessionItemDraft = conflict.memberItemId ? { ...conflict.newDraft, id: conflict.memberItemId } : conflict.newDraft;
+  const saved = await saveSessionItem(session.id, conflict.athleteId, draft, conflict.exerciseGroupId, sortOrder, userId);
+  const { error } = await supabase.from('gym_session_items').update({ plan_item_id: conflict.planItemId }).eq('id', saved.id);
+  if (error) throw error;
+}
+
+// ── Move session (UI 2 Day view) ────────────────────────────────────────
+// Moves one athlete's whole session from one date to another. If the
+// destination date already has a session, the moved items are appended
+// after whatever's already there (never overwritten) — the caller is
+// expected to have already confirmed that with the user, since gym_sessions
+// has a unique(athlete_id, date) constraint so two sessions can't coexist.
+
+export interface MoveSessionResult {
+  athleteId: string;
+  movedCount: number;
+  destinationHadExisting: boolean;
+  movedItemIds: string[];
+  /** Every moved item's original data, for undo (re-creating them back at fromDate). */
+  originalItems: GymSessionItem[];
+}
+
+export async function moveSessionItems(
+  clubId: string,
+  athleteId: string,
+  fromDate: string,
+  toDate: string,
+  exerciseGroupIdFor: (exerciseId: string) => string | null,
+  userId: string
+): Promise<MoveSessionResult> {
+  const [sourceSessions, destSessions] = await Promise.all([
+    fetchAthleteSessionsForDateRange(athleteId, [fromDate]),
+    fetchAthleteSessionsForDateRange(athleteId, [toDate]),
+  ]);
+  const source = sourceSessions[0];
+  const dest = destSessions[0];
+  const destinationHadExisting = !!(dest?.items && dest.items.length > 0);
+
+  if (!source || !source.items || source.items.length === 0) {
+    return { athleteId, movedCount: 0, destinationHadExisting, movedItemIds: [], originalItems: [] };
+  }
+
+  const destSession = await getOrCreateSession(clubId, athleteId, toDate, userId, source.sourceGroupId ?? null);
+  let sortOrder = dest?.items?.length ?? 0;
+  const movedItemIds: string[] = [];
+  const originalItems = source.items;
+  for (const item of source.items) {
+    const eg = item.itemType === 'exercise' && item.exerciseId ? exerciseGroupIdFor(item.exerciseId) : null;
+    const saved = await saveSessionItem(destSession.id, athleteId, itemToDraft(item), eg, sortOrder, userId);
+    movedItemIds.push(saved.id);
+    sortOrder++;
+  }
+  for (const item of originalItems) await deleteSessionItem(item.id);
+
+  return { athleteId, movedCount: originalItems.length, destinationHadExisting, movedItemIds, originalItems };
 }

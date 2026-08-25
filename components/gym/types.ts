@@ -137,6 +137,13 @@ export interface GymSessionItem {
   // note fields
   noteText: string | null;
 
+  // Set when this item was created/last synced from a group session plan
+  // item (see GymGroupPlanItem below) — used to detect drift so a later plan
+  // edit knows whether this item can be auto-updated or needs a manual
+  // accept-new/keep-current decision. Null for anything the athlete (or a
+  // coach editing them individually) added themselves.
+  planItemId: string | null;
+
   createdBy: string | null;
   createdByName?: string;
   createdAt: string;
@@ -157,4 +164,59 @@ export interface GymSessionItemDraft {
   isPrimary: boolean;
   side: GymSessionItemSide;
   noteText: string | null;
+}
+
+// ── Group session plans ────────────────────────────────────────────────────
+// A canonical, per-group-per-date exercise list — edited via UI 2's "All"
+// mode — kept separate from each member's own GymSession/GymSessionItem
+// rows. Editing a plan item fans the change out to every member; see
+// gymApi.ts's syncGroupPlanItemChange()/resolveGroupPlanConflict().
+
+export interface GymGroupSessionPlan {
+  id: string;
+  clubId: string;
+  groupId: string;
+  date: string;
+  createdBy: string | null;
+  createdAt: string;
+  updatedBy: string | null;
+  updatedAt: string;
+}
+
+export interface GymGroupPlanItem {
+  id: string;
+  planId: string;
+  sortOrder: number;
+  itemType: GymSessionItemType;
+
+  exerciseId: string | null;
+  exerciseName?: string;
+  sets: number | null;
+  reps: number | null;
+  load: string | null;
+  isPrimary: boolean;
+  side: GymSessionItemSide;
+
+  noteText: string | null;
+
+  createdBy: string | null;
+  createdByName?: string;
+  createdAt: string;
+  updatedBy: string | null;
+  updatedAt: string;
+}
+
+/** A member whose own item has drifted from a group plan item that just changed — needs a manual accept-new/keep-current decision. */
+export interface GymGroupPlanConflict {
+  athleteId: string;
+  athleteName?: string;
+  planItemId: string;
+  groupId: string;
+  date: string;
+  kind: 'edit' | 'delete';
+  memberItemId: string | null; // null = the member had already removed their own copy of this item
+  memberSortOrder: number | null;
+  currentDraft: GymSessionItemDraft | null; // the member's current values (null if they'd already removed it)
+  newDraft: GymSessionItemDraft | null; // the plan's new values (null if the plan item was deleted)
+  exerciseGroupId: string | null;
 }

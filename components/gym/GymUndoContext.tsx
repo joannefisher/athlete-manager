@@ -63,7 +63,7 @@ export const useGymUndo = (): GymUndoContextValue => {
 };
 
 /** Always-visible Undo control — greyed out with nothing to do when the stack is empty. */
-export const GymUndoButton = ({ variant = 'sidebar' }: { variant?: 'sidebar' | 'mobile' }) => {
+export const GymUndoButton = ({ variant = 'sidebar' }: { variant?: 'sidebar' | 'mobile' | 'canvas' }) => {
   const { pending, undoLast, undoing } = useGymUndo();
   const disabled = !pending || undoing;
   const label = pending ? `Undo: ${pending.label}` : 'Nothing to undo';
@@ -77,6 +77,24 @@ export const GymUndoButton = ({ variant = 'sidebar' }: { variant?: 'sidebar' | '
         className={`p-1.5 rounded-lg flex items-center justify-center flex-shrink-0 ${disabled ? 'text-slate-300' : 'text-slate-600 hover:bg-slate-100'}`}
       >
         {undoing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+      </button>
+    );
+  }
+
+  // Lives on the main content header (not tucked into the sidebar) — a
+  // light, bordered control matching the rest of Gym's toolbar buttons.
+  if (variant === 'canvas') {
+    return (
+      <button
+        onClick={undoLast}
+        disabled={disabled}
+        title={label}
+        className={`h-8 px-2.5 flex items-center gap-1.5 rounded-md border text-[11.5px] font-medium max-w-[220px] transition-colors ${
+          disabled ? 'border-slate-200 text-slate-300 cursor-default' : 'border-slate-200 text-slate-600 bg-white hover:bg-slate-50'
+        }`}
+      >
+        {undoing ? <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" /> : <RotateCcw className="w-3.5 h-3.5 flex-shrink-0" />}
+        <span className="truncate">{label}</span>
       </button>
     );
   }

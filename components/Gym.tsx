@@ -121,11 +121,6 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
             </button>
           ))}
         </nav>
-        {!isPlayer && (
-          <div className="px-2 pb-1">
-            <GymUndoButton variant="sidebar" />
-          </div>
-        )}
         <div className="p-3 border-t border-white/[0.06]">
           <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] mb-1">Signed in</p>
           <p className="text-[11px] text-white/50 truncate">{myName || authUser?.email}</p>
@@ -170,20 +165,26 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
               {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
             </p>
           </div>
-          {!isPlayer && page === 'sessions' && (
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Layout</span>
-              <div className="flex bg-slate-100 rounded-md p-0.5 text-[12px] font-medium">
-                {(['ui1', 'ui2'] as UiVersion[]).map(v => (
-                  <button
-                    key={v}
-                    onClick={() => setUiVersion(v)}
-                    className={`px-3 py-1 rounded ${uiVersion === v ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
-                  >
-                    {v === 'ui1' ? 'UI 1' : 'UI 2'}
-                  </button>
-                ))}
-              </div>
+          {!isPlayer && (
+            <div className="flex items-center gap-3">
+              {page === 'sessions' && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Layout</span>
+                  <div className="flex bg-slate-100 rounded-md p-0.5 text-[12px] font-medium">
+                    {(['ui1', 'ui2'] as UiVersion[]).map(v => (
+                      <button
+                        key={v}
+                        onClick={() => setUiVersion(v)}
+                        className={`px-3 py-1 rounded ${uiVersion === v ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
+                      >
+                        {v === 'ui1' ? 'UI 1' : 'UI 2'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* Undo lives here — on the main content header, not tucked into the sidebar — so it's visible whatever page/layout is open. */}
+              <GymUndoButton variant="canvas" />
             </div>
           )}
         </div>

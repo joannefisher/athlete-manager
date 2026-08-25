@@ -1,0 +1,468 @@
+// components/gym/GroupPlanEditor.tsx
+// UI 2's "All" mode: one shared, editable "group session plan" for every
+// member of a gym group on one date (Day tab only). Adding/editing/deleting
+// an exercise here immediately fans the change out to every member's own
+// session — see gymApi.ts's syncGroupPlanItemChange() for exactly what
+// auto-applies (nobody had touched that exercise) vs what needs a manual
+// accept-new/keep-current decision (a member had already modified or
+// removed their own copy of it) via the confirmation modal below.
+
+import React, { useEffect, useState, useCallback } from 'react';
+import {
+  AlertTriangle, ArrowDown, ArrowUp, Check, Edit2, Loader2, Plus, StickyNote, Trash2, Users, X,
+} from 'lucide-react';
+import type { GymAthlete as Athlete, GymExercise, GymExerciseGroup, GymGroupPlanConflict, GymGroupPlanItem, GymSessionGroup, GymSessionItemDraft } from './types';
+import {
+  getOrCreateGroupPlan,
+  fetchGroupPlanItems,
+  saveGroupPlanItem,
+  deleteGroupPlanItem,
+  reorderGroupPlanItems,
+  syncGroupPlanItemChange,
+  resolveGroupPlanConflict,
+  createExercise,
+  searchExercises,
+} from './gymApi';
+import { itemMetaText } from './itemDisplay';
+import { useGymUndo } from './GymUndoContext';
+
+const emptyDraft: GymSessionItemDraft = {
+  itemType: 'exercise',
+  exerciseId: null,
+  sets: null,
+  reps: null,
+  load: null,
+  isPrimary: false,
+  side: 'both',
+  noteText: null,
+};
+
+const fmtDate = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+
+const draftLabel = (draft: GymSessionItemDraft | null): string => {
+  if (!draft) return 'Removed';
+  if (draft.itemType === 'note') return draft.noteText || 'Note';
+  const sideTag = draft.side !== 'both' ? ` (${draft.side === 'left' ? 'L' : 'R'})` : '';
+  return `${draft.exerciseName || 'Exercise'}${sideTag} — ${itemMetaText(draft)}`;
+};
+
+export const GroupPlanEditor = ({
+  group,
+  date,
+  clubId,
+  userId,
+  canEdit,
+  athletes,
+  exerciseGroups,
+  exercises,
+  onExercisesChanged,
+  onMemberChanged,
+}: {
+  group: GymSessionGroup;
+  date: string;
+  clubId: string;
+  userId: string;
+  canEdit: boolean;
+  athletes: Athlete[];
+  exerciseGroups: GymExerciseGroup[];
+  exercises: GymExercise[];
+  onExercisesChanged: () => void;
+  /** Called after any change that fans out to members, so a parent showing per-member counts elsewhere can refresh. */
+  onMemberChanged?: () => void;
+}) => {
+  const { pushUndo } = useGymUndo();
+  const members = athletes.filter(a => group.memberAthleteIds.includes(a.id));
+
+  const [planId, setPlanId] = useState<string | null>(null);
+  const [items, setItems] = useState<GymGroupPlanItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [conflicts, setConflicts] = useState<GymGroupPlanConflict[]>([]);
+  const [lastSyncNote, setLastSyncNote] = useState<string | null>(null);
+
+  const [draft, setDraft] = useState<GymSessionItemDraft>(emptyDraft);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [exerciseQuery, setExerciseQuery] = useState('');
+  const [showPicker, setShowPicker] = useState(false);
+  const [addingNewExercise, setAddingNewExercise] = useState(false);
+  const [newExerciseGroupId, setNewExerciseGroupId] = useState('');
+  const [splitSide, setSplitSide] = useState(false);
+  const [rightDraft, setRightDraft] = useState<{ sets: number | null; reps: number | null; load: string | null }>({ sets: null, reps: null, load: null });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const plan = await getOrCreateGroupPlan(clubId, group.id, date, userId);
+      setPlanId(plan.id);
+      setItems(await fetchGroupPlanItems(plan.id));
+    } catch (err) {
+      console.error('[GroupPlanEditor] failed to load group plan', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [clubId, group.id, date, userId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const resetDraft = () => {
+    setDraft(emptyDraft);
+    setEditingId(null);
+    setExerciseQuery('');
+    setShowPicker(false);
+    setAddingNewExercise(false);
+    setNewExerciseGroupId('');
+    setSplitSide(false);
+    setRightDraft({ sets: null, reps: null, load: null });
+  };
+
+  const matches = searchExercises(exercises, exerciseQuery);
+  const exerciseGroupIdFor = (exerciseId: string) => exercises.find(e => e.id === exerciseId)?.exerciseGroupId ?? null;
+
+  const handleCreateExercise = async () => {
+    if (!exerciseQuery.trim() || !newExerciseGroupId) return;
+    const created = await createExercise(clubId, exerciseQuery.trim(), newExerciseGroupId, userId);
+    onExercisesChanged();
+    setDraft(d => ({ ...d, exerciseId: created.id, exerciseName: created.name }));
+    setAddingNewExercise(false);
+    setShowPicker(false);
+  };
+
+  const runSync = async (planItemId: string, before: GymGroupPlanItem | null, after: GymGroupPlanItem | null) => {
+    const result = await syncGroupPlanItemChange(clubId, group.id, group.memberAthleteIds, date, planItemId, before, after, exerciseGroupIdFor, userId);
+    if (result.conflicts.length > 0) {
+      setConflicts(prev => [...prev, ...result.conflicts]);
+      setLastSyncNote(`Applied to ${result.appliedCount} player${result.appliedCount !== 1 ? 's' : ''} automatically — ${result.conflicts.length} need a decision below.`);
+    } else if (result.appliedCount > 0) {
+      setLastSyncNote(`Applied to ${result.appliedCount} player${result.appliedCount !== 1 ? 's' : ''}.`);
+    }
+    onMemberChanged?.();
+  };
+
+  const handleStartEdit = (item: GymGroupPlanItem) => {
+    setDraft({
+      id: item.id,
+      itemType: item.itemType,
+      exerciseId: item.exerciseId,
+      exerciseName: item.exerciseName,
+      sets: item.sets,
+      reps: item.reps,
+      load: item.load,
+      isPrimary: item.isPrimary,
+      side: item.side,
+      noteText: item.noteText,
+    });
+    setEditingId(item.id);
+    setExerciseQuery(item.exerciseName || '');
+    setShowPicker(false);
+    setAddingNewExercise(false);
+    setSplitSide(false);
+  };
+
+  const handleSave = async () => {
+    if (draft.itemType === 'exercise' && !draft.exerciseId) return;
+    if (draft.itemType === 'note' && !draft.noteText?.trim()) return;
+    if (!planId) return;
+    setSaving(true);
+    try {
+      if (!editingId && draft.itemType === 'exercise' && splitSide) {
+        const leftDraft: GymSessionItemDraft = { ...draft, side: 'left' };
+        const rightDraftFull: GymSessionItemDraft = { ...draft, side: 'right', sets: rightDraft.sets, reps: rightDraft.reps, load: rightDraft.load };
+        const savedLeft = await saveGroupPlanItem(planId, leftDraft, items.length, userId);
+        const savedRight = await saveGroupPlanItem(planId, rightDraftFull, items.length + 1, userId);
+        await runSync(savedLeft.id, null, savedLeft);
+        await runSync(savedRight.id, null, savedRight);
+        pushUndo({
+          label: `Remove "${savedLeft.exerciseName}" (L/R) from ${group.name}'s plan`,
+          run: async () => {
+            await deleteGroupPlanItem(savedLeft.id);
+            await deleteGroupPlanItem(savedRight.id);
+            await load();
+          },
+        });
+      } else if (!editingId) {
+        const saved = await saveGroupPlanItem(planId, draft, items.length, userId);
+        await runSync(saved.id, null, saved);
+        pushUndo({
+          label: `Remove "${saved.exerciseName || saved.noteText}" from ${group.name}'s plan`,
+          run: async () => {
+            await deleteGroupPlanItem(saved.id);
+            await load();
+          },
+        });
+      } else {
+        const before = items.find(i => i.id === editingId) || null;
+        const sortOrder = before?.sortOrder ?? items.length;
+        const saved = await saveGroupPlanItem(planId, { ...draft, id: editingId }, sortOrder, userId);
+        await runSync(editingId, before, saved);
+      }
+      resetDraft();
+      await load();
+    } catch (err: any) {
+      console.error('[GroupPlanEditor] failed to save plan item', err);
+      window.alert(err?.message || 'Failed to save this change to the group plan.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (item: GymGroupPlanItem) => {
+    if (!window.confirm(`Remove "${item.exerciseName || item.noteText}" from ${group.name}'s plan for every player?`)) return;
+    setSaving(true);
+    try {
+      await deleteGroupPlanItem(item.id);
+      await runSync(item.id, item, null);
+      await load();
+    } catch (err: any) {
+      console.error('[GroupPlanEditor] failed to delete plan item', err);
+      window.alert(err?.message || 'Failed to remove this from the group plan.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const moveItem = async (index: number, dir: -1 | 1) => {
+    const target = index + dir;
+    if (target < 0 || target >= items.length) return;
+    const reordered = [...items];
+    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    setItems(reordered);
+    await reorderGroupPlanItems(reordered.map((it, i) => ({ id: it.id, sortOrder: i })));
+  };
+
+  const resolveConflict = async (conflict: GymGroupPlanConflict, accept: boolean) => {
+    try {
+      await resolveGroupPlanConflict(clubId, conflict, accept, userId);
+      setConflicts(prev => prev.filter(c => c !== conflict));
+      onMemberChanged?.();
+    } catch (err: any) {
+      console.error('[GroupPlanEditor] failed to resolve conflict', err);
+      window.alert(err?.message || 'Failed to apply that decision.');
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <Loader2 className="w-6 h-6 text-slate-300 animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-md md:max-w-2xl mx-auto p-4 md:p-6 space-y-3">
+      <div className="bg-white rounded-lg border border-slate-200 p-4">
+        <p className="text-[15px] font-bold text-slate-900 flex items-center gap-1.5">
+          <Users className="w-4 h-4 text-slate-400" /> {group.name} — All players
+        </p>
+        <p className="text-[12px] text-slate-400">
+          {fmtDate(date)} · {members.length} player{members.length !== 1 ? 's' : ''} · changes here apply to everyone's session for this date
+        </p>
+      </div>
+
+      {lastSyncNote && (
+        <p className="text-[11.5px] text-green-700 bg-green-50 border border-green-100 rounded-lg px-3 py-2">{lastSyncNote}</p>
+      )}
+
+      {conflicts.length > 0 && (
+        <div className="bg-white rounded-lg border border-amber-300 overflow-hidden">
+          <div className="px-3.5 py-2 bg-amber-50 border-b border-amber-200 flex items-center gap-1.5">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+            <span className="text-[12px] font-semibold text-amber-800">
+              {conflicts.length} player{conflicts.length !== 1 ? 's' : ''} customized this exercise — decide per player
+            </span>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {conflicts.map((c, i) => {
+              const athlete = athletes.find(a => a.id === c.athleteId);
+              return (
+                <div key={i} className="px-3.5 py-2.5">
+                  <p className="text-[12.5px] font-medium text-slate-800 mb-1">{athlete?.name || 'Player'}</p>
+                  <p className="text-[11.5px] text-slate-500">Current: <span className="text-slate-700">{draftLabel(c.currentDraft)}</span></p>
+                  <p className="text-[11.5px] text-slate-500 mb-1.5">New plan: <span className="text-slate-700">{draftLabel(c.newDraft)}</span></p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => resolveConflict(c, true)}
+                      className="h-7 px-2.5 text-[11.5px] font-medium bg-slate-900 text-white rounded hover:bg-slate-800"
+                    >
+                      Accept new
+                    </button>
+                    <button
+                      onClick={() => resolveConflict(c, false)}
+                      className="h-7 px-2.5 text-[11.5px] font-medium border border-slate-200 text-slate-600 rounded hover:bg-slate-50"
+                    >
+                      Keep current
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {canEdit && (
+        <div className="bg-white rounded-lg border border-slate-200 p-3.5">
+          <p className="text-[12px] font-semibold text-slate-600 mb-2.5">{editingId ? 'Edit exercise' : 'Add to everyone\'s plan'}</p>
+          <div className="flex bg-slate-100 rounded-md p-0.5 text-[12px] font-medium mb-3 w-fit">
+            <button onClick={() => setDraft(d => ({ ...emptyDraft, itemType: 'exercise' }))} className={`px-2.5 py-1 rounded ${draft.itemType === 'exercise' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>
+              Exercise
+            </button>
+            <button onClick={() => setDraft(d => ({ ...emptyDraft, itemType: 'note' }))} className={`px-2.5 py-1 rounded ${draft.itemType === 'note' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>
+              Note
+            </button>
+          </div>
+
+          {draft.itemType === 'exercise' ? (
+            <div className="space-y-2.5">
+              <div className="relative">
+                <label className="block text-[11px] font-medium text-slate-500 mb-1">Exercise</label>
+                <input
+                  value={exerciseQuery}
+                  onChange={e => { setExerciseQuery(e.target.value); setDraft(d => ({ ...d, exerciseId: null })); setShowPicker(true); }}
+                  onFocus={() => setShowPicker(true)}
+                  placeholder="Start typing…"
+                  className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                {showPicker && exerciseQuery.trim() && (
+                  <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+                    {matches.map(ex => (
+                      <button key={ex.id} onClick={() => { setDraft(d => ({ ...d, exerciseId: ex.id, exerciseName: ex.name })); setExerciseQuery(ex.name); setShowPicker(false); }} className="w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50 flex justify-between">
+                        <span>{ex.name}</span>
+                        <span className="text-[11px] text-slate-400">{ex.exerciseGroupName}</span>
+                      </button>
+                    ))}
+                    <button onClick={() => setAddingNewExercise(true)} className="w-full text-left px-3 py-2 text-[13px] text-blue-600 hover:bg-blue-50 flex items-center gap-1 border-t border-slate-100">
+                      <Plus className="w-3.5 h-3.5" /> Add "{exerciseQuery.trim()}" as new exercise
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {addingNewExercise && (
+                <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 space-y-2">
+                  <label className="block text-[11px] font-medium text-slate-500">Exercise group</label>
+                  <select value={newExerciseGroupId} onChange={e => setNewExerciseGroupId(e.target.value)} className="w-full h-8 px-2 text-[13px] border border-slate-200 rounded bg-white">
+                    <option value="">Select a group…</option>
+                    {exerciseGroups.map(g => <option key={g.id} value={g.id}>{g.name}{g.typeName ? ` (${g.typeName})` : ''}</option>)}
+                  </select>
+                  <div className="flex gap-2">
+                    <button onClick={handleCreateExercise} disabled={!newExerciseGroupId} className="h-8 px-3 text-[12px] font-medium bg-slate-900 text-white rounded disabled:opacity-40">Create exercise</button>
+                    <button onClick={() => setAddingNewExercise(false)} className="h-8 px-3 text-[12px] text-slate-500">Cancel</button>
+                  </div>
+                </div>
+              )}
+
+              {!editingId && (
+                <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer">
+                  <input type="checkbox" checked={splitSide} onChange={e => setSplitSide(e.target.checked)} className="w-3.5 h-3.5" />
+                  Split left / right
+                </label>
+              )}
+
+              {splitSide && !editingId ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <p className="text-[11px] font-semibold text-slate-500">Left</p>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <input type="number" min={0} placeholder="Sets" value={draft.sets ?? ''} onChange={e => setDraft(d => ({ ...d, sets: e.target.value ? Number(e.target.value) : null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                      <input type="number" min={0} placeholder="Reps" value={draft.reps ?? ''} onChange={e => setDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                      <input placeholder="Load" value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-[11px] font-semibold text-slate-500">Right</p>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <input type="number" min={0} placeholder="Sets" value={rightDraft.sets ?? ''} onChange={e => setRightDraft(d => ({ ...d, sets: e.target.value ? Number(e.target.value) : null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                      <input type="number" min={0} placeholder="Reps" value={rightDraft.reps ?? ''} onChange={e => setRightDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                      <input placeholder="Load" value={rightDraft.load ?? ''} onChange={e => setRightDraft(d => ({ ...d, load: e.target.value || null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-500 mb-1">Sets</label>
+                    <input type="number" min={0} value={draft.sets ?? ''} onChange={e => setDraft(d => ({ ...d, sets: e.target.value ? Number(e.target.value) : null }))} className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-500 mb-1">Reps</label>
+                    <input type="number" min={0} value={draft.reps ?? ''} onChange={e => setDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))} className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-500 mb-1">Load</label>
+                    <input value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))} placeholder="e.g. 60kg" className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                </div>
+              )}
+
+              <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer">
+                <input type="checkbox" checked={draft.isPrimary} onChange={e => setDraft(d => ({ ...d, isPrimary: e.target.checked }))} className="w-3.5 h-3.5" />
+                Mark as Primary
+              </label>
+            </div>
+          ) : (
+            <textarea
+              value={draft.noteText ?? ''}
+              onChange={e => setDraft(d => ({ ...d, noteText: e.target.value }))}
+              placeholder="Note for everyone's session…"
+              rows={3}
+              className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          )}
+
+          <div className="flex gap-2 mt-3">
+            <button
+              onClick={handleSave}
+              disabled={saving || members.length === 0 || (draft.itemType === 'exercise' ? !draft.exerciseId : !draft.noteText?.trim())}
+              className="flex-1 h-9 flex items-center justify-center gap-1.5 bg-slate-900 text-white rounded-lg text-[13px] font-semibold hover:bg-slate-800 disabled:opacity-40"
+            >
+              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+              {editingId ? 'Save change' : splitSide ? `Add both sides for all ${members.length}` : `Add for all ${members.length}`}
+            </button>
+            {editingId && (
+              <button onClick={resetDraft} className="h-9 px-3 text-[13px] text-slate-500 flex items-center gap-1">
+                <X className="w-3.5 h-3.5" /> Cancel
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="bg-white rounded-lg border border-slate-200 divide-y divide-slate-100 overflow-hidden">
+        <div className="px-3.5 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Group plan ({items.length})</div>
+        {items.map((item, i) => (
+          <div key={item.id} className="flex items-start gap-2.5 px-3.5 py-2.5">
+            <div className="flex-1 min-w-0">
+              <p className="text-[13px] font-medium text-slate-800 flex items-center gap-1.5">
+                {item.itemType === 'note' ? <StickyNote className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" /> : null}
+                {item.itemType === 'note' ? item.noteText : item.exerciseName}
+                {item.side !== 'both' && (
+                  <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1 rounded">{item.side === 'left' ? 'L' : 'R'}</span>
+                )}
+                {item.isPrimary && <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1 rounded">Primary</span>}
+              </p>
+              {item.itemType === 'exercise' && <p className="text-[11px] text-slate-400">{itemMetaText(item)}</p>}
+            </div>
+            {canEdit && (
+              <div className="flex items-center gap-0.5 flex-shrink-0">
+                <button onClick={() => moveItem(i, -1)} disabled={i === 0} className="p-1 rounded hover:bg-slate-100 text-slate-400 disabled:opacity-30">
+                  <ArrowUp className="w-3.5 h-3.5" />
+                </button>
+                <button onClick={() => moveItem(i, 1)} disabled={i === items.length - 1} className="p-1 rounded hover:bg-slate-100 text-slate-400 disabled:opacity-30">
+                  <ArrowDown className="w-3.5 h-3.5" />
+                </button>
+                <button onClick={() => handleStartEdit(item)} className="p-1 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700">
+                  <Edit2 className="w-3.5 h-3.5" />
+                </button>
+                <button onClick={() => handleDelete(item)} className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-500">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+        {items.length === 0 && <div className="p-6 text-center text-[13px] text-slate-400">Nothing planned for this group yet.</div>}
+      </div>
+    </div>
+  );
+};

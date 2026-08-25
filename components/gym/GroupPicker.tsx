@@ -14,7 +14,7 @@
 // not on every pill click.
 
 import React, { useMemo, useState } from 'react';
-import { ArrowLeft, Check, Loader2, Plus, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Check, Loader2, Plus, Trash2, X } from 'lucide-react';
 import type { GymAthlete as Athlete, GymTeamPosition } from './types';
 import type { GymSessionGroup } from './types';
 import { createSessionGroup, setSessionGroupMembers, deleteSessionGroup } from './gymApi';
@@ -132,11 +132,72 @@ export const GroupPicker = ({
   const [editingMembers, setEditingMembers] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
+  // A player can only belong to one gym group at a time. Adding someone
+  // who's already in a different group is allowed, but only after they
+  // confirm the reassignment (naming the group they'll be removed from) —
+  // the actual removal from their old group is queued here and applied
+  // alongside the add, at the same point the add itself is committed
+  // (Done / Create group), not on every pill click.
+  const [pendingCrossRemovals, setPendingCrossRemovals] = useState<{ athleteId: string; fromGroupId: string }[]>([]);
+  const [confirmReassign, setConfirmReassign] = useState<{
+    athleteId: string;
+    athleteName: string;
+    fromGroupId: string;
+    fromGroupName: string;
+    target: 'new' | 'editing';
+  } | null>(null);
+
   const newGroupFilter = usePositionFilter(athletes, teamStructure);
   const editFilter = usePositionFilter(athletes, teamStructure);
 
-  const toggleMember = (list: string[], setList: (v: string[]) => void, athleteId: string) => {
-    setList(list.includes(athleteId) ? list.filter(id => id !== athleteId) : [...list, athleteId]);
+  const findCurrentGroup = (athleteId: string, excludeGroupId: string | null) =>
+    sessionGroups.find(g => g.id !== excludeGroupId && g.memberAthleteIds.includes(athleteId));
+
+  const toggleMember = (
+    list: string[],
+    setList: (v: string[]) => void,
+    athleteId: string,
+    athleteName: string,
+    excludeGroupId: string | null,
+    target: 'new' | 'editing'
+  ) => {
+    if (list.includes(athleteId)) {
+      setList(list.filter(id => id !== athleteId));
+      setPendingCrossRemovals(prev => prev.filter(p => p.athleteId !== athleteId));
+      return;
+    }
+    const current = findCurrentGroup(athleteId, excludeGroupId);
+    if (current) {
+      setConfirmReassign({ athleteId, athleteName, fromGroupId: current.id, fromGroupName: current.name, target });
+      return;
+    }
+    setList([...list, athleteId]);
+  };
+
+  const confirmReassignment = () => {
+    if (!confirmReassign) return;
+    const { athleteId, fromGroupId, target } = confirmReassign;
+    if (target === 'new') setNewMembers(prev => [...prev, athleteId]);
+    else setEditingMembers(prev => [...prev, athleteId]);
+    setPendingCrossRemovals(prev => [...prev, { athleteId, fromGroupId }]);
+    setConfirmReassign(null);
+  };
+
+  /** Removes each queued reassignment's athlete from their old group's member list — run once, alongside the add itself. */
+  const applyCrossRemovals = async (relevantAthleteIds: string[]) => {
+    const relevant = pendingCrossRemovals.filter(p => relevantAthleteIds.includes(p.athleteId));
+    if (relevant.length === 0) return;
+    const byGroup = new Map<string, string[]>();
+    for (const r of relevant) {
+      if (!byGroup.has(r.fromGroupId)) byGroup.set(r.fromGroupId, []);
+      byGroup.get(r.fromGroupId)!.push(r.athleteId);
+    }
+    for (const [groupId, removeIds] of byGroup) {
+      const group = sessionGroups.find(g => g.id === groupId);
+      if (!group) continue;
+      await setSessionGroupMembers(groupId, group.memberAthleteIds.filter(id => !removeIds.includes(id)));
+    }
+    setPendingCrossRemovals(prev => prev.filter(p => !relevantAthleteIds.includes(p.athleteId)));
   };
 
   const handleCreate = async () => {
@@ -144,6 +205,7 @@ export const GroupPicker = ({
     setSaving(true);
     try {
       await createSessionGroup(clubId, newName.trim(), newMembers, userId);
+      await applyCrossRemovals(newMembers);
       setNewName('');
       setNewMembers([]);
       setCreating(false);
@@ -157,6 +219,7 @@ export const GroupPicker = ({
     setSaving(true);
     try {
       await setSessionGroupMembers(groupId, members);
+      await applyCrossRemovals(members);
       onChanged();
     } finally {
       setSaving(false);
@@ -238,7 +301,7 @@ export const GroupPicker = ({
                       return (
                         <button
                           key={a.id}
-                          onClick={() => toggleMember(editingMembers, setEditingMembers, a.id)}
+                          onClick={() => toggleMember(editingMembers, setEditingMembers, a.id, a.name, group.id, 'editing')}
                           className={`text-[11px] px-2 py-1 rounded-full border ${active ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200'}`}
                         >
                           {a.name}
@@ -280,7 +343,7 @@ export const GroupPicker = ({
               return (
                 <button
                   key={a.id}
-                  onClick={() => toggleMember(newMembers, setNewMembers, a.id)}
+                  onClick={() => toggleMember(newMembers, setNewMembers, a.id, a.name, null, 'new')}
                   className={`text-[11px] px-2 py-1 rounded-full border ${active ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200'}`}
                 >
                   {a.name}
@@ -307,6 +370,32 @@ export const GroupPicker = ({
         >
           <Plus className="w-4 h-4" /> New group
         </button>
+      )}
+
+      {confirmReassign && (
+        <div className="fixed inset-0 z-30 bg-black/30 flex items-center justify-center p-4" onClick={() => setConfirmReassign(null)}>
+          <div className="bg-white rounded-xl w-full max-w-sm shadow-xl p-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start gap-2.5 mb-3">
+              <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+              <p className="text-[13px] text-slate-700">
+                <span className="font-semibold">{confirmReassign.athleteName}</span> is already in{' '}
+                <span className="font-semibold">{confirmReassign.fromGroupName}</span>. A player can only be in one group at a time —
+                continuing will remove them from {confirmReassign.fromGroupName}.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={confirmReassignment}
+                className="flex-1 h-9 flex items-center justify-center gap-1.5 bg-slate-900 text-white rounded-lg text-[13px] font-semibold hover:bg-slate-800"
+              >
+                <Check className="w-3.5 h-3.5" /> Move them
+              </button>
+              <button onClick={() => setConfirmReassign(null)} className="h-9 px-4 text-[13px] text-slate-500 hover:text-slate-700 border border-slate-200 rounded-lg">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

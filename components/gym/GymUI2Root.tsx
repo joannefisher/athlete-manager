@@ -22,10 +22,13 @@ import { SessionEditor } from './SessionEditor';
 import { GymUI2Calendar } from './GymUI2Calendar';
 import { GymUI2Compare } from './GymUI2Compare';
 import { GroupPicker } from './GroupPicker';
+import { GroupPlanEditor } from './GroupPlanEditor';
+import { MoveSessionButton } from './MoveSessionButton';
 import { DatePickerPopover } from './DatePickerPopover';
 
 type ScopeMode = 'player' | 'group';
 type UI2Tab = 'day' | 'calendar' | 'compare';
+const ALL_MEMBERS = '__all__';
 
 export const GymUI2Root = ({
   athletes,
@@ -56,6 +59,7 @@ export const GymUI2Root = ({
   const [tab, setTab] = useState<UI2Tab>('day');
   const [date, setDate] = useState(todayIso());
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [refreshNonce, setRefreshNonce] = useState(0);
 
   const loadReferenceData = useCallback(async () => {
     setLoading(true);
@@ -93,14 +97,27 @@ export const GymUI2Root = ({
   const groupMembers = currentGroup ? athletes.filter(a => currentGroup.memberAthleteIds.includes(a.id)) : [];
 
   useEffect(() => {
-    if (scopeMode === 'group' && currentGroup && (!selectedMemberId || !currentGroup.memberAthleteIds.includes(selectedMemberId))) {
-      setSelectedMemberId(groupMembers[0]?.id || '');
+    if (
+      scopeMode === 'group' &&
+      currentGroup &&
+      (!selectedMemberId || (selectedMemberId !== ALL_MEMBERS && !currentGroup.memberAthleteIds.includes(selectedMemberId)))
+    ) {
+      setSelectedMemberId(ALL_MEMBERS);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopeMode, currentGroup?.id]);
 
-  const currentAthleteId = scopeMode === 'player' ? selectedAthleteId : selectedMemberId;
+  const isAllMode = scopeMode === 'group' && selectedMemberId === ALL_MEMBERS;
+  const currentAthleteId = scopeMode === 'player' ? selectedAthleteId : isAllMode ? '' : selectedMemberId;
   const currentAthlete = athletes.find(a => a.id === currentAthleteId);
+
+  // "All" only makes sense for the Day tab (one shared plan for the whole
+  // group) — Calendar/Compare are always about a single athlete's own
+  // calendar or a hand-picked set of players, so bounce back to Day if the
+  // scope switches into All mode while on either of those tabs.
+  useEffect(() => {
+    if (isAllMode && tab !== 'day') setTab('day');
+  }, [isAllMode, tab]);
 
   const stepDate = (dir: 1 | -1) => {
     const d = new Date(date + 'T00:00:00');
@@ -139,7 +156,7 @@ export const GymUI2Root = ({
   }
 
   return (
-    <div className="max-w-full xl:max-w-7xl mx-auto p-4 md:p-6 space-y-3">
+    <div className="w-full p-4 md:p-6 space-y-3">
       {/* Scope switcher */}
       <div className="bg-white rounded-lg border border-slate-200 p-3 flex items-center gap-2 flex-wrap">
         <div className="flex bg-slate-100 rounded-md p-0.5 text-[12px] font-medium">
@@ -190,14 +207,20 @@ export const GymUI2Root = ({
                 <select
                   value={selectedMemberId}
                   onChange={e => setSelectedMemberId(e.target.value)}
-                  className="h-8 pl-2.5 pr-7 rounded-md border border-slate-200 bg-white text-[12.5px] font-medium text-slate-700 appearance-none"
+                  className={`h-8 pl-2.5 pr-7 rounded-md border text-[12.5px] font-medium appearance-none ${
+                    isAllMode ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-700'
+                  }`}
                 >
-                  {groupMembers.length === 0 && <option value="">No members</option>}
+                  {groupMembers.length === 0 ? (
+                    <option value="">No members</option>
+                  ) : (
+                    <option value={ALL_MEMBERS}>All players ({groupMembers.length})</option>
+                  )}
                   {groupMembers.map(a => (
                     <option key={a.id} value={a.id}>{a.name}</option>
                   ))}
                 </select>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <ChevronDown className={`w-3.5 h-3.5 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none ${isAllMode ? 'text-white/70' : 'text-slate-400'}`} />
               </div>
             )}
           </>
@@ -244,27 +267,61 @@ export const GymUI2Root = ({
           {tab === 'calendar' ? 'This Week' : 'Today'}
         </button>
 
+        {tab === 'day' && canEditGym && (isAllMode ? !!currentGroup : !!currentAthleteId) && (
+          <MoveSessionButton
+            clubId={clubId}
+            userId={userId}
+            date={date}
+            isAllMode={isAllMode}
+            currentAthleteId={currentAthleteId}
+            groupMemberAthleteIds={currentGroup?.memberAthleteIds || []}
+            athletes={athletes}
+            exercises={exercises}
+            onMoved={() => setRefreshNonce(n => n + 1)}
+          />
+        )}
+
         <div className="flex bg-slate-100 rounded-md p-0.5 text-[12px] font-medium ml-auto">
-          {(['day', 'calendar', 'compare'] as UI2Tab[]).map(t => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`px-3 py-1.5 rounded capitalize ${tab === t ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}
-            >
-              {t}
-            </button>
-          ))}
+          {(['day', 'calendar', 'compare'] as UI2Tab[]).map(t => {
+            const disabled = isAllMode && t !== 'day';
+            return (
+              <button
+                key={t}
+                onClick={() => !disabled && setTab(t)}
+                disabled={disabled}
+                title={disabled ? 'Switch to a specific player to use this tab' : undefined}
+                className={`px-3 py-1.5 rounded capitalize ${
+                  disabled ? 'text-slate-300 cursor-not-allowed' : tab === t ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'
+                }`}
+              >
+                {t}
+              </button>
+            );
+          })}
         </div>
       </div>
 
       {/* Tab content */}
-      {!currentAthleteId ? (
+      {isAllMode && currentGroup ? (
+        <GroupPlanEditor
+          key={`${currentGroup.id}-${date}-${refreshNonce}`}
+          group={currentGroup}
+          date={date}
+          clubId={clubId}
+          userId={userId}
+          canEdit={canEditGym}
+          athletes={athletes}
+          exerciseGroups={exerciseGroups}
+          exercises={exercises}
+          onExercisesChanged={loadReferenceData}
+        />
+      ) : !currentAthleteId ? (
         <div className="bg-white rounded-lg border border-slate-200 p-8 text-center text-[13px] text-slate-400">
           {scopeMode === 'group' ? 'Choose a group with at least one member to see sessions.' : 'Select a player to see their session.'}
         </div>
       ) : tab === 'day' ? (
         <SessionEditor
-          key={`${currentAthleteId}-${date}`}
+          key={`${currentAthleteId}-${date}-${refreshNonce}`}
           athlete={currentAthlete}
           athleteId={currentAthleteId}
           date={date}
