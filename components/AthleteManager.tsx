@@ -1,18 +1,24 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Search, Plus, User, Menu, MessageSquare, X, ChevronDown, ChevronUp, Users, Calendar, Zap, Target, ArrowLeft, Camera, Settings, Trash2, Edit2, Check, BarChart3, AlertCircle, Loader2, SlidersHorizontal, Lock } from 'lucide-react';
+import { Search, Plus, User, Menu, MessageSquare, X, ChevronDown, ChevronUp, Users, Calendar, Zap, Target, ArrowLeft, Camera, Settings, Trash2, Edit2, Check, BarChart3, AlertCircle, Loader2, SlidersHorizontal, Lock, Dumbbell } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { GymRoot } from './gym/GymRoot';
+import { PlayerGymView } from './gym/PlayerGymView';
+import { ExerciseBankAdmin } from './gym/ExerciseBankAdmin';
 
 const BODY_PARTS = ['Head', 'Neck', 'Shoulder', 'Arm', 'Elbow', 'Wrist', 'Hand', 'Chest', 'Back', 'Hip', 'Groin', 'Thigh', 'Hamstring', 'Knee', 'Calf', 'Ankle', 'Foot', 'Other'];
 
-type Role = 'Admin' | 'S&C' | 'Physio' | 'Coach';
+export type Role = 'Admin' | 'S&C' | 'Physio' | 'Coach' | 'Player';
 
-const ROLE_ACCESS: Record<Role, string[]> = {
-  'Admin':  ['home', 'availability', 'athlete-profile', 'session-plan', 'add-drill', 'reporting', 'setup'],
-  'S&C':    ['home', 'availability', 'athlete-profile', 'session-plan', 'reporting'],
-  'Physio': ['home', 'availability', 'athlete-profile', 'session-plan', 'reporting'],
-  'Coach':  ['home', 'session-plan', 'add-drill', 'reporting'],
+// Player is intentionally NOT given an entry here — a Player's access isn't
+// governed by ROLE_ACCESS/page nav at all. The top-level render branches
+// straight to PlayerGymView for role === 'Player' (Gym-only login, see plan).
+const ROLE_ACCESS: Record<Exclude<Role, 'Player'>, string[]> = {
+  'Admin':  ['home', 'availability', 'athlete-profile', 'session-plan', 'add-drill', 'reporting', 'setup', 'gym'],
+  'S&C':    ['home', 'availability', 'athlete-profile', 'session-plan', 'reporting', 'gym'],
+  'Physio': ['home', 'availability', 'athlete-profile', 'session-plan', 'reporting', 'gym'],
+  'Coach':  ['home', 'session-plan', 'add-drill', 'reporting', 'gym'],
 };
 // Derived permission helpers used by pages
 const canEdit  = (role: Role) => role === 'Admin' || role === 'Coach';
@@ -21,9 +27,13 @@ const canAddPrivateNote = (role: Role) => role === 'Admin' || role === 'Physio' 
 const canAddPublicNote  = (role: Role) => role === 'Admin';
 const canEditPublicNote = (role: Role) => role === 'Admin';
 const isAdmin = (role: Role) => role === 'Admin';
+// Gym CRUD permissions — Admin/Coach can create/edit/delete sessions and
+// items, S&C/Physio get view-only. Adjust here if Joanne wants a different
+// split; every Gym write path goes through this one helper.
+export const gymCanEdit = (role: Role) => role === 'Admin' || role === 'Coach';
 
 // Type definitions
-interface TeamPosition {
+export interface TeamPosition {
   id: string;
   number: number;
   name: string;
@@ -41,7 +51,7 @@ interface Injury {
   contact?: string;
 }
 
-interface Athlete {
+export interface Athlete {
   id: string;
   name: string;
   status: string;
@@ -925,19 +935,20 @@ const AthleteManager = () => {
 
   const [role, setRole] = useState<Role>('Coach'); // default until profile loads
   const [clubId, setClubId] = useState<string | null>(null);
+  const [athleteId, setAthleteId] = useState<string | null>(null); // set only for role === 'Player'
   const [authUser, setAuthUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
   // Load real role + club from user_profiles on auth change
   useEffect(() => {
     const loadProfile = async (userId: string) => {
-      const validRoles: Role[] = ['Admin', 'S&C', 'Physio', 'Coach'];
+      const validRoles: Role[] = ['Admin', 'S&C', 'Physio', 'Coach', 'Player'];
 
       // Retry up to 3 times — session can race on first load
       for (let attempt = 0; attempt < 3; attempt++) {
         const { data, error } = await supabase
           .from('user_profiles')
-          .select('club_id, role, full_name')
+          .select('club_id, role, full_name, athlete_id')
           .eq('id', userId)
           .maybeSingle();
 
@@ -950,6 +961,7 @@ const AthleteManager = () => {
           console.log('[loadProfile] raw role from DB:', JSON.stringify(rawRole), '→', loadedRole);
           setRole(loadedRole);
           setClubId(data.club_id);
+          setAthleteId(data.athlete_id ?? null);
           setAuthLoading(false);
           return;
         }
@@ -985,7 +997,7 @@ const AthleteManager = () => {
   }, []);
 
   const navigateTo = (page: string) => { setCurrentPage(page); setShowMenu(false); };
-  const getPageTitle = () => ({ home: 'Home', availability: 'Availability', 'session-plan': 'Session Plan', 'add-drill': 'Create Drill', 'athlete-profile': 'Athlete Profile', setup: 'Setup', reporting: 'Reporting' }[currentPage] || 'Team');
+  const getPageTitle = () => ({ home: 'Home', availability: 'Availability', 'session-plan': 'Session Plan', 'add-drill': 'Create Drill', 'athlete-profile': 'Athlete Profile', setup: 'Setup', reporting: 'Reporting', gym: 'Gym' }[currentPage] || 'Team');
 
   // loading is now an overlay so the app shell stays visible
 
@@ -993,14 +1005,17 @@ const AthleteManager = () => {
     { page: 'home', Icon: Target, label: 'Home' },
     { page: 'availability', Icon: Calendar, label: 'Availability' },
     { page: 'session-plan', Icon: Zap, label: 'Session Plan' },
+    { page: 'gym', Icon: Dumbbell, label: 'Gym' },
     { page: 'reporting', Icon: BarChart3, label: 'Reporting' },
 
     { page: 'setup', Icon: Settings, label: 'Setup' },
   ];
-  const navItems = allNavItems.filter(item => ROLE_ACCESS[role].includes(item.page));
+  const navItems = allNavItems.filter(item => role !== 'Player' && ROLE_ACCESS[role].includes(item.page));
 
-  // If current page not accessible for role, redirect to first allowed page
-  const allowedPages = ROLE_ACCESS[role];
+  // If current page not accessible for role, redirect to first allowed page.
+  // 'Player' has no entry in ROLE_ACCESS — it never reaches this shell at all
+  // (see the role === 'Player' branch below, rendered before this point).
+  const allowedPages = role === 'Player' ? [] : ROLE_ACCESS[role];
   const effectivePage = allowedPages.includes(currentPage) ? currentPage : allowedPages[0];
 
   const UserInfo = ({ dark = false }: { dark?: boolean }) => {
@@ -1049,6 +1064,30 @@ const AthleteManager = () => {
 
   if (!authUser) {
     return <LoginScreen />;
+  }
+
+  // Players get a dedicated, Gym-only screen — no sidebar, no other pages.
+  // (Deliberately bypasses ROLE_ACCESS/effectivePage entirely — see plan.)
+  if (role === 'Player') {
+    if (!athleteId) {
+      return (
+        <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl p-6 max-w-sm w-full text-center">
+            <p className="text-slate-700 font-medium mb-2">No player profile linked</p>
+            <p className="text-slate-400 text-sm">Ask your club admin to link your login to an athlete record.</p>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <PlayerGymView
+        athleteId={athleteId}
+        athleteName={athletes.find((a: Athlete) => a.id === athleteId)?.name}
+        clubId={clubId || ''}
+        userId={authUser.id}
+        authEmail={authUser.email}
+      />
+    );
   }
 
   return (
@@ -1147,6 +1186,7 @@ const AthleteManager = () => {
           {effectivePage === 'session-plan' && <SessionPlanPage drills={drills} setDrills={setDrills} weekDrills={weekDrills} setWeekDrills={setWeekDrills} navigateTo={navigateTo} athletes={athletes} drillTypes={drillTypes} teamStructure={teamStructure} defaultTeam={defaultTeam} onSaveDefaultTeam={saveDefaultTeam} selectedDate={selectedDate} onDateChange={handleDateChange} onSaveSessionPlan={saveSessionPlan} saving={saving} getWeekDates={getWeekDates} role={role} />}
           {effectivePage === 'add-drill' && <AddDrillPage drills={drills} setDrills={setDrills} weekDrills={weekDrills} setWeekDrills={setWeekDrills} selectedDate={selectedDate} navigateTo={navigateTo} drillTypes={drillTypes} defaultTeam={defaultTeam} athletes={athletes} teamStructure={teamStructure} />}
           {effectivePage === 'athlete-profile' && <AthleteProfilePage athletes={athletes} athleteId={selectedAthleteId} navigateTo={navigateTo} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} onSave={saveAthlete} onDelete={deleteAthlete} saving={saving} role={role} />}
+          {effectivePage === 'gym' && <GymRoot athletes={athletes} role={role} userId={authUser?.id} clubId={clubId || ''} />}
           {effectivePage === 'reporting' && <ReportingPage athletes={athletes} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} />}
 
           {effectivePage === 'setup' && <SetupPage drillTypes={drillTypes} seasonDates={seasonDates} teamStructure={teamStructure} onSaveDrillType={saveDrillType} onDeleteDrillType={deleteDrillType} onSaveSeasonDate={saveSeasonDate} onDeleteSeasonDate={deleteSeasonDate} onSaveTeamStructure={saveTeamStructure} onDeleteTeamStructure={deleteTeamStructurePosition} saving={saving} clubId={clubId} currentUserId={authUser?.id} />}
@@ -4041,6 +4081,8 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
           </div>
         )}
       </div>
+
+      <ExerciseBankAdmin clubId={clubId} currentUserId={currentUserId} />
     </div>
   );
 };

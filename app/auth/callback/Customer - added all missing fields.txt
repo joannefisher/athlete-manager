@@ -1,0 +1,53 @@
+{
+  "data": [
+    {
+      "firstName": "Barry",
+      "lastName": "White",
+      "salutation": "Mr",
+      "email": "barryswhite@gmail.com",
+      "created": "2024-02-21T09:14:02Z",
+      "ids": {
+        "posId": "CUS_007490441",
+        "cdpId": "cda703e8-df24-4dd7-a868-1dc44df9b355"
+      },
+      "consent": {
+        "marketingEmail": true,
+        "marketingMessaging": false,
+        "marketingPostal": false,
+        "clientelingEmail": false,
+        "clientelingMessaging": false
+      },
+      "baseAddress": {
+        "type": "(0.1) Active Membership with Member Contact Address",
+        "address1": "19 Fir Tree Avenue",
+        "address2": "Haslemere",
+        "city": "Kent",
+        "state": "South East",
+        "country": "United Kingdom",
+        "postalCode": "GU27 1PL"
+      },
+      "lastTransactionDate": "2026-04-05T14:45:15Z",
+      "companyName": "ABC",
+      "ownerId": "v18000",
+      "phoneHome": "0132201322",
+      "segment": "08 Active Existing Loyal",
+      "atv": 74.214285,
+      "totalSpend": 519.5,
+      "spendLast12Months": 423.1,
+      "totalTransactions": 7,
+      "totalTransactionsLast12Months": 5,
+      "atvLast12Months": 84.62,
+      "currency": "GBP",
+      "accountholder": false,
+      "birthDay": 21,
+      "birthMonth": 4,
+      "IsPrimary": false,
+      "IsCorporate": false,
+      "customProperties": {
+        "customerGroup": "Private",
+        "FOFId": "0003984",
+        "ukRegion": "South East"
+      }
+    }
+  ]
+}
