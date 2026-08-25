@@ -4,7 +4,23 @@
 // by StaffDailyView's per-player row and StaffWeeklyView's per-day cell so
 // both show what's actually planned instead of a bare item count.
 
-import type { GymSessionItem } from './types';
+import type { GymSessionItem, GymSessionItemSide, GymSessionItemType } from './types';
+
+// Shape shared by GymSessionItem (an athlete's own item) and GymGroupPlanItem
+// (a group plan's item, no effectiveExerciseName/wasSwapped fields of its
+// own) — lets these formatters serve both UI 2's Calendar/Compare tabs
+// (per-athlete) and the "All players" group-plan equivalents without
+// duplicating this logic.
+interface ItemLike {
+  itemType: GymSessionItemType;
+  noteText: string | null;
+  exerciseName?: string;
+  effectiveExerciseName?: string;
+  side: GymSessionItemSide;
+  sets: number | null;
+  reps: number | null;
+  load: string | null;
+}
 
 export const sideLabel = (side: string): string => (side === 'left' ? 'Left' : side === 'right' ? 'Right' : '');
 
@@ -17,13 +33,13 @@ export function itemMetaText(item: Pick<GymSessionItem, 'sets' | 'reps' | 'load'
   );
 }
 
-export function itemDisplayName(item: GymSessionItem): string {
+export function itemDisplayName(item: ItemLike): string {
   if (item.itemType !== 'exercise') return item.noteText || 'Note';
   return item.effectiveExerciseName || item.exerciseName || 'Exercise';
 }
 
 /** One tight line for the week grid, e.g. "Front Squat (L) 4×5 @90kg". */
-export function itemCompactLabel(item: GymSessionItem): string {
+export function itemCompactLabel(item: ItemLike): string {
   if (item.itemType !== 'exercise') return item.noteText || 'Note';
   const name = itemDisplayName(item);
   const sideTag = item.side !== 'both' ? ` (${item.side === 'left' ? 'L' : 'R'})` : '';

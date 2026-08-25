@@ -26,7 +26,6 @@ export const StaffDailyView = ({
   rehabAthleteIds,
   onOpenSession,
   onOpenGroupSession,
-  onManageGroups,
 }: {
   date: string;
   clubId: string;
@@ -41,7 +40,6 @@ export const StaffDailyView = ({
   rehabAthleteIds?: Set<string>;
   onOpenSession: (athleteId: string, date: string) => void;
   onOpenGroupSession: (groupId: string, date: string) => void;
-  onManageGroups: () => void;
 }) => {
   const { pushUndo } = useGymUndo();
   const [sessions, setSessions] = useState<GymSession[]>([]);
@@ -103,37 +101,29 @@ export const StaffDailyView = ({
   return (
     <div>
       {canEdit && (
-        <div className="flex items-center gap-2 mb-3">
-          <div className="relative flex-1">
-            <button
-              onClick={() => setShowGroupMenu(v => !v)}
-              disabled={sessionGroups.length === 0}
-              className="w-full h-9 flex items-center justify-center gap-1.5 text-[13px] font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40"
-            >
-              <Users className="w-3.5 h-3.5" />
-              Group session…
-            </button>
-            {showGroupMenu && (
-              <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
-                {sessionGroups.map(g => (
-                  <button
-                    key={g.id}
-                    onClick={() => { setShowGroupMenu(false); onOpenGroupSession(g.id, date); }}
-                    className="w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50 flex items-center justify-between"
-                  >
-                    <span>{g.name}</span>
-                    <span className="text-[11px] text-slate-400">{g.memberAthleteIds.length} players</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+        <div className="relative mb-3">
           <button
-            onClick={onManageGroups}
-            className="h-9 px-3 flex items-center gap-1.5 text-[13px] font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 whitespace-nowrap"
+            onClick={() => setShowGroupMenu(v => !v)}
+            disabled={sessionGroups.length === 0}
+            className="w-full h-9 flex items-center justify-center gap-1.5 text-[13px] font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40"
           >
-            Manage groups
+            <Users className="w-3.5 h-3.5" />
+            Group session…
           </button>
+          {showGroupMenu && (
+            <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+              {sessionGroups.map(g => (
+                <button
+                  key={g.id}
+                  onClick={() => { setShowGroupMenu(false); onOpenGroupSession(g.id, date); }}
+                  className="w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50 flex items-center justify-between"
+                >
+                  <span>{g.name}</span>
+                  <span className="text-[11px] text-slate-400">{g.memberAthleteIds.length} players</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

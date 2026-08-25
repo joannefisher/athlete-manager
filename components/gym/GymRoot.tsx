@@ -14,7 +14,6 @@ import { WeekStrip, GymViewMode, getWeekDates, todayIso } from './WeekStrip';
 import { StaffDailyView } from './StaffDailyView';
 import { StaffWeeklyView } from './StaffWeeklyView';
 import { SessionEditor } from './SessionEditor';
-import { GroupPicker } from './GroupPicker';
 import { GroupSessionEditor } from './GroupSessionEditor';
 import {
   fetchExerciseGroups,
@@ -50,9 +49,10 @@ export const GymRoot = ({
   const [sessionGroups, setSessionGroups] = useState<GymSessionGroup[]>([]);
 
   // 'roster' = the default day/week + split session-pane screen,
-  // 'groups' = managing gym-only player groups,
   // 'group-editor' = bulk-building/editing a group's session for a date.
-  const [screen, setScreen] = useState<'roster' | 'groups' | 'group-editor'>('roster');
+  // Managing gym-only player groups now lives in Gym.tsx's own sidebar nav
+  // (shared by UI 1 and UI 2), not as an internal screen here.
+  const [screen, setScreen] = useState<'roster' | 'group-editor'>('roster');
   const [editingAthleteId, setEditingAthleteId] = useState<string | null>(null);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   // Mobile only: whether the full-screen session view is pushed open over the roster.
@@ -137,20 +137,6 @@ export const GymRoot = ({
       <div className="flex items-center justify-center py-24">
         <Loader2 className="w-6 h-6 text-slate-300 animate-spin" />
       </div>
-    );
-  }
-
-  if (screen === 'groups') {
-    return (
-      <GroupPicker
-        clubId={clubId}
-        userId={userId}
-        athletes={athletes}
-        teamStructure={teamStructure}
-        sessionGroups={sessionGroups}
-        onChanged={loadReferenceData}
-        onBack={() => setScreen('roster')}
-      />
     );
   }
 
@@ -288,7 +274,6 @@ export const GymRoot = ({
                   rehabAthleteIds={rehabAthleteIds}
                   onOpenSession={openSession}
                   onOpenGroupSession={openGroupSession}
-                  onManageGroups={() => setScreen('groups')}
                 />
               ) : (
                 <StaffWeeklyView

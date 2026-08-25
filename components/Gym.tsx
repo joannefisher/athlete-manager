@@ -8,19 +8,21 @@
 // settings. Follows the same sidebar shell as RehabPlanner/MainSchedule so it
 // looks and feels native to the rest of the app.
 
-import React, { useEffect, useState } from 'react';
-import { ArrowLeft, ChevronLeft, Dumbbell, Library, Loader2, Settings, X } from 'lucide-react';
+import React, { useEffect, useState, useCallback } from 'react';
+import { ArrowLeft, ChevronLeft, Dumbbell, Library, Loader2, Settings, Users, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import type { Role } from './AthleteManager';
 import { GymRoot } from './gym/GymRoot';
 import { GymUI2Root } from './gym/GymUI2Root';
 import { PlayerSessionsView, PlayerDefaultsView } from './gym/PlayerGymView';
 import { ExerciseBankAdmin } from './gym/ExerciseBankAdmin';
+import { GroupPicker } from './gym/GroupPicker';
+import { fetchSessionGroups } from './gym/gymApi';
 import { gymCanEdit } from './gym/permissions';
 import { GymUndoProvider, GymUndoButton } from './gym/GymUndoContext';
-import type { GymAthlete, GymTeamPosition } from './gym/types';
+import type { GymAthlete, GymSessionGroup, GymTeamPosition } from './gym/types';
 
-type Page = 'sessions' | 'exercise-bank' | 'defaults';
+type Page = 'sessions' | 'groups' | 'exercise-bank' | 'defaults';
 // UI 1 is today's live sessions experience (GymRoot) — kept exactly as-is.
 // UI 2 is the calendar-first redesign (Concept C: scope switcher + date
 // stepper + Day/Calendar/Compare tabs — see GymUI2Root) built from the
@@ -34,6 +36,7 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
   const [loading, setLoading] = useState(true);
   const [athletes, setAthletes] = useState<GymAthlete[]>([]);
   const [teamStructure, setTeamStructure] = useState<GymTeamPosition[]>([]);
+  const [sessionGroups, setSessionGroups] = useState<GymSessionGroup[]>([]);
   const [linkedAthleteId, setLinkedAthleteId] = useState<string | null>(null);
   const [myName, setMyName] = useState<string | null>(null);
   const [page, setPage] = useState<Page>('sessions');
@@ -83,6 +86,20 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
     return () => { cancelled = true; };
   }, [isPlayer, clubId, authUser?.id]);
 
+  // Gym-only session groups, fetched here (not just inside GymRoot/GymUI2Root)
+  // so "Manage Groups" can live as its own sidebar page shared by both UI
+  // versions, rather than a screen tucked inside each one separately.
+  const loadSessionGroups = useCallback(async () => {
+    if (isPlayer) return;
+    try {
+      setSessionGroups(await fetchSessionGroups(clubId));
+    } catch (err) {
+      console.error('[Gym] failed to load session groups', err);
+    }
+  }, [isPlayer, clubId]);
+
+  useEffect(() => { loadSessionGroups(); }, [loadSessionGroups]);
+
   const navItems: { id: Page; label: string; Icon: any }[] = isPlayer
     ? [
         { id: 'sessions', label: 'My Sessions', Icon: Dumbbell },
@@ -90,10 +107,16 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
       ]
     : [
         { id: 'sessions', label: 'Sessions', Icon: Dumbbell },
-        { id: 'exercise-bank', label: 'Exercise Bank', Icon: Library },
+        ...(canEdit ? [{ id: 'groups' as Page, label: 'Groups', Icon: Users }] : []),
+        { id: 'exercise-bank', label: 'Exercises', Icon: Library },
       ];
 
-  const pageTitle = { sessions: isPlayer ? 'My Sessions' : 'Gym Sessions', 'exercise-bank': 'Exercise Bank', defaults: 'My Defaults' }[page];
+  const pageTitle = {
+    sessions: isPlayer ? 'My Sessions' : 'Gym Sessions',
+    groups: 'Manage Groups',
+    'exercise-bank': 'Exercises',
+    defaults: 'My Defaults',
+  }[page];
 
   return (
     <GymUndoProvider>
@@ -206,6 +229,16 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
           ) : (
             <PlayerSessionsView athleteId={linkedAthleteId} />
           )
+        ) : page === 'groups' ? (
+          <GroupPicker
+            clubId={clubId}
+            userId={authUser.id}
+            athletes={athletes}
+            teamStructure={teamStructure}
+            sessionGroups={sessionGroups}
+            onChanged={loadSessionGroups}
+            onBack={() => setPage('sessions')}
+          />
         ) : page === 'exercise-bank' ? (
           <div className="max-w-2xl mx-auto p-4 md:p-6 space-y-3 w-full">
             <ExerciseBankAdmin clubId={clubId} currentUserId={authUser.id} canEdit={canEdit} role={role} />

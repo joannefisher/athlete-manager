@@ -12,7 +12,7 @@
 // untouched — this is a sibling, switched to from Gym.tsx's UI 1/UI 2 toggle.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { ChevronDown, ChevronLeft, ChevronRight, Loader2, Settings } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import type { Role } from '../AthleteManager';
 import type { GymAthlete as Athlete, GymExerciseGroup, GymExercise, GymSessionGroup, GymTeamPosition } from './types';
 import { fetchExerciseGroups, fetchExercises, fetchSessionGroups } from './gymApi';
@@ -21,7 +21,8 @@ import { gymCanEdit } from './permissions';
 import { SessionEditor } from './SessionEditor';
 import { GymUI2Calendar } from './GymUI2Calendar';
 import { GymUI2Compare } from './GymUI2Compare';
-import { GroupPicker } from './GroupPicker';
+import { GymUI2GroupCalendar } from './GymUI2GroupCalendar';
+import { GymUI2GroupCompare } from './GymUI2GroupCompare';
 import { GroupPlanEditor } from './GroupPlanEditor';
 import { MoveSessionButton } from './MoveSessionButton';
 import { DatePickerPopover } from './DatePickerPopover';
@@ -49,7 +50,6 @@ export const GymUI2Root = ({
   const [exerciseGroups, setExerciseGroups] = useState<GymExerciseGroup[]>([]);
   const [exercises, setExercises] = useState<GymExercise[]>([]);
   const [sessionGroups, setSessionGroups] = useState<GymSessionGroup[]>([]);
-  const [screen, setScreen] = useState<'main' | 'groups'>('main');
 
   const [scopeMode, setScopeMode] = useState<ScopeMode>('player');
   const [selectedAthleteId, setSelectedAthleteId] = useState<string>('');
@@ -111,14 +111,6 @@ export const GymUI2Root = ({
   const currentAthleteId = scopeMode === 'player' ? selectedAthleteId : isAllMode ? '' : selectedMemberId;
   const currentAthlete = athletes.find(a => a.id === currentAthleteId);
 
-  // "All" only makes sense for the Day tab (one shared plan for the whole
-  // group) — Calendar/Compare are always about a single athlete's own
-  // calendar or a hand-picked set of players, so bounce back to Day if the
-  // scope switches into All mode while on either of those tabs.
-  useEffect(() => {
-    if (isAllMode && tab !== 'day') setTab('day');
-  }, [isAllMode, tab]);
-
   const stepDate = (dir: 1 | -1) => {
     const d = new Date(date + 'T00:00:00');
     if (tab === 'calendar') d.setMonth(d.getMonth() + dir);
@@ -138,20 +130,6 @@ export const GymUI2Root = ({
       <div className="flex items-center justify-center py-24">
         <Loader2 className="w-6 h-6 text-slate-300 animate-spin" />
       </div>
-    );
-  }
-
-  if (screen === 'groups') {
-    return (
-      <GroupPicker
-        clubId={clubId}
-        userId={userId}
-        athletes={athletes}
-        teamStructure={teamStructure}
-        sessionGroups={sessionGroups}
-        onChanged={loadReferenceData}
-        onBack={() => setScreen('main')}
-      />
     );
   }
 
@@ -225,15 +203,6 @@ export const GymUI2Root = ({
             )}
           </>
         )}
-
-        {canEditGym && (
-          <button
-            onClick={() => setScreen('groups')}
-            className="ml-auto h-8 px-2.5 flex items-center gap-1.5 rounded-md border border-slate-200 text-[11.5px] font-medium text-slate-500 bg-white hover:bg-slate-50"
-          >
-            <Settings className="w-3.5 h-3.5" /> Manage groups
-          </button>
-        )}
       </div>
 
       {/* Date stepper + tabs */}
@@ -282,39 +251,59 @@ export const GymUI2Root = ({
         )}
 
         <div className="flex bg-slate-100 rounded-md p-0.5 text-[12px] font-medium ml-auto">
-          {(['day', 'calendar', 'compare'] as UI2Tab[]).map(t => {
-            const disabled = isAllMode && t !== 'day';
-            return (
-              <button
-                key={t}
-                onClick={() => !disabled && setTab(t)}
-                disabled={disabled}
-                title={disabled ? 'Switch to a specific player to use this tab' : undefined}
-                className={`px-3 py-1.5 rounded capitalize ${
-                  disabled ? 'text-slate-300 cursor-not-allowed' : tab === t ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'
-                }`}
-              >
-                {t}
-              </button>
-            );
-          })}
+          {(['day', 'calendar', 'compare'] as UI2Tab[]).map(t => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-3 py-1.5 rounded capitalize ${tab === t ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}
+            >
+              {t}
+            </button>
+          ))}
         </div>
       </div>
 
       {/* Tab content */}
       {isAllMode && currentGroup ? (
-        <GroupPlanEditor
-          key={`${currentGroup.id}-${date}-${refreshNonce}`}
-          group={currentGroup}
-          date={date}
-          clubId={clubId}
-          userId={userId}
-          canEdit={canEditGym}
-          athletes={athletes}
-          exerciseGroups={exerciseGroups}
-          exercises={exercises}
-          onExercisesChanged={loadReferenceData}
-        />
+        tab === 'day' ? (
+          <GroupPlanEditor
+            key={`${currentGroup.id}-${date}-${refreshNonce}`}
+            group={currentGroup}
+            date={date}
+            clubId={clubId}
+            userId={userId}
+            canEdit={canEditGym}
+            athletes={athletes}
+            exerciseGroups={exerciseGroups}
+            exercises={exercises}
+            onExercisesChanged={loadReferenceData}
+          />
+        ) : tab === 'calendar' ? (
+          <GymUI2GroupCalendar
+            key={`group-${currentGroup.id}`}
+            group={currentGroup}
+            monthAnchor={date}
+            clubId={clubId}
+            userId={userId}
+            canEdit={canEditGym}
+            athletes={athletes}
+            exerciseGroups={exerciseGroups}
+            exercises={exercises}
+            onExercisesChanged={loadReferenceData}
+            selectedDate={date}
+            onSelectDate={setDate}
+          />
+        ) : (
+          <GymUI2GroupCompare
+            key={`group-${currentGroup.id}`}
+            group={currentGroup}
+            clubId={clubId}
+            userId={userId}
+            canEdit={canEditGym}
+            exercises={exercises}
+            anchorDate={date}
+          />
+        )
       ) : !currentAthleteId ? (
         <div className="bg-white rounded-lg border border-slate-200 p-8 text-center text-[13px] text-slate-400">
           {scopeMode === 'group' ? 'Choose a group with at least one member to see sessions.' : 'Select a player to see their session.'}

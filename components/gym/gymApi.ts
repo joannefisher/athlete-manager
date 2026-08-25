@@ -1045,6 +1045,118 @@ export async function syncGroupPlanItemChange(
   return { appliedCount, conflicts };
 }
 
+/**
+ * All of a group's plan items across a set of dates, keyed by date — used
+ * by UI 2's Calendar/Compare tabs in "All players" mode, which show only
+ * the group's shared plan for each date, never any individual member's own
+ * modifications or additions (those live on the members' own gym_sessions
+ * rows, never fetched here).
+ */
+export async function fetchGroupPlansForDateRange(groupId: string, dates: string[]): Promise<Map<string, GymGroupPlanItem[]>> {
+  const map = new Map<string, GymGroupPlanItem[]>();
+  if (dates.length === 0) return map;
+  const { data: plans, error: plansErr } = await supabase
+    .from('gym_group_session_plans')
+    .select('id, date')
+    .eq('group_id', groupId)
+    .in('date', dates);
+  if (plansErr) throw plansErr;
+  if (!plans || plans.length === 0) return map;
+
+  const planIdToDate = new Map<string, string>();
+  for (const p of plans) planIdToDate.set(p.id, p.date);
+
+  const { data: itemRows, error: itemsErr } = await supabase
+    .from('gym_group_plan_items')
+    .select(GROUP_PLAN_ITEM_SELECT)
+    .in('plan_id', Array.from(planIdToDate.keys()))
+    .order('sort_order');
+  if (itemsErr) throw itemsErr;
+
+  for (const row of itemRows || []) {
+    const item = mapGroupPlanItem(row);
+    const date = planIdToDate.get(item.planId);
+    if (!date) continue;
+    if (!map.has(date)) map.set(date, []);
+    map.get(date)!.push(item);
+  }
+  return map;
+}
+
+export interface CopyGroupPlanResult {
+  date: string;
+  items: GymGroupPlanItem[]; // newly created plan items at this destination — used to undo the copy
+  appliedCount: number;
+  conflicts: GymGroupPlanConflict[];
+}
+
+/**
+ * Copy a set of group-plan items onto one or more destination dates for the
+ * same group (used by "All players" mode's Calendar copy/paste and
+ * Compare's "Copy to this week"). Each destination's plan is created if
+ * needed and items are appended after whatever's already there. Every
+ * newly created plan item is then fanned out to every member via
+ * syncGroupPlanItemChange with `before: null` — the same "brand-new item"
+ * path GroupPlanEditor's own add-item flow uses — so it applies
+ * automatically to anyone with no existing customization and raises a
+ * conflict for anyone who's already added their own item in that same
+ * "slot" (rare, since the plan item is new, but kept for consistency with
+ * the rest of the group-plan API rather than assuming it can't happen).
+ */
+export async function copyGroupPlanItems(
+  items: GymGroupPlanItem[],
+  destinations: { date: string }[],
+  clubId: string,
+  groupId: string,
+  memberAthleteIds: string[],
+  exerciseGroupIdFor: (exerciseId: string) => string | null,
+  userId: string
+): Promise<CopyGroupPlanResult[]> {
+  const results: CopyGroupPlanResult[] = [];
+  for (const dest of destinations) {
+    const plan = await getOrCreateGroupPlan(clubId, groupId, dest.date, userId);
+    const existing = await fetchGroupPlanItems(plan.id);
+    let sortOrder = existing.length;
+    const created: GymGroupPlanItem[] = [];
+    let appliedCount = 0;
+    const conflicts: GymGroupPlanConflict[] = [];
+    for (const item of items) {
+      const saved = await saveGroupPlanItem(plan.id, groupPlanItemToDraft(item), sortOrder, userId);
+      created.push(saved);
+      sortOrder++;
+      const result = await syncGroupPlanItemChange(clubId, groupId, memberAthleteIds, dest.date, saved.id, null, saved, exerciseGroupIdFor, userId);
+      appliedCount += result.appliedCount;
+      conflicts.push(...result.conflicts);
+    }
+    results.push({ date: dest.date, items: created, appliedCount, conflicts });
+  }
+  return results;
+}
+
+/**
+ * Undo helper for a group-plan copy/paste: deletes the given plan items and
+ * every member session item that was fanned out from them, on one date.
+ * Best-effort by design (mirrors the rest of Undo in this module) — a
+ * conflict a coach had already resolved before hitting Undo isn't reversed.
+ */
+export async function deleteGroupPlanItemsAndSynced(
+  planItemIds: string[],
+  clubId: string,
+  groupId: string,
+  memberAthleteIds: string[],
+  date: string
+): Promise<void> {
+  const memberSessions = await fetchSessionsForDateRange(clubId, [date]);
+  for (const planItemId of planItemIds) {
+    for (const athleteId of memberAthleteIds) {
+      const session = memberSessions.find(s => s.athleteId === athleteId);
+      const item = session?.items?.find(i => i.planItemId === planItemId);
+      if (item) await deleteSessionItem(item.id);
+    }
+    await deleteGroupPlanItem(planItemId);
+  }
+}
+
 /** Apply one conflict's decision — `accept: true` takes the plan's new value, `false` leaves the member's own item exactly as it is. */
 export async function resolveGroupPlanConflict(clubId: string, conflict: GymGroupPlanConflict, accept: boolean, userId: string): Promise<void> {
   if (!accept) return; // "keep current" — member's existing state (including "already removed") is left untouched
