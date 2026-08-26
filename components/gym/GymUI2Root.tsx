@@ -11,7 +11,7 @@
 // (same-weekday-past-weeks, or players-on-a-date). UI 1 (GymRoot) is
 // untouched — this is a sibling, switched to from Gym.tsx's UI 1/UI 2 toggle.
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import type { Role } from '../AthleteManager';
 import type { GymAthlete as Athlete, GymExerciseGroup, GymExercise, GymSessionGroup, GymTeamPosition } from './types';
@@ -61,8 +61,16 @@ export const GymUI2Root = ({
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [refreshNonce, setRefreshNonce] = useState(0);
 
+  // Only the very first load should block the whole screen behind the
+  // spinner below — a later refresh (e.g. onExercisesChanged() firing after
+  // the Day tab's session editor creates a brand-new exercise inline) must
+  // not re-show it, since that would unmount/remount SessionEditor and
+  // everything under it, wiping out whatever the user was still mid-way
+  // through entering.
+  const hasLoadedReferenceDataOnce = useRef(false);
+
   const loadReferenceData = useCallback(async () => {
-    setLoading(true);
+    if (!hasLoadedReferenceDataOnce.current) setLoading(true);
     try {
       const [groups, exs, sGroups] = await Promise.all([
         fetchExerciseGroups(clubId),
@@ -76,6 +84,7 @@ export const GymUI2Root = ({
       console.error('[GymUI2Root] failed to load reference data', err);
     } finally {
       setLoading(false);
+      hasLoadedReferenceDataOnce.current = true;
     }
   }, [clubId]);
 

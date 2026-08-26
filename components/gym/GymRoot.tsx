@@ -7,7 +7,7 @@
 // see a session). Mobile: tapping a roster row still pushes into a
 // full-screen session view, since a two-pane layout doesn't fit a phone.
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Filter, Loader2 } from 'lucide-react';
 import type { Role } from '../AthleteManager';
 import { WeekStrip, GymViewMode, getWeekDates, todayIso } from './WeekStrip';
@@ -67,8 +67,15 @@ export const GymRoot = ({
   const canEditGym = gymCanEdit(role);
   const weekCommencing = getWeekDates(selectedDate)[0];
 
+  // Only the very first load should block the whole screen behind the
+  // spinner below — a later refresh (e.g. onExercisesChanged() firing after
+  // a session editor creates a brand-new exercise inline) must not re-show
+  // it, since that would unmount/remount SessionEditor and everything under
+  // it, wiping out whatever the user was still mid-way through entering.
+  const hasLoadedReferenceDataOnce = useRef(false);
+
   const loadReferenceData = useCallback(async () => {
-    setLoading(true);
+    if (!hasLoadedReferenceDataOnce.current) setLoading(true);
     try {
       const [groups, types, exs, sGroups] = await Promise.all([
         fetchExerciseGroups(clubId),
@@ -84,6 +91,7 @@ export const GymRoot = ({
       console.error('[GymRoot] failed to load reference data', err);
     } finally {
       setLoading(false);
+      hasLoadedReferenceDataOnce.current = true;
     }
   }, [clubId]);
 
