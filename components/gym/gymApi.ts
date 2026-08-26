@@ -421,6 +421,7 @@ function mapSessionItem(r: any): GymSessionItem {
     wasSwapped: r.was_swapped,
     noteText: r.note_text,
     planItemId: r.plan_item_id ?? null,
+    supersetId: r.superset_id ?? null,
     createdBy: r.created_by,
     createdByName: r.creator?.full_name,
     createdAt: r.created_at,
@@ -430,7 +431,7 @@ function mapSessionItem(r: any): GymSessionItem {
 }
 
 const SESSION_ITEM_SELECT =
-  'id, session_id, sort_order, item_type, exercise_id, sets, reps, load, is_primary, side, effective_exercise_id, was_swapped, note_text, plan_item_id, created_by, created_at, updated_by, updated_at, ' +
+  'id, session_id, sort_order, item_type, exercise_id, sets, reps, load, is_primary, side, effective_exercise_id, was_swapped, note_text, plan_item_id, superset_id, created_by, created_at, updated_by, updated_at, ' +
   'exercise:gym_exercises!gym_session_items_exercise_id_fkey(name), ' +
   'effective_exercise:gym_exercises!gym_session_items_effective_exercise_id_fkey(name), ' +
   'creator:user_profiles!gym_session_items_created_by_fkey(full_name)';
@@ -685,12 +686,25 @@ export async function deleteSessionItem(itemId: string): Promise<void> {
   if (error) throw error;
 }
 
-/** Persist a new item order after a drag-reorder. */
-export async function reorderSessionItems(items: { id: string; sortOrder: number }[]): Promise<void> {
+/**
+ * Persist a new item order after a drag-reorder. Pass `supersetId` (even as
+ * `null`) when a Superset drag also needs to change that item's grouping —
+ * see supersetDnd.ts. Omitting the key entirely leaves grouping untouched.
+ */
+export async function reorderSessionItems(items: { id: string; sortOrder: number; supersetId?: string | null }[]): Promise<void> {
   for (const item of items) {
-    const { error } = await supabase.from('gym_session_items').update({ sort_order: item.sortOrder }).eq('id', item.id);
+    const payload: any = { sort_order: item.sortOrder };
+    if ('supersetId' in item) payload.superset_id = item.supersetId;
+    const { error } = await supabase.from('gym_session_items').update(payload).eq('id', item.id);
     if (error) throw error;
   }
+}
+
+/** Bulk-assign (or clear, with `supersetId: null`) the Superset grouping key for a set of session items at once. */
+export async function setSessionItemsSuperset(itemIds: string[], supersetId: string | null): Promise<void> {
+  if (itemIds.length === 0) return;
+  const { error } = await supabase.from('gym_session_items').update({ superset_id: supersetId }).in('id', itemIds);
+  if (error) throw error;
 }
 
 export function itemToDraft(item: GymSessionItem): GymSessionItemDraft {
@@ -733,10 +747,22 @@ export async function copySessionItems(
     const existing = await fetchAthleteSessionsForDateRange(dest.athleteId, [dest.date]);
     let sortOrder = existing[0]?.items?.length ?? 0;
     const created: GymSessionItem[] = [];
+    // Re-create each source Superset's grouping among the newly-created items at this destination —
+    // items stay contiguous since they're appended in the same relative order as the source.
+    const idsBySuperset = new Map<string, string[]>();
     for (const item of items) {
       const exerciseGroupId = item.itemType === 'exercise' && item.exerciseId ? exerciseGroupIdFor(item.exerciseId) : null;
-      created.push(await saveSessionItem(session.id, dest.athleteId, itemToDraft(item), exerciseGroupId, sortOrder, userId));
+      const saved = await saveSessionItem(session.id, dest.athleteId, itemToDraft(item), exerciseGroupId, sortOrder, userId);
       sortOrder++;
+      if (item.supersetId) {
+        if (!idsBySuperset.has(item.supersetId)) idsBySuperset.set(item.supersetId, []);
+        idsBySuperset.get(item.supersetId)!.push(saved.id);
+        saved.supersetId = item.supersetId;
+      }
+      created.push(saved);
+    }
+    for (const [supersetId, ids] of idsBySuperset) {
+      if (ids.length > 1) await setSessionItemsSuperset(ids, supersetId);
     }
     results.push({ athleteId: dest.athleteId, date: dest.date, items: created });
   }
@@ -807,6 +833,7 @@ function mapGroupPlanItem(r: any): GymGroupPlanItem {
     isPrimary: r.is_primary,
     side: r.side || 'both',
     noteText: r.note_text,
+    supersetId: r.superset_id ?? null,
     createdBy: r.created_by,
     createdByName: r.creator?.full_name,
     createdAt: r.created_at,
@@ -816,7 +843,7 @@ function mapGroupPlanItem(r: any): GymGroupPlanItem {
 }
 
 const GROUP_PLAN_ITEM_SELECT =
-  'id, plan_id, sort_order, item_type, exercise_id, sets, reps, load, is_primary, side, note_text, created_by, created_at, updated_by, updated_at, ' +
+  'id, plan_id, sort_order, item_type, exercise_id, sets, reps, load, is_primary, side, note_text, superset_id, created_by, created_at, updated_by, updated_at, ' +
   'exercise:gym_exercises!gym_group_plan_items_exercise_id_fkey(name), ' +
   'creator:user_profiles!gym_group_plan_items_created_by_fkey(full_name)';
 
@@ -919,11 +946,20 @@ export async function deleteGroupPlanItem(itemId: string): Promise<void> {
   if (error) throw error;
 }
 
-export async function reorderGroupPlanItems(items: { id: string; sortOrder: number }[]): Promise<void> {
+export async function reorderGroupPlanItems(items: { id: string; sortOrder: number; supersetId?: string | null }[]): Promise<void> {
   for (const item of items) {
-    const { error } = await supabase.from('gym_group_plan_items').update({ sort_order: item.sortOrder }).eq('id', item.id);
+    const payload: any = { sort_order: item.sortOrder };
+    if ('supersetId' in item) payload.superset_id = item.supersetId;
+    const { error } = await supabase.from('gym_group_plan_items').update(payload).eq('id', item.id);
     if (error) throw error;
   }
+}
+
+/** Bulk-assign (or clear, with `supersetId: null`) the Superset grouping key for a set of group-plan items at once. */
+export async function setGroupPlanItemsSuperset(itemIds: string[], supersetId: string | null): Promise<void> {
+  if (itemIds.length === 0) return;
+  const { error } = await supabase.from('gym_group_plan_items').update({ superset_id: supersetId }).in('id', itemIds);
+  if (error) throw error;
 }
 
 /**
@@ -971,7 +1007,7 @@ export async function syncGroupPlanItemChange(
       const sortOrder = session?.items?.length ?? 0;
       const eg = after.itemType === 'exercise' && after.exerciseId ? exerciseGroupIdFor(after.exerciseId) : null;
       const saved = await saveSessionItem(s.id, athleteId, groupPlanItemToDraft(after), eg, sortOrder, userId);
-      const { error } = await supabase.from('gym_session_items').update({ plan_item_id: planItemId }).eq('id', saved.id);
+      const { error } = await supabase.from('gym_session_items').update({ plan_item_id: planItemId, superset_id: after.supersetId }).eq('id', saved.id);
       if (error) throw error;
       appliedCount++;
       continue;
@@ -991,6 +1027,7 @@ export async function syncGroupPlanItemChange(
         currentDraft: null,
         newDraft: groupPlanItemToDraft(after),
         exerciseGroupId: after.itemType === 'exercise' && after.exerciseId ? exerciseGroupIdFor(after.exerciseId) : null,
+        supersetId: after.supersetId,
       });
       continue;
     }
@@ -1014,6 +1051,7 @@ export async function syncGroupPlanItemChange(
           currentDraft: itemToDraft(memberItem),
           newDraft: null,
           exerciseGroupId: null,
+          supersetId: null,
         });
       }
       continue;
@@ -1023,7 +1061,7 @@ export async function syncGroupPlanItemChange(
     if (unmodified) {
       const eg = after.itemType === 'exercise' && after.exerciseId ? exerciseGroupIdFor(after.exerciseId) : null;
       const saved = await saveSessionItem(memberItem.sessionId, athleteId, { ...groupPlanItemToDraft(after), id: memberItem.id }, eg, memberItem.sortOrder, userId);
-      const { error } = await supabase.from('gym_session_items').update({ plan_item_id: planItemId }).eq('id', saved.id);
+      const { error } = await supabase.from('gym_session_items').update({ plan_item_id: planItemId, superset_id: after.supersetId }).eq('id', saved.id);
       if (error) throw error;
       appliedCount++;
     } else {
@@ -1038,6 +1076,7 @@ export async function syncGroupPlanItemChange(
         currentDraft: itemToDraft(memberItem),
         newDraft: groupPlanItemToDraft(after),
         exerciseGroupId: after.itemType === 'exercise' && after.exerciseId ? exerciseGroupIdFor(after.exerciseId) : null,
+        supersetId: after.supersetId,
       });
     }
   }
@@ -1120,13 +1159,22 @@ export async function copyGroupPlanItems(
     const created: GymGroupPlanItem[] = [];
     let appliedCount = 0;
     const conflicts: GymGroupPlanConflict[] = [];
+    const idsBySuperset = new Map<string, string[]>();
     for (const item of items) {
       const saved = await saveGroupPlanItem(plan.id, groupPlanItemToDraft(item), sortOrder, userId);
-      created.push(saved);
       sortOrder++;
+      if (item.supersetId) {
+        saved.supersetId = item.supersetId; // reflected immediately so the sync below fans it out to members too
+        if (!idsBySuperset.has(item.supersetId)) idsBySuperset.set(item.supersetId, []);
+        idsBySuperset.get(item.supersetId)!.push(saved.id);
+      }
+      created.push(saved);
       const result = await syncGroupPlanItemChange(clubId, groupId, memberAthleteIds, dest.date, saved.id, null, saved, exerciseGroupIdFor, userId);
       appliedCount += result.appliedCount;
       conflicts.push(...result.conflicts);
+    }
+    for (const [supersetId, ids] of idsBySuperset) {
+      if (ids.length > 1) await setGroupPlanItemsSuperset(ids, supersetId);
     }
     results.push({ date: dest.date, items: created, appliedCount, conflicts });
   }
@@ -1173,7 +1221,7 @@ export async function resolveGroupPlanConflict(clubId: string, conflict: GymGrou
   }
   const draft: GymSessionItemDraft = conflict.memberItemId ? { ...conflict.newDraft, id: conflict.memberItemId } : conflict.newDraft;
   const saved = await saveSessionItem(session.id, conflict.athleteId, draft, conflict.exerciseGroupId, sortOrder, userId);
-  const { error } = await supabase.from('gym_session_items').update({ plan_item_id: conflict.planItemId }).eq('id', saved.id);
+  const { error } = await supabase.from('gym_session_items').update({ plan_item_id: conflict.planItemId, superset_id: conflict.supersetId }).eq('id', saved.id);
   if (error) throw error;
 }
 
@@ -1217,11 +1265,22 @@ export async function moveSessionItems(
   let sortOrder = dest?.items?.length ?? 0;
   const movedItemIds: string[] = [];
   const originalItems = source.items;
+  // A move carries the whole session's items across in their existing relative
+  // order, so any Superset groupings stay contiguous automatically — just
+  // need to re-apply each one's grouping key to the newly-created items.
+  const idsBySuperset = new Map<string, string[]>();
   for (const item of source.items) {
     const eg = item.itemType === 'exercise' && item.exerciseId ? exerciseGroupIdFor(item.exerciseId) : null;
     const saved = await saveSessionItem(destSession.id, athleteId, itemToDraft(item), eg, sortOrder, userId);
     movedItemIds.push(saved.id);
+    if (item.supersetId) {
+      if (!idsBySuperset.has(item.supersetId)) idsBySuperset.set(item.supersetId, []);
+      idsBySuperset.get(item.supersetId)!.push(saved.id);
+    }
     sortOrder++;
+  }
+  for (const [supersetId, ids] of idsBySuperset) {
+    if (ids.length > 1) await setSessionItemsSuperset(ids, supersetId);
   }
   for (const item of originalItems) await deleteSessionItem(item.id);
 

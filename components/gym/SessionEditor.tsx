@@ -9,7 +9,7 @@
 // full-screen mobile destination — see GymRoot.tsx.
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { ArrowLeft, Check, Copy, Edit2, GripVertical, Loader2, Plus, RefreshCw, StickyNote, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Check, Copy, Edit2, GripVertical, Link2, Loader2, Plus, RefreshCw, StickyNote, Trash2, X } from 'lucide-react';
 import type { GymAthlete as Athlete } from './types';
 import type { GymExercise, GymExerciseGroup, GymSession, GymSessionGroup, GymSessionItem, GymSessionItemDraft } from './types';
 import {
@@ -21,6 +21,7 @@ import {
   createExercise,
   searchExercises,
 } from './gymApi';
+import { applySupersetDrop, groupBySuperset, zoneForOffset, type DropZone } from './supersetDnd';
 import { CopySessionModal } from './CopySessionModal';
 import { useGymUndo } from './GymUndoContext';
 
@@ -84,7 +85,13 @@ export const SessionEditor = ({
   const [rightDraft, setRightDraft] = useState<{ sets: number | null; reps: number | null; load: string | null }>({ sets: null, reps: null, load: null });
 
   const [ownerFilter, setOwnerFilter] = useState<string>('all');
-  const [draggingId, setDraggingId] = useState<string | null>(null);
+  // Superset drag-and-drop — see supersetDnd.ts. draggedIds holds either one
+  // item's id (dragging a single row's own grip) or every member of a
+  // superset (dragging its group-level grip, dragKeepTogether = true so the
+  // whole block moves as a unit instead of dissolving).
+  const [draggedIds, setDraggedIds] = useState<string[] | null>(null);
+  const [dragKeepTogether, setDragKeepTogether] = useState(false);
+  const [dropTarget, setDropTarget] = useState<{ id: string; zone: DropZone } | null>(null);
   const [showCopyModal, setShowCopyModal] = useState(false);
 
   const load = useCallback(async () => {
@@ -277,21 +284,44 @@ export const SessionEditor = ({
     }
   };
 
-  const handleDrop = async (overId: string) => {
-    const fromId = draggingId;
-    setDraggingId(null);
-    if (!fromId || fromId === overId) return;
-    const fromIdx = items.findIndex(i => i.id === fromId);
-    const toIdx = items.findIndex(i => i.id === overId);
-    if (fromIdx === -1 || toIdx === -1) return;
+  const handleDragStartItem = (itemId: string) => {
+    setDraggedIds([itemId]);
+    setDragKeepTogether(false);
+  };
+
+  const handleDragStartGroup = (memberIds: string[]) => {
+    setDraggedIds(memberIds);
+    setDragKeepTogether(true);
+  };
+
+  const handleDragOverRow = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    setDropTarget({ id: targetId, zone: zoneForOffset(e.clientY - rect.top, rect.height) });
+  };
+
+  const handleDragEndAny = () => {
+    setDraggedIds(null);
+    setDropTarget(null);
+    setDragKeepTogether(false);
+  };
+
+  const handleDropOnRow = async (targetId: string) => {
+    const ids = draggedIds;
+    const zone = dropTarget?.zone;
+    const keepTogether = dragKeepTogether;
+    setDraggedIds(null);
+    setDropTarget(null);
+    setDragKeepTogether(false);
+    if (!ids || !zone) return;
+    const result = applySupersetDrop(items, ids, targetId, zone, keepTogether);
+    if (!result) return;
     const prevItems = items;
-    const prevOrder = items.map(it => ({ id: it.id, sortOrder: it.sortOrder }));
-    const reordered = [...items];
-    const [moved] = reordered.splice(fromIdx, 1);
-    reordered.splice(toIdx, 0, moved);
+    const prevOrder = items.map(it => ({ id: it.id, sortOrder: it.sortOrder, supersetId: it.supersetId }));
+    const reordered = result.map((it, idx) => ({ ...it, sortOrder: idx }));
     setItems(reordered);
     try {
-      await reorderSessionItems(reordered.map((it, idx) => ({ id: it.id, sortOrder: idx })));
+      await reorderSessionItems(reordered.map(it => ({ id: it.id, sortOrder: it.sortOrder, supersetId: it.supersetId })));
       pushUndo({
         label: 'Undo reorder',
         run: async () => {
@@ -305,11 +335,107 @@ export const SessionEditor = ({
     }
   };
 
+  const handleUngroup = async (memberIds: string[]) => {
+    const prevItems = items;
+    const prevOrder = items.map(it => ({ id: it.id, sortOrder: it.sortOrder, supersetId: it.supersetId }));
+    const updated = items.map(it => (memberIds.includes(it.id) ? { ...it, supersetId: null } : it));
+    setItems(updated);
+    try {
+      await reorderSessionItems(updated.filter(it => memberIds.includes(it.id)).map(it => ({ id: it.id, sortOrder: it.sortOrder, supersetId: null })));
+      pushUndo({
+        label: 'Undo ungroup',
+        run: async () => {
+          await reorderSessionItems(prevOrder);
+          setItems(prevItems);
+        },
+      });
+    } catch (err) {
+      console.error('[SessionEditor] failed to ungroup', err);
+      load();
+    }
+  };
+
   const creators = Array.from(
     new Map(items.filter(i => i.createdBy).map(i => [i.createdBy as string, i.createdByName || 'Unknown'])).entries()
   );
   const visibleItems = ownerFilter === 'all' ? items : items.filter(i => i.createdBy === ownerFilter);
   const canReorder = canEdit && ownerFilter === 'all';
+  const visibleIndexById = new Map(visibleItems.map((it, idx) => [it.id, idx]));
+
+  const renderItemRow = (item: GymSessionItem, idx: number, inGroup: boolean) => {
+    const zone = dropTarget?.id === item.id ? dropTarget.zone : null;
+    return (
+      <div
+        key={item.id}
+        draggable={canReorder}
+        onDragStart={() => handleDragStartItem(item.id)}
+        onDragOver={e => handleDragOverRow(e, item.id)}
+        onDrop={() => handleDropOnRow(item.id)}
+        onDragEnd={handleDragEndAny}
+        className={[
+          'px-3.5 py-3 flex items-start gap-2 relative',
+          draggedIds?.includes(item.id) ? 'opacity-40' : '',
+          draft.id === item.id ? 'bg-blue-50/60' : '',
+          zone === 'merge' ? 'bg-indigo-100/70' : '',
+        ].filter(Boolean).join(' ')}
+      >
+        {zone === 'before' && <div className="absolute left-0 right-0 top-0 h-0.5 bg-blue-500 z-10" />}
+        {zone === 'after' && <div className="absolute left-0 right-0 bottom-0 h-0.5 bg-blue-500 z-10" />}
+        {canReorder && <GripVertical className="w-3.5 h-3.5 text-slate-300 mt-1 flex-shrink-0 cursor-grab" />}
+        <span className="w-5 h-5 rounded-full bg-slate-100 text-slate-400 text-[10px] font-semibold flex items-center justify-center flex-shrink-0 mt-0.5">
+          {idx + 1}
+        </span>
+        <div className="flex-1 min-w-0">
+          {item.itemType === 'exercise' ? (
+            <>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[13px] font-medium text-slate-800">{item.effectiveExerciseName || item.exerciseName}</span>
+                {item.side !== 'both' && (
+                  <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
+                    {sideLabel(item.side)}
+                  </span>
+                )}
+                {item.isPrimary && (
+                  <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200">
+                    Primary
+                  </span>
+                )}
+                {item.wasSwapped && (
+                  <span
+                    title={`Swapped from "${item.exerciseName}" to this player's default`}
+                    className="flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200"
+                  >
+                    <RefreshCw className="w-2.5 h-2.5" /> swapped
+                  </span>
+                )}
+              </div>
+              <p className="text-[12px] text-slate-400 mt-0.5">
+                {[item.sets ? `${item.sets} sets` : null, item.reps ? `${item.reps} reps` : null, item.load ? `@ ${item.load}` : null]
+                  .filter(Boolean)
+                  .join(' × ') || 'No sets/reps/intensity set'}
+              </p>
+            </>
+          ) : (
+            <div className="flex items-start gap-1.5">
+              <StickyNote className="w-3.5 h-3.5 text-slate-300 mt-0.5 flex-shrink-0" />
+              <p className="text-[13px] text-slate-700">{item.noteText}</p>
+            </div>
+          )}
+          {item.createdByName && <p className="text-[10px] text-slate-300 mt-1">added by {item.createdByName}</p>}
+        </div>
+        {canEdit && (
+          <div className="flex items-center gap-0.5 flex-shrink-0">
+            <button onClick={() => handleStartEdit(item)} className="p-1 rounded hover:bg-slate-100 text-slate-300 hover:text-slate-600">
+              <Edit2 className="w-3.5 h-3.5" />
+            </button>
+            <button onClick={() => handleDeleteItem(item.id)} className="p-1 rounded hover:bg-red-50 text-slate-300 hover:text-red-500">
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   if (loading) {
     return (
@@ -369,70 +495,37 @@ export const SessionEditor = ({
               {items.length === 0 ? 'No exercises or notes yet.' : 'No items from this person.'}
             </div>
           )}
-          {visibleItems.map((item, idx) => (
-            <div
-              key={item.id}
-              draggable={canReorder}
-              onDragStart={() => setDraggingId(item.id)}
-              onDragOver={e => e.preventDefault()}
-              onDrop={() => handleDrop(item.id)}
-              onDragEnd={() => setDraggingId(null)}
-              className={`px-3.5 py-3 flex items-start gap-2 ${draggingId === item.id ? 'opacity-40' : ''} ${draft.id === item.id ? 'bg-blue-50/60' : ''}`}
-            >
-              {canReorder && <GripVertical className="w-3.5 h-3.5 text-slate-300 mt-1 flex-shrink-0 cursor-grab" />}
-              <span className="w-5 h-5 rounded-full bg-slate-100 text-slate-400 text-[10px] font-semibold flex items-center justify-center flex-shrink-0 mt-0.5">
-                {idx + 1}
-              </span>
-              <div className="flex-1 min-w-0">
-                {item.itemType === 'exercise' ? (
-                  <>
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[13px] font-medium text-slate-800">{item.effectiveExerciseName || item.exerciseName}</span>
-                      {item.side !== 'both' && (
-                        <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
-                          {sideLabel(item.side)}
-                        </span>
-                      )}
-                      {item.isPrimary && (
-                        <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200">
-                          Primary
-                        </span>
-                      )}
-                      {item.wasSwapped && (
-                        <span
-                          title={`Swapped from "${item.exerciseName}" to this player's default`}
-                          className="flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200"
-                        >
-                          <RefreshCw className="w-2.5 h-2.5" /> swapped
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[12px] text-slate-400 mt-0.5">
-                      {[item.sets ? `${item.sets} sets` : null, item.reps ? `${item.reps} reps` : null, item.load ? `@ ${item.load}` : null]
-                        .filter(Boolean)
-                        .join(' × ') || 'No sets/reps/load set'}
-                    </p>
-                  </>
-                ) : (
-                  <div className="flex items-start gap-1.5">
-                    <StickyNote className="w-3.5 h-3.5 text-slate-300 mt-0.5 flex-shrink-0" />
-                    <p className="text-[13px] text-slate-700">{item.noteText}</p>
-                  </div>
-                )}
-                {item.createdByName && <p className="text-[10px] text-slate-300 mt-1">added by {item.createdByName}</p>}
-              </div>
-              {canEdit && (
-                <div className="flex items-center gap-0.5 flex-shrink-0">
-                  <button onClick={() => handleStartEdit(item)} className="p-1 rounded hover:bg-slate-100 text-slate-300 hover:text-slate-600">
-                    <Edit2 className="w-3.5 h-3.5" />
-                  </button>
-                  <button onClick={() => handleDeleteItem(item.id)} className="p-1 rounded hover:bg-red-50 text-slate-300 hover:text-red-500">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+          {groupBySuperset(visibleItems).map(group => {
+            if (!group.supersetId) {
+              const item = group.members[0];
+              return renderItemRow(item, visibleIndexById.get(item.id) ?? 0, false);
+            }
+            return (
+              <div key={group.supersetId} className="bg-indigo-50/40">
+                <div
+                  draggable={canReorder}
+                  onDragStart={() => handleDragStartGroup(group.members.map(m => m.id))}
+                  onDragEnd={handleDragEndAny}
+                  className="flex items-center gap-1.5 px-3.5 pt-2 pb-1 cursor-grab select-none"
+                >
+                  {canReorder && <GripVertical className="w-3.5 h-3.5 text-indigo-300 flex-shrink-0" />}
+                  <Link2 className="w-3 h-3 text-indigo-400 flex-shrink-0" />
+                  <span className="text-[10px] font-semibold text-indigo-500 uppercase tracking-wide">Superset</span>
+                  {canEdit && (
+                    <button
+                      onClick={() => handleUngroup(group.members.map(m => m.id))}
+                      className="ml-auto text-[10px] text-indigo-400 hover:text-indigo-700 hover:underline"
+                    >
+                      Ungroup
+                    </button>
+                  )}
                 </div>
-              )}
-            </div>
-          ))}
+                <div className="divide-y divide-indigo-100/70 ml-3.5 border-l-2 border-indigo-300">
+                  {group.members.map(item => renderItemRow(item, visibleIndexById.get(item.id) ?? 0, true))}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -529,7 +622,7 @@ export const SessionEditor = ({
                 <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer">
                   <input type="checkbox" checked={splitSide} onChange={e => setSplitSide(e.target.checked)} className="w-3.5 h-3.5" />
                   Split left / right
-                  <span className="text-slate-400">— separate sets/reps/load for each side</span>
+                  <span className="text-slate-400">— separate sets/reps/intensity for each side</span>
                 </label>
               )}
 
@@ -542,7 +635,7 @@ export const SessionEditor = ({
                         className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
                       <input type="number" min={0} placeholder="Reps" value={draft.reps ?? ''} onChange={e => setDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))}
                         className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
-                      <input placeholder="Load" value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))}
+                      <input placeholder="Intensity" value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))}
                         className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
                     </div>
                   </div>
@@ -553,7 +646,7 @@ export const SessionEditor = ({
                         className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
                       <input type="number" min={0} placeholder="Reps" value={rightDraft.reps ?? ''} onChange={e => setRightDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))}
                         className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
-                      <input placeholder="Load" value={rightDraft.load ?? ''} onChange={e => setRightDraft(d => ({ ...d, load: e.target.value || null }))}
+                      <input placeholder="Intensity" value={rightDraft.load ?? ''} onChange={e => setRightDraft(d => ({ ...d, load: e.target.value || null }))}
                         className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
                     </div>
                   </div>
@@ -571,7 +664,7 @@ export const SessionEditor = ({
                       className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-medium text-slate-500 mb-1">Load</label>
+                    <label className="block text-[11px] font-medium text-slate-500 mb-1">Intensity</label>
                     <input value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))} placeholder="e.g. 60kg"
                       className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>

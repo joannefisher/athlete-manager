@@ -29,7 +29,7 @@ export function itemMetaText(item: Pick<GymSessionItem, 'sets' | 'reps' | 'load'
   return (
     [item.sets ? `${item.sets} sets` : null, item.reps ? `${item.reps} reps` : null, item.load ? `@ ${item.load}` : null]
       .filter(Boolean)
-      .join(' × ') || 'No sets/reps/load set'
+      .join(' × ') || 'No sets/reps/intensity set'
   );
 }
 

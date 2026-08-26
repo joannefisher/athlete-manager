@@ -144,6 +144,13 @@ export interface GymSessionItem {
   // coach editing them individually) added themselves.
   planItemId: string | null;
 
+  // Grouping key shared by every member of the same Superset (2+ exercises
+  // performed together, in a fixed order — see supersetDnd.ts). Null for an
+  // item that isn't part of one. Not carried on GymSessionItemDraft — like
+  // planItemId, it's set via a small follow-up update rather than through
+  // the shared save-item payload, so that payload never has to change shape.
+  supersetId: string | null;
+
   createdBy: string | null;
   createdByName?: string;
   createdAt: string;
@@ -199,6 +206,9 @@ export interface GymGroupPlanItem {
 
   noteText: string | null;
 
+  /** Grouping key shared by every member of the same Superset — see GymSessionItem.supersetId above. */
+  supersetId: string | null;
+
   createdBy: string | null;
   createdByName?: string;
   createdAt: string;
@@ -219,4 +229,6 @@ export interface GymGroupPlanConflict {
   currentDraft: GymSessionItemDraft | null; // the member's current values (null if they'd already removed it)
   newDraft: GymSessionItemDraft | null; // the plan's new values (null if the plan item was deleted)
   exerciseGroupId: string | null;
+  /** The plan item's Superset grouping key at the time of this conflict, applied to the member's item if accepted. Null for a 'delete' conflict (unused). */
+  supersetId: string | null;
 }
