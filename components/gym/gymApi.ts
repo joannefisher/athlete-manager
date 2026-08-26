@@ -7,7 +7,6 @@
 import { supabase } from '@/lib/supabase';
 import type {
   GymExerciseGroupType,
-  GymExerciseGroup,
   GymExercise,
   GymConditioningExercise,
   GymRunningExercise,
@@ -22,83 +21,92 @@ import type {
   GymGroupPlanItem,
   GymGroupPlanConflict,
 } from './types';
+import { groupTypeLabel, type GroupTypeAttrs } from './GroupTypePicker';
 
-// ── Exercise group types (Anterior / Posterior / …) ─────────────────────────
+// ── Exercise group types — hierarchical (round 17) ──────────────────────────
+// Replaces the old two-level "type tag" -> "named group" hierarchy entirely.
+// A type is defined purely by its attribute combination (body region, +
+// push/pull + vertical/horizontal for Upper, or +anterior/posterior/other
+// for Lower, + an independent unilateral/bilateral toggle) — see
+// GroupTypePicker.tsx. findOrCreateExerciseGroupType never creates a
+// duplicate combination: it looks one up first via the exact same partial
+// unique index the migration defined, and only inserts if nothing matches.
+
+const GROUP_TYPE_SELECT = 'id, club_id, body_region, upper_push_pull, upper_plane, lower_position, laterality, archived, created_by, created_at';
+
+function mapGroupType(r: any): GymExerciseGroupType {
+  return {
+    id: r.id,
+    clubId: r.club_id,
+    bodyRegion: r.body_region,
+    upperPushPull: r.upper_push_pull,
+    upperPlane: r.upper_plane,
+    lowerPosition: r.lower_position,
+    laterality: r.laterality,
+    archived: r.archived,
+    createdBy: r.created_by,
+    createdAt: r.created_at,
+  };
+}
 
 export async function fetchExerciseGroupTypes(clubId: string): Promise<GymExerciseGroupType[]> {
   const { data, error } = await supabase
     .from('gym_exercise_group_types')
-    .select('id, club_id, name')
+    .select(GROUP_TYPE_SELECT)
     .eq('club_id', clubId)
-    .order('name');
+    .eq('archived', false)
+    .order('body_region')
+    .order('laterality');
   if (error) throw error;
-  return (data || []).map((r: any) => ({ id: r.id, clubId: r.club_id, name: r.name }));
+  return (data || []).map(mapGroupType);
 }
 
-export async function createExerciseGroupType(clubId: string, name: string): Promise<GymExerciseGroupType> {
+/** Look up an existing type by its exact attribute combination, or create it if this club has never used it before. */
+export async function findOrCreateExerciseGroupType(clubId: string, attrs: GroupTypeAttrs, createdBy: string): Promise<GymExerciseGroupType> {
+  let query = supabase
+    .from('gym_exercise_group_types')
+    .select(GROUP_TYPE_SELECT)
+    .eq('club_id', clubId)
+    .eq('archived', false)
+    .eq('body_region', attrs.bodyRegion as string)
+    .eq('laterality', attrs.laterality as string);
+  query = attrs.upperPushPull ? query.eq('upper_push_pull', attrs.upperPushPull) : query.is('upper_push_pull', null);
+  query = attrs.upperPlane ? query.eq('upper_plane', attrs.upperPlane) : query.is('upper_plane', null);
+  query = attrs.lowerPosition ? query.eq('lower_position', attrs.lowerPosition) : query.is('lower_position', null);
+  const { data: existing, error: findErr } = await query.maybeSingle();
+  if (findErr) throw findErr;
+  if (existing) return mapGroupType(existing);
+
   const { data, error } = await supabase
     .from('gym_exercise_group_types')
-    .insert({ club_id: clubId, name: name.trim() })
-    .select('id, club_id, name')
+    .insert({
+      club_id: clubId,
+      body_region: attrs.bodyRegion,
+      upper_push_pull: attrs.upperPushPull,
+      upper_plane: attrs.upperPlane,
+      lower_position: attrs.lowerPosition,
+      laterality: attrs.laterality,
+      created_by: createdBy,
+    })
+    .select(GROUP_TYPE_SELECT)
     .single();
   if (error) throw error;
-  return { id: data.id, clubId: data.club_id, name: data.name };
-}
-
-// ── Exercise groups ─────────────────────────────────────────────────────────
-
-export async function fetchExerciseGroups(clubId: string): Promise<GymExerciseGroup[]> {
-  const { data, error } = await supabase
-    .from('gym_exercise_groups')
-    .select('id, club_id, name, type_id, gym_exercise_group_types(name)')
-    .eq('club_id', clubId)
-    .order('name');
-  if (error) throw error;
-  return (data || []).map((r: any) => ({
-    id: r.id,
-    clubId: r.club_id,
-    name: r.name,
-    typeId: r.type_id,
-    typeName: r.gym_exercise_group_types?.name,
-  }));
-}
-
-export async function createExerciseGroup(clubId: string, name: string, typeId: string | null): Promise<GymExerciseGroup> {
-  const { data, error } = await supabase
-    .from('gym_exercise_groups')
-    .insert({ club_id: clubId, name: name.trim(), type_id: typeId })
-    .select('id, club_id, name, type_id')
-    .single();
-  if (error) throw error;
-  return { id: data.id, clubId: data.club_id, name: data.name, typeId: data.type_id };
-}
-
-export async function updateExerciseGroup(id: string, name: string, typeId: string | null): Promise<void> {
-  const { error } = await supabase
-    .from('gym_exercise_groups')
-    .update({ name: name.trim(), type_id: typeId })
-    .eq('id', id);
-  if (error) throw error;
-}
-
-export async function deleteExerciseGroup(id: string): Promise<void> {
-  const { error } = await supabase.from('gym_exercise_groups').delete().eq('id', id);
-  if (error) throw error;
+  return mapGroupType(data);
 }
 
 // ── Exercise bank ────────────────────────────────────────────────────────
 
 const EXERCISE_SELECT =
-  'id, club_id, name, exercise_group_id, created_by, created_at, status, archived, merged_into_id, ' +
-  'gym_exercise_groups(name), creator:user_profiles!gym_exercises_created_by_fkey(full_name)';
+  'id, club_id, name, exercise_group_type_id, created_by, created_at, status, archived, merged_into_id, ' +
+  `gym_exercise_group_types(${GROUP_TYPE_SELECT}), creator:user_profiles!gym_exercises_created_by_fkey(full_name)`;
 
 function mapExercise(r: any): GymExercise {
   return {
     id: r.id,
     clubId: r.club_id,
     name: r.name,
-    exerciseGroupId: r.exercise_group_id,
-    exerciseGroupName: r.gym_exercise_groups?.name,
+    exerciseGroupTypeId: r.exercise_group_type_id,
+    exerciseGroupTypeLabel: r.gym_exercise_group_types ? groupTypeLabel(mapGroupType(r.gym_exercise_group_types)) : undefined,
     createdBy: r.created_by,
     createdByName: r.creator?.full_name,
     createdAt: r.created_at,
@@ -145,14 +153,38 @@ export function searchExercises(exercises: GymExercise[], query: string): GymExe
 /** Every new exercise starts life as 'pending' — flagged for Admin review —
  *  but is usable immediately (non-blocking) so adding one mid-session isn't
  *  interrupted by an approval step. */
-export async function createExercise(clubId: string, name: string, exerciseGroupId: string, createdBy: string): Promise<GymExercise> {
+export async function createExercise(clubId: string, name: string, exerciseGroupTypeId: string, createdBy: string): Promise<GymExercise> {
   const { data, error } = await supabase
     .from('gym_exercises')
-    .insert({ club_id: clubId, name: name.trim(), exercise_group_id: exerciseGroupId, created_by: createdBy })
+    .insert({ club_id: clubId, name: name.trim(), exercise_group_type_id: exerciseGroupTypeId, created_by: createdBy })
     .select(EXERCISE_SELECT)
     .single();
   if (error) throw error;
   return mapExercise(data);
+}
+
+/** Assign/reassign an exercise's Exercise Group Type — used both to edit an
+ *  existing exercise's type and, in the Exercises admin screen's "Needs
+ *  review" list, to assign one to a legacy exercise the round-17 auto-map
+ *  migration couldn't confidently place. */
+export async function updateExerciseGroupType(exerciseId: string, exerciseGroupTypeId: string): Promise<void> {
+  const { error } = await supabase.from('gym_exercises').update({ exercise_group_type_id: exerciseGroupTypeId }).eq('id', exerciseId);
+  if (error) throw error;
+}
+
+/** Exercises with no Exercise Group Type assigned yet — legacy rows the
+ *  round-17 migration's best-effort auto-map couldn't confidently place.
+ *  Surfaced in the Exercises admin screen's "Needs review" list. */
+export async function fetchExercisesNeedingReview(clubId: string): Promise<GymExercise[]> {
+  const { data, error } = await supabase
+    .from('gym_exercises')
+    .select(EXERCISE_SELECT)
+    .eq('club_id', clubId)
+    .eq('archived', false)
+    .is('exercise_group_type_id', null)
+    .order('name');
+  if (error) throw error;
+  return (data || []).map(mapExercise);
 }
 
 /** Admin marks a pending exercise as reviewed/accepted as its own distinct entry. */
@@ -355,7 +387,7 @@ export function suggestMerges(exercises: GymExercise[], threshold = 0.6): GymExe
     for (let j = i + 1; j < exercises.length; j++) {
       const a = exercises[i];
       const b = exercises[j];
-      if (a.exerciseGroupId !== b.exerciseGroupId) continue;
+      if (a.exerciseGroupTypeId !== b.exerciseGroupTypeId) continue;
       const score = similarity(a.name, b.name);
       if (score >= threshold) suggestions.push({ exercise: a, candidate: b, score });
     }
@@ -367,7 +399,7 @@ export function suggestMerges(exercises: GymExercise[], threshold = 0.6): GymExe
 export function bestMatch(exercise: GymExercise, candidates: GymExercise[], threshold = 0.6): GymExerciseMergeSuggestion | null {
   let best: GymExerciseMergeSuggestion | null = null;
   for (const c of candidates) {
-    if (c.id === exercise.id || c.exerciseGroupId !== exercise.exerciseGroupId) continue;
+    if (c.id === exercise.id || c.exerciseGroupTypeId !== exercise.exerciseGroupTypeId) continue;
     const score = similarity(exercise.name, c.name);
     if (score >= threshold && (!best || score > best.score)) best = { exercise, candidate: c, score };
   }
@@ -404,19 +436,24 @@ export async function dismissDuplicatePair(clubId: string, exerciseAId: string, 
   if (error) throw error;
 }
 
-// ── Player default primary exercise (per exercise group) ───────────────────
+// ── Player default primary exercise (per Exercise Group Type, round 17) ────
+// Re-keyed from the old named exercise group to the new hierarchical type —
+// per Joanne's answer, the unique combination of attributes (e.g. Lower
+// Body, Anterior, Bilateral) is treated as a single "type" a player sets one
+// default within.
 
 export async function fetchPlayerDefaults(athleteId: string): Promise<GymPlayerDefaultPrimary[]> {
   const { data, error } = await supabase
     .from('gym_player_default_primary')
-    .select('id, club_id, athlete_id, exercise_group_id, exercise_id, updated_by, updated_at, gym_exercises(name)')
-    .eq('athlete_id', athleteId);
+    .select('id, club_id, athlete_id, exercise_group_type_id, exercise_id, updated_by, updated_at, gym_exercises(name)')
+    .eq('athlete_id', athleteId)
+    .not('exercise_group_type_id', 'is', null);
   if (error) throw error;
   return (data || []).map((r: any) => ({
     id: r.id,
     clubId: r.club_id,
     athleteId: r.athlete_id,
-    exerciseGroupId: r.exercise_group_id,
+    exerciseGroupTypeId: r.exercise_group_type_id,
     exerciseId: r.exercise_id,
     exerciseName: r.gym_exercises?.name,
     updatedBy: r.updated_by,
@@ -427,7 +464,7 @@ export async function fetchPlayerDefaults(athleteId: string): Promise<GymPlayerD
 export async function setPlayerDefault(
   clubId: string,
   athleteId: string,
-  exerciseGroupId: string,
+  exerciseGroupTypeId: string,
   exerciseId: string,
   updatedBy: string
 ): Promise<void> {
@@ -437,14 +474,76 @@ export async function setPlayerDefault(
       {
         club_id: clubId,
         athlete_id: athleteId,
-        exercise_group_id: exerciseGroupId,
+        exercise_group_type_id: exerciseGroupTypeId,
         exercise_id: exerciseId,
         updated_by: updatedBy,
         updated_at: new Date().toISOString(),
       },
-      { onConflict: 'athlete_id,exercise_group_id' }
+      { onConflict: 'athlete_id,exercise_group_type_id' }
     );
   if (error) throw error;
+}
+
+// Round 18: club-wide read of every player's defaults, for the new Setup
+// page's matrix (all players x all exercise group types, one query instead
+// of one fetchPlayerDefaults() call per player).
+export async function fetchAllPlayerDefaults(clubId: string): Promise<GymPlayerDefaultPrimary[]> {
+  const { data, error } = await supabase
+    .from('gym_player_default_primary')
+    .select('id, club_id, athlete_id, exercise_group_type_id, exercise_id, updated_by, updated_at, gym_exercises(name)')
+    .eq('club_id', clubId)
+    .not('exercise_group_type_id', 'is', null);
+  if (error) throw error;
+  return (data || []).map((r: any) => ({
+    id: r.id,
+    clubId: r.club_id,
+    athleteId: r.athlete_id,
+    exerciseGroupTypeId: r.exercise_group_type_id,
+    exerciseId: r.exercise_id,
+    exerciseName: r.gym_exercises?.name,
+    updatedBy: r.updated_by,
+    updatedAt: r.updated_at,
+  }));
+}
+
+// Round 18: "frequently used" quick-pick for the Section item type's name
+// field (SessionEditor/GroupPlanEditor). Deliberately computed from actual
+// usage history rather than an admin-curated list — tallies section_name
+// across both individual sessions and group plans for this club, case-
+// insensitively, and returns the top N by frequency (first-seen casing wins
+// for display). No new table — reads the same gym_session_items/
+// gym_group_plan_items rows everything else already writes.
+export async function fetchFrequentSectionNames(clubId: string, limit = 8): Promise<string[]> {
+  const [{ data: sessionRows, error: sessionErr }, { data: planRows, error: planErr }] = await Promise.all([
+    supabase
+      .from('gym_session_items')
+      .select('section_name, gym_sessions!inner(club_id)')
+      .eq('item_type', 'section')
+      .eq('gym_sessions.club_id', clubId),
+    supabase
+      .from('gym_group_plan_items')
+      .select('section_name, gym_group_session_plans!inner(club_id)')
+      .eq('item_type', 'section')
+      .eq('gym_group_session_plans.club_id', clubId),
+  ]);
+  if (sessionErr) throw sessionErr;
+  if (planErr) throw planErr;
+
+  const allRows = [...(sessionRows || []), ...(planRows || [])];
+  const counts = new Map<string, number>();
+  const displayName = new Map<string, string>();
+  for (const row of allRows) {
+    const raw = (row as any).section_name as string | null;
+    const name = raw?.trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    counts.set(key, (counts.get(key) || 0) + 1);
+    if (!displayName.has(key)) displayName.set(key, name);
+  }
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([key]) => displayName.get(key) || key);
 }
 
 // ── Gym-only session groups ─────────────────────────────────────────────
@@ -533,6 +632,7 @@ function mapSessionItem(r: any): GymSessionItem {
     effectiveExerciseName: r.effective_exercise?.name,
     wasSwapped: r.was_swapped,
     noteText: r.note_text,
+    sectionName: r.section_name,
     conditioningExerciseId: r.conditioning_exercise_id,
     conditioningExerciseName: r.conditioning_exercise?.name,
     runningExerciseId: r.running_exercise_id,
@@ -553,7 +653,7 @@ function mapSessionItem(r: any): GymSessionItem {
 }
 
 const SESSION_ITEM_SELECT =
-  'id, session_id, sort_order, item_type, exercise_id, sets, reps, load, load_kg, tempo, is_primary, side, effective_exercise_id, was_swapped, note_text, distance_value, distance_unit, timer_label, duration_seconds, plan_item_id, superset_id, conditioning_exercise_id, running_exercise_id, created_by, created_at, updated_by, updated_at, ' +
+  'id, session_id, sort_order, item_type, exercise_id, sets, reps, load, load_kg, tempo, is_primary, side, effective_exercise_id, was_swapped, note_text, section_name, distance_value, distance_unit, timer_label, duration_seconds, plan_item_id, superset_id, conditioning_exercise_id, running_exercise_id, created_by, created_at, updated_by, updated_at, ' +
   'exercise:gym_exercises!gym_session_items_exercise_id_fkey(name), ' +
   'effective_exercise:gym_exercises!gym_session_items_effective_exercise_id_fkey(name), ' +
   'conditioning_exercise:gym_conditioning_exercises(name), ' +
@@ -722,7 +822,7 @@ export async function resolvePrimaryExercise(
   athleteId: string,
   chosenExerciseId: string,
   isPrimary: boolean,
-  exerciseGroupId: string
+  exerciseGroupTypeId: string
 ): Promise<ResolvedPrimary> {
   if (!isPrimary) {
     return { effectiveExerciseId: chosenExerciseId, wasSwapped: false };
@@ -731,7 +831,7 @@ export async function resolvePrimaryExercise(
     .from('gym_player_default_primary')
     .select('exercise_id')
     .eq('athlete_id', athleteId)
-    .eq('exercise_group_id', exerciseGroupId)
+    .eq('exercise_group_type_id', exerciseGroupTypeId)
     .maybeSingle();
   if (error) throw error;
 
@@ -745,17 +845,19 @@ export async function resolvePrimaryExercise(
 
 /**
  * Save (create or update) one session item. 'exercise' items resolve the
- * Primary swap rule above; `exerciseGroupId` is required only for those (used
- * to look up the player's default) — 'conditioning' items never call this at
- * all (round 16: Conditioning has no exercise-group concept any more, so
- * there's nothing to resolve). Sets/Reps/Intensity are shared by 'exercise'
- * and 'conditioning'; Load(kg)/Tempo are 'exercise'-only.
+ * Primary swap rule above; `exerciseGroupTypeId` is required only for those
+ * (used to look up the player's default) — 'conditioning' items never call
+ * this at all (round 16: Conditioning has no exercise-group concept any
+ * more, so there's nothing to resolve). Sets/Reps/Intensity are shared by
+ * 'exercise' and 'conditioning'; Load(kg)/Tempo are 'exercise'-only.
+ * 'section' (round 17) is a simple named divider — just sectionName, no
+ * other field, no Primary-swap resolution, never part of a Superset.
  */
 export async function saveSessionItem(
   sessionId: string,
   athleteId: string,
   draft: GymSessionItemDraft,
-  exerciseGroupId: string | null,
+  exerciseGroupTypeId: string | null,
   sortOrder: number,
   userId: string
 ): Promise<GymSessionItem> {
@@ -763,16 +865,18 @@ export async function saveSessionItem(
   let wasSwapped = false;
 
   if (draft.itemType === 'exercise') {
-    if (!draft.exerciseId || !exerciseGroupId) {
+    if (!draft.exerciseId || !exerciseGroupTypeId) {
       throw new Error('An exercise must be selected before saving.');
     }
-    const resolved = await resolvePrimaryExercise(athleteId, draft.exerciseId, draft.isPrimary, exerciseGroupId);
+    const resolved = await resolvePrimaryExercise(athleteId, draft.exerciseId, draft.isPrimary, exerciseGroupTypeId);
     effectiveExerciseId = resolved.effectiveExerciseId;
     wasSwapped = resolved.wasSwapped;
   } else if (draft.itemType === 'conditioning' && !draft.conditioningExerciseId) {
     throw new Error('A conditioning exercise must be selected before saving.');
   } else if (draft.itemType === 'running' && !draft.runningExerciseId) {
     throw new Error('A running exercise must be selected before saving.');
+  } else if (draft.itemType === 'section' && !draft.sectionName?.trim()) {
+    throw new Error('A section needs a name before saving.');
   }
 
   const setsRepsLike = draft.itemType === 'exercise' || draft.itemType === 'conditioning';
@@ -794,6 +898,7 @@ export async function saveSessionItem(
     effective_exercise_id: effectiveExerciseId,
     was_swapped: wasSwapped,
     note_text: draft.itemType === 'note' ? draft.noteText : null,
+    section_name: draft.itemType === 'section' ? draft.sectionName?.trim() : null,
     // distance_value/distance_unit are superseded (round 16) — running's
     // distance now lives on gym_running_exercises, looked up via the join.
     distance_value: null,
@@ -863,6 +968,7 @@ export function itemToDraft(item: GymSessionItem): GymSessionItemDraft {
     isPrimary: item.isPrimary,
     side: item.side,
     noteText: item.noteText,
+    sectionName: item.sectionName,
     conditioningExerciseId: item.conditioningExerciseId,
     conditioningExerciseName: item.conditioningExerciseName,
     runningExerciseId: item.runningExerciseId,
@@ -990,6 +1096,7 @@ function mapGroupPlanItem(r: any): GymGroupPlanItem {
     isPrimary: r.is_primary,
     side: r.side || 'both',
     noteText: r.note_text,
+    sectionName: r.section_name,
     conditioningExerciseId: r.conditioning_exercise_id,
     conditioningExerciseName: r.conditioning_exercise?.name,
     runningExerciseId: r.running_exercise_id,
@@ -1009,7 +1116,7 @@ function mapGroupPlanItem(r: any): GymGroupPlanItem {
 }
 
 const GROUP_PLAN_ITEM_SELECT =
-  'id, plan_id, sort_order, item_type, exercise_id, sets, reps, load, load_kg, tempo, is_primary, side, note_text, distance_value, distance_unit, timer_label, duration_seconds, superset_id, conditioning_exercise_id, running_exercise_id, created_by, created_at, updated_by, updated_at, ' +
+  'id, plan_id, sort_order, item_type, exercise_id, sets, reps, load, load_kg, tempo, is_primary, side, note_text, section_name, distance_value, distance_unit, timer_label, duration_seconds, superset_id, conditioning_exercise_id, running_exercise_id, created_by, created_at, updated_by, updated_at, ' +
   'exercise:gym_exercises!gym_group_plan_items_exercise_id_fkey(name), ' +
   'conditioning_exercise:gym_conditioning_exercises(name), ' +
   'running_exercise:gym_running_exercises(name, distance_meters), ' +
@@ -1028,6 +1135,7 @@ export function groupPlanItemToDraft(item: GymGroupPlanItem): GymSessionItemDraf
     isPrimary: item.isPrimary,
     side: item.side,
     noteText: item.noteText,
+    sectionName: item.sectionName,
     conditioningExerciseId: item.conditioningExerciseId,
     conditioningExerciseName: item.conditioningExerciseName,
     runningExerciseId: item.runningExerciseId,
@@ -1112,6 +1220,7 @@ export async function saveGroupPlanItem(
     is_primary: draft.itemType === 'exercise' ? draft.isPrimary : false,
     side: draft.itemType === 'exercise' ? draft.side : 'both',
     note_text: draft.itemType === 'note' ? draft.noteText : null,
+    section_name: draft.itemType === 'section' ? draft.sectionName?.trim() : null,
     // distance_value/distance_unit are superseded (round 16) — see saveSessionItem.
     distance_value: null,
     distance_unit: null,
@@ -1188,6 +1297,7 @@ export async function syncGroupPlanItemChange(
     item.isPrimary === plan.isPrimary &&
     item.side === plan.side &&
     item.noteText === plan.noteText &&
+    item.sectionName === plan.sectionName &&
     item.timerLabel === plan.timerLabel &&
     item.durationSeconds === plan.durationSeconds;
 
@@ -1221,7 +1331,7 @@ export async function syncGroupPlanItemChange(
         memberSortOrder: null,
         currentDraft: null,
         newDraft: groupPlanItemToDraft(after),
-        exerciseGroupId: after.itemType === 'exercise' && after.exerciseId ? exerciseGroupIdFor(after.exerciseId) : null,
+        exerciseGroupTypeId: after.itemType === 'exercise' && after.exerciseId ? exerciseGroupIdFor(after.exerciseId) : null,
         supersetId: after.supersetId,
       });
       continue;
@@ -1245,7 +1355,7 @@ export async function syncGroupPlanItemChange(
           memberSortOrder: memberItem.sortOrder,
           currentDraft: itemToDraft(memberItem),
           newDraft: null,
-          exerciseGroupId: null,
+          exerciseGroupTypeId: null,
           supersetId: null,
         });
       }
@@ -1270,7 +1380,7 @@ export async function syncGroupPlanItemChange(
         memberSortOrder: memberItem.sortOrder,
         currentDraft: itemToDraft(memberItem),
         newDraft: groupPlanItemToDraft(after),
-        exerciseGroupId: after.itemType === 'exercise' && after.exerciseId ? exerciseGroupIdFor(after.exerciseId) : null,
+        exerciseGroupTypeId: after.itemType === 'exercise' && after.exerciseId ? exerciseGroupIdFor(after.exerciseId) : null,
         supersetId: after.supersetId,
       });
     }
@@ -1415,7 +1525,7 @@ export async function resolveGroupPlanConflict(clubId: string, conflict: GymGrou
     sortOrder = existing[0]?.items?.length ?? 0;
   }
   const draft: GymSessionItemDraft = conflict.memberItemId ? { ...conflict.newDraft, id: conflict.memberItemId } : conflict.newDraft;
-  const saved = await saveSessionItem(session.id, conflict.athleteId, draft, conflict.exerciseGroupId, sortOrder, userId);
+  const saved = await saveSessionItem(session.id, conflict.athleteId, draft, conflict.exerciseGroupTypeId, sortOrder, userId);
   const { error } = await supabase.from('gym_session_items').update({ plan_item_id: conflict.planItemId, superset_id: conflict.supersetId }).eq('id', saved.id);
   if (error) throw error;
 }

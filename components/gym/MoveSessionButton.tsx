@@ -40,7 +40,7 @@ export const MoveSessionButton = ({
   const [showPicker, setShowPicker] = useState(false);
   const [moving, setMoving] = useState(false);
 
-  const exerciseGroupIdFor = (exerciseId: string) => exercises.find(e => e.id === exerciseId)?.exerciseGroupId ?? null;
+  const exerciseGroupIdFor = (exerciseId: string) => exercises.find(e => e.id === exerciseId)?.exerciseGroupTypeId ?? null;
 
   const doMove = async (toDate: string) => {
     setShowPicker(false);

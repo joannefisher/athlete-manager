@@ -9,7 +9,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { Clipboard, ClipboardCheck, Copy, Loader2, Plus, StickyNote, X } from 'lucide-react';
-import type { GymAthlete as Athlete, GymConditioningExercise, GymExercise, GymExerciseGroup, GymGroupPlanItem, GymRunningExercise, GymSessionGroup } from './types';
+import type { GymAthlete as Athlete, GymConditioningExercise, GymExercise, GymExerciseGroupType, GymGroupPlanItem, GymRunningExercise, GymSessionGroup } from './types';
 import { fetchGroupPlansForDateRange, copyGroupPlanItems, deleteGroupPlanItemsAndSynced } from './gymApi';
 import { todayIso } from './WeekStrip';
 import { itemCompactLabel } from './itemDisplay';
@@ -41,7 +41,7 @@ export const GymUI2GroupCalendar = ({
   userId,
   canEdit,
   athletes,
-  exerciseGroups,
+  exerciseGroupTypes,
   exercises,
   conditioningExercises,
   runningExercises,
@@ -55,7 +55,7 @@ export const GymUI2GroupCalendar = ({
   userId: string;
   canEdit: boolean;
   athletes: Athlete[];
-  exerciseGroups: GymExerciseGroup[];
+  exerciseGroupTypes: GymExerciseGroupType[];
   exercises: GymExercise[];
   conditioningExercises: GymConditioningExercise[];
   runningExercises: GymRunningExercise[];
@@ -95,7 +95,7 @@ export const GymUI2GroupCalendar = ({
     onExercisesChanged();
   };
 
-  const exerciseGroupIdFor = (exerciseId: string) => exercises.find(e => e.id === exerciseId)?.exerciseGroupId ?? null;
+  const exerciseGroupIdFor = (exerciseId: string) => exercises.find(e => e.id === exerciseId)?.exerciseGroupTypeId ?? null;
 
   const handleCopy = (e: React.MouseEvent, iso: string, items: GymGroupPlanItem[]) => {
     e.stopPropagation();
@@ -260,7 +260,7 @@ export const GymUI2GroupCalendar = ({
               userId={userId}
               canEdit={canEdit}
               athletes={athletes}
-              exerciseGroups={exerciseGroups}
+              exerciseGroupTypes={exerciseGroupTypes}
               exercises={exercises}
               conditioningExercises={conditioningExercises}
               runningExercises={runningExercises}

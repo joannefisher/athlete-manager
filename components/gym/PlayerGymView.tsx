@@ -9,9 +9,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Loader2, RefreshCw, StickyNote } from 'lucide-react';
 import { WeekStrip, GymViewMode, getWeekDates, todayIso } from './WeekStrip';
-import { fetchAthleteSessionsForDateRange, fetchExerciseGroups, fetchExercises, fetchPlayerDefaults, setPlayerDefault } from './gymApi';
+import { fetchAthleteSessionsForDateRange, fetchExerciseGroupTypes, fetchExercises, fetchPlayerDefaults, setPlayerDefault } from './gymApi';
 import { itemDisplayName, itemMetaText } from './itemDisplay';
-import type { GymExercise, GymExerciseGroup, GymPlayerDefaultPrimary, GymSession } from './types';
+import { groupTypeLabel } from './GroupTypePicker';
+import type { GymExercise, GymExerciseGroupType, GymPlayerDefaultPrimary, GymSession } from './types';
 
 const fmtDate = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
 
@@ -57,8 +58,10 @@ export const PlayerSessionsView = ({ athleteId }: { athleteId: string }) => {
                   </div>
                 )}
                 {(session?.items || []).map(item => (
-                  <div key={item.id} className="px-3.5 py-3">
-                    {item.itemType === 'note' ? (
+                  <div key={item.id} className={item.itemType === 'section' ? 'px-3.5 py-2 bg-slate-50' : 'px-3.5 py-3'}>
+                    {item.itemType === 'section' ? (
+                      <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">{item.sectionName}</p>
+                    ) : item.itemType === 'note' ? (
                       <div className="flex items-start gap-1.5">
                         <StickyNote className="w-3.5 h-3.5 text-slate-300 mt-0.5 flex-shrink-0" />
                         <p className="text-[13px] text-slate-700">{item.noteText}</p>
@@ -91,21 +94,21 @@ export const PlayerSessionsView = ({ athleteId }: { athleteId: string }) => {
 };
 
 export const PlayerDefaultsView = ({ athleteId, clubId, userId }: { athleteId: string; clubId: string; userId: string }) => {
-  const [exerciseGroups, setExerciseGroups] = useState<GymExerciseGroup[]>([]);
+  const [groupTypes, setGroupTypes] = useState<GymExerciseGroupType[]>([]);
   const [exercises, setExercises] = useState<GymExercise[]>([]);
   const [defaults, setDefaults] = useState<GymPlayerDefaultPrimary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [savingGroupId, setSavingGroupId] = useState<string | null>(null);
+  const [savingTypeId, setSavingTypeId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [groups, exs, defs] = await Promise.all([
-        fetchExerciseGroups(clubId),
+      const [types, exs, defs] = await Promise.all([
+        fetchExerciseGroupTypes(clubId),
         fetchExercises(clubId),
         fetchPlayerDefaults(athleteId),
       ]);
-      setExerciseGroups(groups);
+      setGroupTypes(types);
       setExercises(exs);
       setDefaults(defs);
     } finally {
@@ -115,17 +118,17 @@ export const PlayerDefaultsView = ({ athleteId, clubId, userId }: { athleteId: s
 
   useEffect(() => { load(); }, [load]);
 
-  const handleSetDefault = async (groupId: string, exerciseId: string) => {
-    setSavingGroupId(groupId);
+  const handleSetDefault = async (typeId: string, exerciseId: string) => {
+    setSavingTypeId(typeId);
     try {
-      await setPlayerDefault(clubId, athleteId, groupId, exerciseId, userId);
+      await setPlayerDefault(clubId, athleteId, typeId, exerciseId, userId);
       await load();
     } finally {
-      setSavingGroupId(null);
+      setSavingTypeId(null);
     }
   };
 
-  const defaultFor = (groupId: string) => defaults.find(d => d.exerciseGroupId === groupId);
+  const defaultFor = (typeId: string) => defaults.find(d => d.exerciseGroupTypeId === typeId);
 
   if (loading) {
     return (
@@ -138,18 +141,16 @@ export const PlayerDefaultsView = ({ athleteId, clubId, userId }: { athleteId: s
   return (
     <div className="max-w-md md:max-w-2xl mx-auto p-4 md:p-6">
       <div className="bg-white rounded-lg border border-slate-200 divide-y divide-slate-100 overflow-hidden">
-        {exerciseGroups.map(group => {
-          const current = defaultFor(group.id);
-          const options = exercises.filter(e => e.exerciseGroupId === group.id);
+        {groupTypes.map(type => {
+          const current = defaultFor(type.id);
+          const options = exercises.filter(e => e.exerciseGroupTypeId === type.id);
           return (
-            <div key={group.id} className="p-3.5">
-              <p className="text-[13px] font-medium text-slate-800 mb-1.5">
-                {group.name} {group.typeName && <span className="text-[11px] font-normal text-slate-400">({group.typeName})</span>}
-              </p>
+            <div key={type.id} className="p-3.5">
+              <p className="text-[13px] font-medium text-slate-800 mb-1.5">{groupTypeLabel(type)}</p>
               <select
                 value={current?.exerciseId || ''}
-                onChange={e => e.target.value && handleSetDefault(group.id, e.target.value)}
-                disabled={savingGroupId === group.id}
+                onChange={e => e.target.value && handleSetDefault(type.id, e.target.value)}
+                disabled={savingTypeId === type.id}
                 className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">No default set</option>
@@ -157,11 +158,11 @@ export const PlayerDefaultsView = ({ athleteId, clubId, userId }: { athleteId: s
                   <option key={ex.id} value={ex.id}>{ex.name}</option>
                 ))}
               </select>
-              {options.length === 0 && <p className="text-[11px] text-slate-400 mt-1">No exercises in this group yet.</p>}
+              {options.length === 0 && <p className="text-[11px] text-slate-400 mt-1">No exercises of this type yet.</p>}
             </div>
           );
         })}
-        {exerciseGroups.length === 0 && <div className="p-6 text-center text-[13px] text-slate-400">No exercise groups set up yet.</div>}
+        {groupTypes.length === 0 && <div className="p-6 text-center text-[13px] text-slate-400">No exercise group types set up yet.</div>}
       </div>
     </div>
   );

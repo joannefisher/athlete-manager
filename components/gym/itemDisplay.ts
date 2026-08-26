@@ -15,6 +15,7 @@ import type { GymSessionItemSide, GymSessionItemType } from './types';
 interface ItemLike {
   itemType: GymSessionItemType;
   noteText: string | null;
+  sectionName?: string | null;
   exerciseName?: string;
   effectiveExerciseName?: string;
   conditioningExerciseName?: string;
@@ -50,6 +51,7 @@ export function formatDuration(totalSeconds: number | null): string {
 /** "4 sets × 8 reps × 60kg × @75% × tempo 3-1-1-0" for Exercise (Conditioning drops the kg/tempo parts); distance for Running; duration for Timer. Same format SessionEditor uses for its own rows. */
 export function itemMetaText(item: ItemLike): string {
   if (item.itemType === 'note') return '';
+  if (item.itemType === 'section') return '';
   if (item.itemType === 'running') {
     return item.runningExerciseDistanceMeters != null ? `${item.runningExerciseDistanceMeters}m` : 'No distance set';
   }
@@ -78,6 +80,7 @@ export function itemMetaText(item: ItemLike): string {
 
 export function itemDisplayName(item: ItemLike): string {
   if (item.itemType === 'note') return item.noteText || 'Note';
+  if (item.itemType === 'section') return item.sectionName || 'Section';
   if (item.itemType === 'running') return item.runningExerciseName || 'Running';
   if (item.itemType === 'timer') return item.timerLabel || 'Timer';
   if (item.itemType === 'conditioning') return item.conditioningExerciseName || 'Conditioning';
@@ -88,6 +91,7 @@ export function itemDisplayName(item: ItemLike): string {
 /** One tight line for the week grid, e.g. "Front Squat (L) 4×5 @75%/60kg". */
 export function itemCompactLabel(item: ItemLike): string {
   if (item.itemType === 'note') return item.noteText || 'Note';
+  if (item.itemType === 'section') return item.sectionName || 'Section';
   const name = itemDisplayName(item);
   if (item.itemType === 'running' || item.itemType === 'timer') {
     const meta = itemMetaText(item);

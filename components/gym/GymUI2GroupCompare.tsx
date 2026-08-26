@@ -99,7 +99,7 @@ export const GymUI2GroupCompare = ({
 
   useEffect(() => { load(); }, [load]);
 
-  const exerciseGroupIdFor = (exerciseId: string) => exercises.find(e => e.id === exerciseId)?.exerciseGroupId ?? null;
+  const exerciseGroupIdFor = (exerciseId: string) => exercises.find(e => e.id === exerciseId)?.exerciseGroupTypeId ?? null;
 
   const handleCopyToThisWeek = async (sourceItems: GymGroupPlanItem[]) => {
     if (!sourceItems || sourceItems.length === 0) return;

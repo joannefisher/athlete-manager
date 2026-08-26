@@ -88,7 +88,7 @@ export const CopySessionModal = ({
     setDestAthleteIds(prev => new Set([...prev, ...group.memberAthleteIds]));
   };
 
-  const exerciseGroupIdFor = (exerciseId: string) => exercises.find(e => e.id === exerciseId)?.exerciseGroupId ?? null;
+  const exerciseGroupIdFor = (exerciseId: string) => exercises.find(e => e.id === exerciseId)?.exerciseGroupTypeId ?? null;
 
   const handleCopy = async () => {
     if (items.length === 0) {
@@ -140,7 +140,7 @@ export const CopySessionModal = ({
             </div>
             {items.map(item => (
               <div key={item.id} className="px-3 py-1.5 text-[12.5px] text-slate-700">
-                {item.itemType === 'note' ? item.noteText : itemDisplayName(item)}
+                {item.itemType === 'note' ? item.noteText : item.itemType === 'section' ? `— ${item.sectionName} —` : itemDisplayName(item)}
               </div>
             ))}
             {items.length === 0 && <div className="px-3 py-4 text-center text-[12px] text-slate-400">Nothing selected to copy.</div>}

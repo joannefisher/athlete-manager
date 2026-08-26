@@ -11,7 +11,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   AlertTriangle, Check, Edit2, GripVertical, Link2, Loader2, Plus, StickyNote, Trash2, Users, X,
 } from 'lucide-react';
-import type { GymAthlete as Athlete, GymConditioningExercise, GymExercise, GymExerciseGroup, GymGroupPlanConflict, GymGroupPlanItem, GymRunningExercise, GymSessionGroup, GymSessionItemDraft } from './types';
+import type { GymAthlete as Athlete, GymConditioningExercise, GymExercise, GymExerciseGroupType, GymGroupPlanConflict, GymGroupPlanItem, GymRunningExercise, GymSessionGroup, GymSessionItemDraft } from './types';
 import {
   getOrCreateGroupPlan,
   fetchGroupPlanItems,
@@ -26,11 +26,14 @@ import {
   searchConditioningExercises,
   createRunningExercise,
   searchRunningExercises,
+  findOrCreateExerciseGroupType,
   groupPlanItemToDraft,
+  fetchFrequentSectionNames,
 } from './gymApi';
 import { applySupersetDrop, groupBySuperset, zoneForOffset, type DropZone } from './supersetDnd';
 import { itemDisplayName, itemMetaText } from './itemDisplay';
 import { useGymUndo } from './GymUndoContext';
+import { GroupTypePicker, emptyGroupTypeAttrs, isGroupTypeAttrsComplete, type GroupTypeAttrs } from './GroupTypePicker';
 
 const emptyDraft: GymSessionItemDraft = {
   itemType: 'exercise',
@@ -43,6 +46,7 @@ const emptyDraft: GymSessionItemDraft = {
   isPrimary: false,
   side: 'both',
   noteText: null,
+  sectionName: null,
   conditioningExerciseId: null,
   runningExerciseId: null,
   distanceValue: null,
@@ -56,6 +60,7 @@ const fmtDate = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-
 const draftLabel = (draft: GymSessionItemDraft | null): string => {
   if (!draft) return 'Removed';
   if (draft.itemType === 'note') return draft.noteText || 'Note';
+  if (draft.itemType === 'section') return draft.sectionName || 'Section';
   const sideTag = draft.side !== 'both' ? ` (${draft.side === 'left' ? 'L' : 'R'})` : '';
   return `${itemDisplayName(draft)}${sideTag} — ${itemMetaText(draft)}`;
 };
@@ -67,7 +72,7 @@ export const GroupPlanEditor = ({
   userId,
   canEdit,
   athletes,
-  exerciseGroups,
+  exerciseGroupTypes,
   exercises,
   conditioningExercises,
   runningExercises,
@@ -80,7 +85,7 @@ export const GroupPlanEditor = ({
   userId: string;
   canEdit: boolean;
   athletes: Athlete[];
-  exerciseGroups: GymExerciseGroup[];
+  exerciseGroupTypes: GymExerciseGroupType[];
   exercises: GymExercise[];
   conditioningExercises: GymConditioningExercise[];
   runningExercises: GymRunningExercise[];
@@ -103,7 +108,7 @@ export const GroupPlanEditor = ({
   const [exerciseQuery, setExerciseQuery] = useState('');
   const [showPicker, setShowPicker] = useState(false);
   const [addingNewExercise, setAddingNewExercise] = useState(false);
-  const [newExerciseGroupId, setNewExerciseGroupId] = useState('');
+  const [newExerciseTypeAttrs, setNewExerciseTypeAttrs] = useState<GroupTypeAttrs>(emptyGroupTypeAttrs);
   const [splitSide, setSplitSide] = useState(false);
   const [rightDraft, setRightDraft] = useState<{ sets: number | null; reps: number | null; load: string | null; loadKg: number | null; tempo: string | null }>({ sets: null, reps: null, load: null, loadKg: null, tempo: null });
   // Timer's Minutes/Seconds inputs are kept separate from draft.durationSeconds for entry ergonomics.
@@ -112,6 +117,8 @@ export const GroupPlanEditor = ({
   const [creatingExercise, setCreatingExercise] = useState(false);
   const [createExerciseError, setCreateExerciseError] = useState<string | null>(null);
   const [newRunningDistance, setNewRunningDistance] = useState('');
+  // Round 18: "frequently used" quick-pick for the Section name field.
+  const [frequentSectionNames, setFrequentSectionNames] = useState<string[]>([]);
 
   // Focus jumps straight to Sets right after an exercise is picked/created.
   const setsInputRef = useRef<HTMLInputElement>(null);
@@ -136,6 +143,11 @@ export const GroupPlanEditor = ({
   }, [clubId, group.id, date, userId]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    fetchFrequentSectionNames(clubId)
+      .then(setFrequentSectionNames)
+      .catch(err => console.error('[GroupPlanEditor] failed to load frequent section names', err));
+  }, [clubId]);
 
   const resetDraft = () => {
     setDraft(emptyDraft);
@@ -143,7 +155,7 @@ export const GroupPlanEditor = ({
     setExerciseQuery('');
     setShowPicker(false);
     setAddingNewExercise(false);
-    setNewExerciseGroupId('');
+    setNewExerciseTypeAttrs(emptyGroupTypeAttrs);
     setSplitSide(false);
     setRightDraft({ sets: null, reps: null, load: null, loadKg: null, tempo: null });
     setTimerMinutes(null);
@@ -166,6 +178,7 @@ export const GroupPlanEditor = ({
     setExerciseQuery('');
     setShowPicker(false);
     setAddingNewExercise(false);
+    setNewExerciseTypeAttrs(emptyGroupTypeAttrs);
     setCreateExerciseError(null);
     setSplitSide(false);
     setRightDraft({ sets: null, reps: null, load: null, loadKg: null, tempo: null });
@@ -180,12 +193,13 @@ export const GroupPlanEditor = ({
     draft.itemType === 'running' ? !!draft.runningExerciseId :
     draft.itemType === 'note' ? !!draft.noteText?.trim() :
     draft.itemType === 'timer' ? !!draft.timerLabel?.trim() && draft.durationSeconds != null :
+    draft.itemType === 'section' ? !!draft.sectionName?.trim() :
     false;
 
   const matches = searchExercises(exercises, exerciseQuery);
   const conditioningMatches = searchConditioningExercises(conditioningExercises, exerciseQuery);
   const runningMatches = searchRunningExercises(runningExercises, exerciseQuery);
-  const exerciseGroupIdFor = (exerciseId: string) => exercises.find(e => e.id === exerciseId)?.exerciseGroupId ?? null;
+  const exerciseGroupIdFor = (exerciseId: string) => exercises.find(e => e.id === exerciseId)?.exerciseGroupTypeId ?? null;
 
   const handlePickExercise = (ex: GymExercise) => {
     setDraft(d => ({ ...d, exerciseId: ex.id, exerciseName: ex.name }));
@@ -195,11 +209,12 @@ export const GroupPlanEditor = ({
   };
 
   const handleCreateExercise = async () => {
-    if (!exerciseQuery.trim() || !newExerciseGroupId) return;
+    if (!exerciseQuery.trim() || !isGroupTypeAttrsComplete(newExerciseTypeAttrs)) return;
     setCreatingExercise(true);
     setCreateExerciseError(null);
     try {
-      const created = await createExercise(clubId, exerciseQuery.trim(), newExerciseGroupId, userId);
+      const type = await findOrCreateExerciseGroupType(clubId, newExerciseTypeAttrs, userId);
+      const created = await createExercise(clubId, exerciseQuery.trim(), type.id, userId);
       onExercisesChanged();
       setDraft(d => ({ ...d, exerciseId: created.id, exerciseName: created.name }));
       setAddingNewExercise(false);
@@ -375,7 +390,18 @@ export const GroupPlanEditor = ({
   const handleDragOverRow = (e: React.DragEvent, targetId: string) => {
     e.preventDefault();
     const rect = e.currentTarget.getBoundingClientRect();
-    setDropTarget({ id: targetId, zone: zoneForOffset(e.clientY - rect.top, rect.height) });
+    let zone = zoneForOffset(e.clientY - rect.top, rect.height);
+    // Sections have no interaction with Supersets (Joanne's answer, round
+    // 17) — never let one merge into/receive a superset, only reorder.
+    if (zone === 'merge') {
+      const targetItem = items.find(i => i.id === targetId);
+      const draggingSection = (draggedIds || []).some(id => items.find(i => i.id === id)?.itemType === 'section');
+      if (targetItem?.itemType === 'section' || draggingSection) {
+        const ratio = rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0;
+        zone = ratio < 0.5 ? 'before' : 'after';
+      }
+    }
+    setDropTarget({ id: targetId, zone });
   };
 
   const handleDragEndAny = () => {
@@ -434,6 +460,7 @@ export const GroupPlanEditor = ({
           ['running', 'Running'],
           ['timer', 'Timer'],
           ['note', 'Note'],
+          ['section', 'Section'],
         ] as const).map(([type, label]) => (
           <button
             key={type}
@@ -482,7 +509,7 @@ export const GroupPlanEditor = ({
                     {matches.map(ex => (
                       <button key={ex.id} onClick={() => handlePickExercise(ex)} className="w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50 flex justify-between">
                         <span>{ex.name}</span>
-                        <span className="text-[11px] text-slate-400">{ex.exerciseGroupName}</span>
+                        <span className="text-[11px] text-slate-400">{ex.exerciseGroupTypeLabel}</span>
                       </button>
                     ))}
                     <button onClick={() => setAddingNewExercise(true)} className="w-full text-left px-3 py-2 text-[13px] text-blue-600 hover:bg-blue-50 flex items-center gap-1 border-t border-slate-100">
@@ -496,20 +523,17 @@ export const GroupPlanEditor = ({
 
           {addingNewExercise && (
             <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 space-y-2">
-              <label className="block text-[11px] font-medium text-slate-500">Exercise group</label>
-              <select value={newExerciseGroupId} onChange={e => setNewExerciseGroupId(e.target.value)} className="w-full h-8 px-2 text-[13px] border border-slate-200 rounded bg-white">
-                <option value="">Select a group…</option>
-                {exerciseGroups.map(g => <option key={g.id} value={g.id}>{g.name}{g.typeName ? ` (${g.typeName})` : ''}</option>)}
-              </select>
+              <label className="block text-[11px] font-medium text-slate-500">Exercise group type</label>
+              <GroupTypePicker value={newExerciseTypeAttrs} onChange={setNewExerciseTypeAttrs} />
               {createExerciseError && (
                 <p className="text-[11px] text-red-600">{createExerciseError}</p>
               )}
               <div className="flex gap-2">
-                <button onClick={handleCreateExercise} disabled={!newExerciseGroupId || creatingExercise} className="h-8 px-3 text-[12px] font-medium bg-slate-900 text-white rounded disabled:opacity-40 flex items-center gap-1.5">
+                <button onClick={handleCreateExercise} disabled={!isGroupTypeAttrsComplete(newExerciseTypeAttrs) || creatingExercise} className="h-8 px-3 text-[12px] font-medium bg-slate-900 text-white rounded disabled:opacity-40 flex items-center gap-1.5">
                   {creatingExercise && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                   {creatingExercise ? 'Creating…' : 'Create exercise'}
                 </button>
-                <button onClick={() => { setAddingNewExercise(false); setCreateExerciseError(null); }} disabled={creatingExercise} className="h-8 px-3 text-[12px] text-slate-500 disabled:opacity-40">Cancel</button>
+                <button onClick={() => { setAddingNewExercise(false); setCreateExerciseError(null); setNewExerciseTypeAttrs(emptyGroupTypeAttrs); }} disabled={creatingExercise} className="h-8 px-3 text-[12px] text-slate-500 disabled:opacity-40">Cancel</button>
               </div>
             </div>
           )}
@@ -760,6 +784,32 @@ export const GroupPlanEditor = ({
             </div>
           </div>
         </div>
+      ) : draft.itemType === 'section' ? (
+        <div>
+          <label className="block text-[11px] font-medium text-slate-500 mb-1">Section name</label>
+          <input
+            ref={setsInputRef}
+            value={draft.sectionName ?? ''}
+            onChange={e => setDraft(d => ({ ...d, sectionName: e.target.value || null }))}
+            placeholder="e.g. Warm-up, Main lifts, Accessories"
+            className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          {frequentSectionNames.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {frequentSectionNames.map(name => (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => setDraft(d => ({ ...d, sectionName: name }))}
+                  className="px-2 py-1 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600 hover:bg-slate-200"
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="text-[11px] text-slate-400 mt-1">A simple named divider in the list — no sets/reps of its own, and it can't be part of a Superset or split left/right.</p>
+        </div>
       ) : (
         <textarea
           value={draft.noteText ?? ''}
@@ -794,6 +844,38 @@ export const GroupPlanEditor = ({
       return (
         <div key={item.id} className="px-3.5 py-3 bg-blue-50/60 border-l-2 border-blue-400">
           {renderForm()}
+        </div>
+      );
+    }
+    if (item.itemType === 'section') {
+      const zone = dropTarget?.id === item.id ? dropTarget.zone : null;
+      return (
+        <div
+          key={item.id}
+          draggable={canEdit}
+          onDragStart={() => handleDragStartItem(item.id)}
+          onDragOver={e => handleDragOverRow(e, item.id)}
+          onDrop={() => handleDropOnRow(item.id)}
+          onDragEnd={handleDragEndAny}
+          className={[
+            'flex items-center gap-2 px-3.5 py-2 relative bg-slate-50',
+            draggedIds?.includes(item.id) ? 'opacity-40' : '',
+          ].filter(Boolean).join(' ')}
+        >
+          {zone === 'before' && <div className="absolute left-0 right-0 top-0 h-0.5 bg-blue-500 z-10" />}
+          {zone === 'after' && <div className="absolute left-0 right-0 bottom-0 h-0.5 bg-blue-500 z-10" />}
+          {canEdit && <GripVertical className="w-3.5 h-3.5 text-slate-300 flex-shrink-0 cursor-grab" />}
+          <span className="flex-1 text-[11px] font-bold uppercase tracking-wide text-slate-500">{item.sectionName}</span>
+          {canEdit && (
+            <div className="flex items-center gap-0.5 flex-shrink-0">
+              <button onClick={() => handleStartEdit(item)} className="p-1 rounded hover:bg-slate-200 text-slate-300 hover:text-slate-600">
+                <Edit2 className="w-3.5 h-3.5" />
+              </button>
+              <button onClick={() => handleDelete(item)} className="p-1 rounded hover:bg-red-50 text-slate-300 hover:text-red-500">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
         </div>
       );
     }

@@ -24,18 +24,35 @@ export interface GymTeamPosition {
   group: string; // e.g. "Forward" / "Back"
 }
 
+export type GymBodyRegion = 'upper' | 'lower';
+export type GymUpperPushPull = 'push' | 'pull';
+export type GymUpperPlane = 'vertical' | 'horizontal';
+export type GymLowerPosition = 'anterior' | 'posterior' | 'other';
+export type GymLaterality = 'unilateral' | 'bilateral';
+
+/**
+ * Round 17: replaces the old two-level "Exercise Group Type" (simple tag) ->
+ * "Exercise Group" (named, e.g. "Squat") hierarchy entirely. An Exercise
+ * Group Type is now defined purely by this fixed attribute combination —
+ * Upper Body (+ Push/Pull, + Vertical/Horizontal) or Lower Body (+
+ * Anterior/Posterior/Other), plus an independent Unilateral/Bilateral
+ * toggle that applies no matter which body region was picked. The unique
+ * combination of these fields IS the type — see gymApi.findOrCreateExerciseGroupType,
+ * which looks up-or-creates a row for a given combination rather than ever
+ * creating a duplicate. This is also what the player Primary-default
+ * mechanism is keyed on now (see GymPlayerDefaultPrimary below).
+ */
 export interface GymExerciseGroupType {
   id: string;
   clubId: string;
-  name: string; // e.g. "Anterior", "Posterior" — editable list, seeded by migration
-}
-
-export interface GymExerciseGroup {
-  id: string;
-  clubId: string;
-  name: string; // e.g. "Squat", "Hinge", "Push", "Pull"
-  typeId: string | null;
-  typeName?: string; // convenience, joined in for display
+  bodyRegion: GymBodyRegion;
+  upperPushPull: GymUpperPushPull | null; // set iff bodyRegion === 'upper'
+  upperPlane: GymUpperPlane | null; // set iff bodyRegion === 'upper'
+  lowerPosition: GymLowerPosition | null; // set iff bodyRegion === 'lower'
+  laterality: GymLaterality;
+  archived: boolean;
+  createdBy: string | null;
+  createdAt: string;
 }
 
 /** Flat conditioning-exercise list — its own list, separate from gym_exercises/exercise groups. */
@@ -65,8 +82,11 @@ export interface GymExercise {
   id: string;
   clubId: string;
   name: string;
-  exerciseGroupId: string;
-  exerciseGroupName?: string; // convenience, joined in for display
+  // Nullable from round 17 on: a legacy exercise the auto-map migration
+  // couldn't confidently place shows up with this null, surfaced in the
+  // Exercises admin screen's "Needs review" list until an Admin assigns one.
+  exerciseGroupTypeId: string | null;
+  exerciseGroupTypeLabel?: string; // convenience, computed from the joined type's attributes for display
   createdBy: string | null;
   createdByName?: string; // convenience, joined in for display (Admin review queue)
   createdAt: string;
@@ -102,7 +122,7 @@ export interface GymPlayerDefaultPrimary {
   id: string;
   clubId: string;
   athleteId: string;
-  exerciseGroupId: string;
+  exerciseGroupTypeId: string;
   exerciseId: string;
   exerciseName?: string;
   updatedBy: string | null;
@@ -144,9 +164,12 @@ export interface GymSession {
  * distance_meters, never entered/stored per-item. 'timer' is a labelled
  * duration, captured here as data only — see gymApi.ts's migration-0008
  * comment for what "captured as data only" means for the Player-facing
- * countdown that's ultimately meant to run off it.
+ * countdown that's ultimately meant to run off it. 'section' (round 17) is a
+ * simple named divider within the item list — just a heading, carrying only
+ * sectionName; it has no interaction with Supersets or Split left/right (per
+ * Joanne's answer, both stay unavailable for a section).
  */
-export type GymSessionItemType = 'exercise' | 'note' | 'running' | 'conditioning' | 'timer';
+export type GymSessionItemType = 'exercise' | 'note' | 'running' | 'conditioning' | 'timer' | 'section';
 
 /** 'both' (default, one combined entry) or an independent 'left'/'right' half of a split exercise. Only ever set for 'exercise' items — every other type is always 'both'. */
 export type GymSessionItemSide = 'both' | 'left' | 'right';
@@ -180,6 +203,9 @@ export interface GymSessionItem {
 
   // note fields
   noteText: string | null;
+
+  // section fields — a simple named divider, no other data (round 17)
+  sectionName: string | null;
 
   // conditioning fields — its own flat list (gym_conditioning_exercises), no exercise-bank/group tie
   conditioningExerciseId: string | null;
@@ -237,6 +263,7 @@ export interface GymSessionItemDraft {
   isPrimary: boolean;
   side: GymSessionItemSide;
   noteText: string | null;
+  sectionName: string | null;
   conditioningExerciseId: string | null;
   conditioningExerciseName?: string;
   runningExerciseId: string | null;
@@ -284,6 +311,7 @@ export interface GymGroupPlanItem {
   side: GymSessionItemSide;
 
   noteText: string | null;
+  sectionName: string | null;
 
   conditioningExerciseId: string | null;
   conditioningExerciseName?: string;
@@ -320,7 +348,7 @@ export interface GymGroupPlanConflict {
   memberSortOrder: number | null;
   currentDraft: GymSessionItemDraft | null; // the member's current values (null if they'd already removed it)
   newDraft: GymSessionItemDraft | null; // the plan's new values (null if the plan item was deleted)
-  exerciseGroupId: string | null;
+  exerciseGroupTypeId: string | null;
   /** The plan item's Superset grouping key at the time of this conflict, applied to the member's item if accepted. Null for a 'delete' conflict (unused). */
   supersetId: string | null;
 }

@@ -119,7 +119,7 @@ export const GymUI2Compare = ({
     if (subMode === 'weekday') loadWeekday();
   }, [subMode, loadWeekday]);
 
-  const exerciseGroupIdFor = (exerciseId: string) => exercises.find(e => e.id === exerciseId)?.exerciseGroupId ?? null;
+  const exerciseGroupIdFor = (exerciseId: string) => exercises.find(e => e.id === exerciseId)?.exerciseGroupTypeId ?? null;
 
   const handleCopyToThisWeek = async (sourceSession: GymSession | undefined) => {
     if (!sourceSession || !sourceSession.items || sourceSession.items.length === 0) return;

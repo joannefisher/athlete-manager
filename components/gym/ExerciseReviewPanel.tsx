@@ -109,13 +109,13 @@ export const ExerciseReviewPanel = ({ clubId, currentUserId, onChanged }: { club
             <div className="space-y-2">
               {pending.map(ex => {
                 const suggestion = bestMatch(ex, approved);
-                const sameGroupApproved = approved.filter(a => a.exerciseGroupId === ex.exerciseGroupId);
+                const sameGroupApproved = approved.filter(a => a.exerciseGroupTypeId === ex.exerciseGroupTypeId);
                 const pick = manualPick[ex.id] ?? suggestion?.candidate.id ?? '';
                 return (
                   <div key={ex.id} className="border border-slate-200 rounded-lg p-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="text-sm font-medium truncate">{ex.name} <span className="text-xs text-slate-400">({ex.exerciseGroupName})</span></p>
+                        <p className="text-sm font-medium truncate">{ex.name} <span className="text-xs text-slate-400">({ex.exerciseGroupTypeLabel || 'no type set'})</span></p>
                         <p className="text-[11px] text-slate-400">added by {ex.createdByName || 'someone'}</p>
                       </div>
                       <button
@@ -163,7 +163,7 @@ export const ExerciseReviewPanel = ({ clubId, currentUserId, onChanged }: { club
                 <div key={`${exercise.id}-${candidate.id}`} className="border border-slate-200 rounded-lg p-2.5 flex items-center justify-between gap-2">
                   <p className="text-sm min-w-0 truncate">
                     <span className="font-medium">{exercise.name}</span> <span className="text-slate-400">≈</span> <span className="font-medium">{candidate.name}</span>
-                    <span className="text-[11px] text-slate-400 ml-1">({Math.round(score * 100)}% match, {exercise.exerciseGroupName})</span>
+                    <span className="text-[11px] text-slate-400 ml-1">({Math.round(score * 100)}% match, {exercise.exerciseGroupTypeLabel || 'no type set'})</span>
                   </p>
                   <div className="flex gap-1.5 flex-shrink-0">
                     <button onClick={() => handleMerge(candidate.id, exercise.id)} disabled={busyId !== null} className="px-2 py-1 text-xs border rounded hover:bg-slate-50 disabled:opacity-40">

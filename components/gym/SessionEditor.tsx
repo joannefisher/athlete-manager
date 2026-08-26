@@ -11,7 +11,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { ArrowLeft, Check, Copy, Edit2, GripVertical, Link2, Loader2, Plus, RefreshCw, StickyNote, Trash2, X } from 'lucide-react';
 import type { GymAthlete as Athlete } from './types';
-import type { GymConditioningExercise, GymExercise, GymExerciseGroup, GymRunningExercise, GymSession, GymSessionGroup, GymSessionItem, GymSessionItemDraft } from './types';
+import type { GymConditioningExercise, GymExercise, GymExerciseGroupType, GymRunningExercise, GymSession, GymSessionGroup, GymSessionItem, GymSessionItemDraft } from './types';
 import {
   fetchAthleteSessionsForDateRange,
   getOrCreateSession,
@@ -25,12 +25,15 @@ import {
   searchConditioningExercises,
   createRunningExercise,
   searchRunningExercises,
+  findOrCreateExerciseGroupType,
   itemToDraft,
+  fetchFrequentSectionNames,
 } from './gymApi';
 import { applySupersetDrop, groupBySuperset, zoneForOffset, type DropZone } from './supersetDnd';
 import { CopySessionModal } from './CopySessionModal';
 import { useGymUndo } from './GymUndoContext';
 import { itemDisplayName, itemMetaText } from './itemDisplay';
+import { GroupTypePicker, emptyGroupTypeAttrs, isGroupTypeAttrsComplete, type GroupTypeAttrs } from './GroupTypePicker';
 
 const emptyDraft: GymSessionItemDraft = {
   itemType: 'exercise',
@@ -43,6 +46,7 @@ const emptyDraft: GymSessionItemDraft = {
   isPrimary: false,
   side: 'both',
   noteText: null,
+  sectionName: null,
   conditioningExerciseId: null,
   runningExerciseId: null,
   distanceValue: null,
@@ -61,7 +65,7 @@ export const SessionEditor = ({
   clubId,
   userId,
   canEdit,
-  exerciseGroups,
+  exerciseGroupTypes,
   exercises,
   conditioningExercises,
   runningExercises,
@@ -76,7 +80,7 @@ export const SessionEditor = ({
   clubId: string;
   userId: string;
   canEdit: boolean;
-  exerciseGroups: GymExerciseGroup[];
+  exerciseGroupTypes: GymExerciseGroupType[];
   exercises: GymExercise[];
   conditioningExercises: GymConditioningExercise[];
   runningExercises: GymRunningExercise[];
@@ -97,10 +101,13 @@ export const SessionEditor = ({
   const [exerciseQuery, setExerciseQuery] = useState('');
   const [showPicker, setShowPicker] = useState(false);
   const [addingNewExercise, setAddingNewExercise] = useState(false);
-  const [newExerciseGroupId, setNewExerciseGroupId] = useState<string>('');
+  const [newExerciseTypeAttrs, setNewExerciseTypeAttrs] = useState<GroupTypeAttrs>(emptyGroupTypeAttrs);
   const [creatingExercise, setCreatingExercise] = useState(false);
   const [createExerciseError, setCreateExerciseError] = useState<string | null>(null);
   const [splitSide, setSplitSide] = useState(false);
+  // Round 18: "frequently used" quick-pick for the Section name field —
+  // loaded once, lazily, not blocking the main session load.
+  const [frequentSectionNames, setFrequentSectionNames] = useState<string[]>([]);
   const [rightDraft, setRightDraft] = useState<{ sets: number | null; reps: number | null; load: string | null; loadKg: number | null; tempo: string | null }>({ sets: null, reps: null, load: null, loadKg: null, tempo: null });
   // Timer's Minutes/Seconds inputs are kept separate from draft.durationSeconds
   // for entry ergonomics — each keystroke recombines them into that one field.
@@ -148,6 +155,11 @@ export const SessionEditor = ({
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { setOwnerFilter('all'); }, [athleteId, date]);
+  useEffect(() => {
+    fetchFrequentSectionNames(clubId)
+      .then(setFrequentSectionNames)
+      .catch(err => console.error('[SessionEditor] failed to load frequent section names', err));
+  }, [clubId]);
 
   const ensureSession = async (): Promise<GymSession> => {
     if (session) return session;
@@ -162,7 +174,7 @@ export const SessionEditor = ({
     setExerciseQuery('');
     setShowPicker(false);
     setAddingNewExercise(false);
-    setNewExerciseGroupId('');
+    setNewExerciseTypeAttrs(emptyGroupTypeAttrs);
     setSplitSide(false);
     setRightDraft({ sets: null, reps: null, load: null, loadKg: null, tempo: null });
     setTimerMinutes(null);
@@ -190,11 +202,12 @@ export const SessionEditor = ({
   };
 
   const handleCreateExercise = async () => {
-    if (!exerciseQuery.trim() || !newExerciseGroupId) return;
+    if (!exerciseQuery.trim() || !isGroupTypeAttrsComplete(newExerciseTypeAttrs)) return;
     setCreatingExercise(true);
     setCreateExerciseError(null);
     try {
-      const created = await createExercise(clubId, exerciseQuery.trim(), newExerciseGroupId, userId);
+      const type = await findOrCreateExerciseGroupType(clubId, newExerciseTypeAttrs, userId);
+      const created = await createExercise(clubId, exerciseQuery.trim(), type.id, userId);
       onExercisesChanged();
       setDraft(d => ({ ...d, exerciseId: created.id, exerciseName: created.name }));
       setAddingNewExercise(false);
@@ -287,7 +300,7 @@ export const SessionEditor = ({
     }
   };
 
-  const exerciseGroupIdForDraft = (d: GymSessionItemDraft) => exercises.find(e => e.id === d.exerciseId)?.exerciseGroupId || null;
+  const exerciseGroupIdForDraft = (d: GymSessionItemDraft) => exercises.find(e => e.id === d.exerciseId)?.exerciseGroupTypeId || null;
 
   const handleAddItem = async () => {
     if (draft.itemType === 'exercise' && !draft.exerciseId) return;
@@ -295,6 +308,7 @@ export const SessionEditor = ({
     if (draft.itemType === 'running' && !draft.runningExerciseId) return;
     if (draft.itemType === 'note' && !draft.noteText?.trim()) return;
     if (draft.itemType === 'timer' && (!draft.timerLabel?.trim() || draft.durationSeconds == null)) return;
+    if (draft.itemType === 'section' && !draft.sectionName?.trim()) return;
     setSaving(true);
     try {
       const s = await ensureSession();
@@ -327,7 +341,7 @@ export const SessionEditor = ({
       if (draft.id && previousItem) {
         const sessionId = s.id;
         pushUndo({
-          label: `Undo edit to "${previousItem.exerciseName || previousItem.noteText || 'item'}"`,
+          label: `Undo edit to "${previousItem.exerciseName || previousItem.noteText || previousItem.sectionName || 'item'}"`,
           run: async () => {
             const oldDraft: GymSessionItemDraft = { ...itemToDraft(previousItem), id: previousItem.id };
             const restoredGroupId = previousItem.itemType === 'exercise' ? exerciseGroupIdForDraft(oldDraft) : null;
@@ -338,7 +352,7 @@ export const SessionEditor = ({
       } else if (!draft.id) {
         const sessionId = s.id;
         pushUndo({
-          label: `Remove "${saved.exerciseName || saved.noteText || 'item'}"`,
+          label: `Remove "${saved.exerciseName || saved.noteText || saved.sectionName || 'item'}"`,
           run: async () => {
             await deleteSessionItem(saved.id);
             setItems(prev => prev.filter(i => i.id !== saved.id));
@@ -364,7 +378,7 @@ export const SessionEditor = ({
 
     if (item && sessionId) {
       pushUndo({
-        label: `Restore "${item.exerciseName || item.noteText || 'item'}"`,
+        label: `Restore "${item.exerciseName || item.noteText || item.sectionName || 'item'}"`,
         run: async () => {
           const oldDraft = itemToDraft(item);
           const restoredGroupId = item.itemType === 'exercise' ? exerciseGroupIdForDraft(oldDraft) : null;
@@ -439,7 +453,18 @@ export const SessionEditor = ({
   const handleDragOverRow = (e: React.DragEvent, targetId: string) => {
     e.preventDefault();
     const rect = e.currentTarget.getBoundingClientRect();
-    setDropTarget({ id: targetId, zone: zoneForOffset(e.clientY - rect.top, rect.height) });
+    let zone = zoneForOffset(e.clientY - rect.top, rect.height);
+    // Sections have no interaction with Supersets (Joanne's answer, round
+    // 17) — never let one merge into/receive a superset, only reorder.
+    if (zone === 'merge') {
+      const targetItem = items.find(i => i.id === targetId);
+      const draggingSection = (draggedIds || []).some(id => items.find(i => i.id === id)?.itemType === 'section');
+      if (targetItem?.itemType === 'section' || draggingSection) {
+        const ratio = rect.height > 0 ? (e.clientY - rect.top) / rect.height : 0;
+        zone = ratio < 0.5 ? 'before' : 'after';
+      }
+    }
+    setDropTarget({ id: targetId, zone });
   };
 
   const handleDragEndAny = () => {
@@ -513,6 +538,7 @@ export const SessionEditor = ({
     setExerciseQuery('');
     setShowPicker(false);
     setAddingNewExercise(false);
+    setNewExerciseTypeAttrs(emptyGroupTypeAttrs);
     setCreateExerciseError(null);
     setSplitSide(false);
     setRightDraft({ sets: null, reps: null, load: null, loadKg: null, tempo: null });
@@ -530,6 +556,7 @@ export const SessionEditor = ({
     draft.itemType === 'running' ? !!draft.runningExerciseId :
     draft.itemType === 'note' ? !!draft.noteText?.trim() :
     draft.itemType === 'timer' ? !!draft.timerLabel?.trim() && draft.durationSeconds != null :
+    draft.itemType === 'section' ? !!draft.sectionName?.trim() :
     false;
 
   const renderForm = () => (
@@ -542,6 +569,7 @@ export const SessionEditor = ({
             ['running', 'Running'],
             ['timer', 'Timer'],
             ['note', 'Note'],
+            ['section', 'Section'],
           ] as const).map(([type, label]) => (
             <button
               key={type}
@@ -602,7 +630,7 @@ export const SessionEditor = ({
                     {matches.map(ex => (
                       <button key={ex.id} onClick={() => handlePickExercise(ex)} className="w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50 flex justify-between">
                         <span>{ex.name}</span>
-                        <span className="text-[11px] text-slate-400">{ex.exerciseGroupName}</span>
+                        <span className="text-[11px] text-slate-400">{ex.exerciseGroupTypeLabel}</span>
                       </button>
                     ))}
                     <button
@@ -619,29 +647,17 @@ export const SessionEditor = ({
 
           {addingNewExercise && (
             <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 space-y-2">
-              <label className="block text-[11px] font-medium text-slate-500">Exercise group</label>
-              <select
-                value={newExerciseGroupId}
-                onChange={e => setNewExerciseGroupId(e.target.value)}
-                className="w-full h-8 px-2 text-[13px] border border-slate-200 rounded bg-white"
-              >
-                <option value="">Select a group…</option>
-                {exerciseGroups.map(g => (
-                  <option key={g.id} value={g.id}>{g.name}{g.typeName ? ` (${g.typeName})` : ''}</option>
-                ))}
-              </select>
-              {exerciseGroups.length === 0 && (
-                <p className="text-[11px] text-amber-600">No exercise groups yet — add one in Setup → Gym first.</p>
-              )}
+              <label className="block text-[11px] font-medium text-slate-500">Exercise group type</label>
+              <GroupTypePicker value={newExerciseTypeAttrs} onChange={setNewExerciseTypeAttrs} />
               {createExerciseError && (
                 <p className="text-[11px] text-red-600">{createExerciseError}</p>
               )}
               <div className="flex gap-2">
-                <button onClick={handleCreateExercise} disabled={!newExerciseGroupId || creatingExercise} className="h-8 px-3 text-[12px] font-medium bg-slate-900 text-white rounded disabled:opacity-40 flex items-center gap-1.5">
+                <button onClick={handleCreateExercise} disabled={!isGroupTypeAttrsComplete(newExerciseTypeAttrs) || creatingExercise} className="h-8 px-3 text-[12px] font-medium bg-slate-900 text-white rounded disabled:opacity-40 flex items-center gap-1.5">
                   {creatingExercise && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                   {creatingExercise ? 'Creating…' : 'Create exercise'}
                 </button>
-                <button onClick={() => { setAddingNewExercise(false); setCreateExerciseError(null); }} disabled={creatingExercise} className="h-8 px-3 text-[12px] text-slate-500 disabled:opacity-40">Cancel</button>
+                <button onClick={() => { setAddingNewExercise(false); setCreateExerciseError(null); setNewExerciseTypeAttrs(emptyGroupTypeAttrs); }} disabled={creatingExercise} className="h-8 px-3 text-[12px] text-slate-500 disabled:opacity-40">Cancel</button>
               </div>
             </div>
           )}
@@ -917,6 +933,32 @@ export const SessionEditor = ({
             </div>
           </div>
         </div>
+      ) : draft.itemType === 'section' ? (
+        <div>
+          <label className="block text-[11px] font-medium text-slate-500 mb-1">Section name</label>
+          <input
+            ref={setsInputRef}
+            value={draft.sectionName ?? ''}
+            onChange={e => setDraft(d => ({ ...d, sectionName: e.target.value || null }))}
+            placeholder="e.g. Warm-up, Main lifts, Accessories"
+            className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          {frequentSectionNames.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {frequentSectionNames.map(name => (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => setDraft(d => ({ ...d, sectionName: name }))}
+                  className="px-2 py-1 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600 hover:bg-slate-200"
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="text-[11px] text-slate-400 mt-1">A simple named divider in the list — no sets/reps of its own, and it can't be part of a Superset or split left/right.</p>
+        </div>
       ) : (
         <textarea
           value={draft.noteText ?? ''}
@@ -952,6 +994,46 @@ export const SessionEditor = ({
       return (
         <div key={item.id} className="px-3.5 py-3 bg-blue-50/60 border-l-2 border-blue-400">
           {renderForm()}
+        </div>
+      );
+    }
+    if (item.itemType === 'section') {
+      // A simple named divider — no Sets/Reps meta, never part of a
+      // Superset, rendered distinctly from an exercise/note/etc. row.
+      const zone = dropTarget?.id === item.id ? dropTarget.zone : null;
+      return (
+        <div
+          key={item.id}
+          draggable={canReorder}
+          onDragStart={() => handleDragStartItem(item.id)}
+          onDragOver={e => handleDragOverRow(e, item.id)}
+          onDrop={() => handleDropOnRow(item.id)}
+          onDragEnd={handleDragEndAny}
+          className={[
+            'px-3.5 py-2 flex items-center gap-2 relative bg-slate-50',
+            draggedIds?.includes(item.id) ? 'opacity-40' : '',
+          ].filter(Boolean).join(' ')}
+        >
+          {zone === 'before' && <div className="absolute left-0 right-0 top-0 h-0.5 bg-blue-500 z-10" />}
+          {zone === 'after' && <div className="absolute left-0 right-0 bottom-0 h-0.5 bg-blue-500 z-10" />}
+          <input
+            type="checkbox"
+            checked={selectedItemIds.has(item.id)}
+            onChange={() => toggleSelected(item.id)}
+            className="w-3.5 h-3.5 flex-shrink-0"
+          />
+          {canReorder && <GripVertical className="w-3.5 h-3.5 text-slate-300 flex-shrink-0 cursor-grab" />}
+          <span className="flex-1 text-[11px] font-bold uppercase tracking-wide text-slate-500">{item.sectionName}</span>
+          {canEdit && (
+            <div className="flex items-center gap-0.5 flex-shrink-0">
+              <button onClick={() => handleStartEdit(item)} className="p-1 rounded hover:bg-slate-200 text-slate-300 hover:text-slate-600">
+                <Edit2 className="w-3.5 h-3.5" />
+              </button>
+              <button onClick={() => handleDeleteItem(item.id)} className="p-1 rounded hover:bg-red-50 text-slate-300 hover:text-red-500">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
         </div>
       );
     }

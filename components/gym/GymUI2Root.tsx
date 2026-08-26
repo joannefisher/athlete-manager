@@ -15,11 +15,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import type { Role } from '../AthleteManager';
-import type { GymAthlete as Athlete, GymConditioningExercise, GymExerciseGroup, GymExercise, GymRunningExercise, GymSessionGroup, GymTeamPosition } from './types';
-import { fetchExerciseGroups, fetchExercises, fetchConditioningExercises, fetchRunningExercises, fetchSessionGroups } from './gymApi';
+import type { GymAthlete as Athlete, GymConditioningExercise, GymExerciseGroupType, GymExercise, GymRunningExercise, GymSessionGroup, GymTeamPosition } from './types';
+import { fetchExerciseGroupTypes, fetchExercises, fetchConditioningExercises, fetchRunningExercises, fetchSessionGroups } from './gymApi';
 import { todayIso } from './WeekStrip';
 import { gymCanEdit } from './permissions';
 import { SessionEditor } from './SessionEditor';
+import { PlayerDefaultsPanel } from './PlayerDefaultsPanel';
 import { GymUI2Calendar } from './GymUI2Calendar';
 import { GymUI2Compare } from './GymUI2Compare';
 import { GymUI2GroupCalendar } from './GymUI2GroupCalendar';
@@ -48,7 +49,7 @@ export const GymUI2Root = ({
   const canEditGym = gymCanEdit(role);
 
   const [loading, setLoading] = useState(true);
-  const [exerciseGroups, setExerciseGroups] = useState<GymExerciseGroup[]>([]);
+  const [exerciseGroupTypes, setExerciseGroupTypes] = useState<GymExerciseGroupType[]>([]);
   const [exercises, setExercises] = useState<GymExercise[]>([]);
   const [conditioningExercises, setConditioningExercises] = useState<GymConditioningExercise[]>([]);
   const [runningExercises, setRunningExercises] = useState<GymRunningExercise[]>([]);
@@ -76,13 +77,13 @@ export const GymUI2Root = ({
     if (!hasLoadedReferenceDataOnce.current) setLoading(true);
     try {
       const [groups, exs, condExs, runExs, sGroups] = await Promise.all([
-        fetchExerciseGroups(clubId),
+        fetchExerciseGroupTypes(clubId),
         fetchExercises(clubId),
         fetchConditioningExercises(clubId),
         fetchRunningExercises(clubId),
         fetchSessionGroups(clubId),
       ]);
-      setExerciseGroups(groups);
+      setExerciseGroupTypes(groups);
       setExercises(exs);
       setConditioningExercises(condExs);
       setRunningExercises(runExs);
@@ -290,7 +291,7 @@ export const GymUI2Root = ({
             userId={userId}
             canEdit={canEditGym}
             athletes={athletes}
-            exerciseGroups={exerciseGroups}
+            exerciseGroupTypes={exerciseGroupTypes}
             exercises={exercises}
             conditioningExercises={conditioningExercises}
             runningExercises={runningExercises}
@@ -305,7 +306,7 @@ export const GymUI2Root = ({
             userId={userId}
             canEdit={canEditGym}
             athletes={athletes}
-            exerciseGroups={exerciseGroups}
+            exerciseGroupTypes={exerciseGroupTypes}
             exercises={exercises}
             conditioningExercises={conditioningExercises}
             runningExercises={runningExercises}
@@ -329,22 +330,37 @@ export const GymUI2Root = ({
           {scopeMode === 'group' ? 'Choose a group with at least one member to see sessions.' : 'Select a player to see their session.'}
         </div>
       ) : tab === 'day' ? (
-        <SessionEditor
-          key={`${currentAthleteId}-${date}-${refreshNonce}`}
-          athlete={currentAthlete}
-          athleteId={currentAthleteId}
-          date={date}
-          clubId={clubId}
-          userId={userId}
-          canEdit={canEditGym}
-          exerciseGroups={exerciseGroups}
-          exercises={exercises}
-          conditioningExercises={conditioningExercises}
-          runningExercises={runningExercises}
-          athletes={athletes}
-          sessionGroups={sessionGroups}
-          onExercisesChanged={loadReferenceData}
-        />
+        // Round 18: the player-defaults panel fills the empty space that
+        // SessionEditor's own max-w-2xl cap leaves on the right, on desktop
+        // (see PlayerDefaultsPanel.tsx) — per Joanne's ask.
+        <div className="flex flex-col md:flex-row md:items-start gap-3">
+          <div className="md:flex-1 md:min-w-0">
+            <SessionEditor
+              key={`${currentAthleteId}-${date}-${refreshNonce}`}
+              athlete={currentAthlete}
+              athleteId={currentAthleteId}
+              date={date}
+              clubId={clubId}
+              userId={userId}
+              canEdit={canEditGym}
+              exerciseGroupTypes={exerciseGroupTypes}
+              exercises={exercises}
+              conditioningExercises={conditioningExercises}
+              runningExercises={runningExercises}
+              athletes={athletes}
+              sessionGroups={sessionGroups}
+              onExercisesChanged={loadReferenceData}
+            />
+          </div>
+          <div className="w-full md:w-72 shrink-0">
+            <PlayerDefaultsPanel
+              key={currentAthleteId}
+              athleteId={currentAthleteId}
+              athleteName={currentAthlete?.name}
+              exerciseGroupTypes={exerciseGroupTypes}
+            />
+          </div>
+        </div>
       ) : tab === 'calendar' ? (
         <GymUI2Calendar
           key={currentAthleteId}
@@ -354,7 +370,7 @@ export const GymUI2Root = ({
           clubId={clubId}
           userId={userId}
           canEdit={canEditGym}
-          exerciseGroups={exerciseGroups}
+          exerciseGroupTypes={exerciseGroupTypes}
           exercises={exercises}
           conditioningExercises={conditioningExercises}
           runningExercises={runningExercises}

@@ -1,9 +1,11 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Search, Plus, User, Menu, MessageSquare, X, ChevronDown, ChevronUp, Users, Calendar, Zap, Target, ArrowLeft, Camera, Settings, Trash2, Edit2, Check, BarChart3, AlertCircle, Loader2, SlidersHorizontal, Lock } from 'lucide-react';
+import { Search, Plus, User, Menu, MessageSquare, X, ChevronDown, ChevronUp, Users, Calendar, Zap, Target, ArrowLeft, Camera, Settings, Trash2, Edit2, Check, BarChart3, AlertCircle, Loader2, SlidersHorizontal, Lock, Upload } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import type { Role } from './AthleteManager';
+// Round 18: shared CSV bulk-import, also used by Gym's new Setup page.
+import { CsvAthleteImportModal, type ParsedAthleteRow } from './CsvAthleteImportModal';
 
 const BODY_PARTS = ['Head', 'Neck', 'Shoulder', 'Arm', 'Elbow', 'Wrist', 'Hand', 'Chest', 'Back', 'Hip', 'Groin', 'Thigh', 'Hamstring', 'Knee', 'Calf', 'Ankle', 'Foot', 'Other'];
 
@@ -1656,6 +1658,8 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
   const [showEOD, setShowEOD] = useState(false);
   const [savedEodData, setSavedEodData] = useState<any[] | null>(null);
   const [eodLoading, setEodLoading] = useState(false);
+  // Round 18: bulk-add-a-squad-via-CSV, alongside the existing one-at-a-time "Add" button.
+  const [showCsvImport, setShowCsvImport] = useState(false);
 
   // When the selected date changes, load availability_records for that date
   // and overlay them onto the athlete list. This surfaces EOD-written records
@@ -1769,6 +1773,12 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
               className="w-full pl-8 pr-3 h-8 text-[13px] border border-slate-200 rounded bg-slate-50 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500" />
           </div>
           {isAdmin(role) && (
+            <button onClick={() => setShowCsvImport(true)}
+              className="h-8 px-3 bg-white border border-slate-200 text-slate-600 rounded text-[12px] font-medium flex items-center gap-1.5 hover:bg-slate-50 transition-colors whitespace-nowrap">
+              <Upload className="w-3.5 h-3.5" />Import CSV
+            </button>
+          )}
+          {isAdmin(role) && (
             <button onClick={async () => { const { data, error } = await supabase.from('athletes').insert({ name: 'New Athlete', status: 'Available', notes: '', is_public: false, avatar: 'NA', photo_url: '' }).select().single(); if (!error && data) { await fetchAllData(); setSelectedAthleteId(data.id); navigateTo('athlete-profile'); } }}
               className="h-8 px-3 bg-slate-900 text-white rounded text-[12px] font-medium flex items-center gap-1.5 hover:bg-slate-700 transition-colors">
               <Plus className="w-3.5 h-3.5" />Add
@@ -1802,6 +1812,26 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
           )}
         </div>
       </div>
+
+      {showCsvImport && (
+        <CsvAthleteImportModal
+          teamStructure={typedTeamStructure}
+          onClose={() => setShowCsvImport(false)}
+          onImport={async (rows: ParsedAthleteRow[]) => {
+            for (const row of rows) {
+              const { data, error } = await supabase
+                .from('athletes')
+                .insert({ name: row.name, status: row.status, notes: row.notes, is_public: row.isPublic, avatar: row.avatar, photo_url: '' })
+                .select()
+                .single();
+              if (!error && data && row.positionNumbers.length > 0) {
+                await supabase.from('athlete_positions').insert(row.positionNumbers.map((pn: number) => ({ athlete_id: data.id, position_number: pn })));
+              }
+            }
+            await fetchAllData();
+          }}
+        />
+      )}
 
       {showSaveSuccess && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-[13px] font-medium">✓ Saved</div>}
 
@@ -3898,7 +3928,10 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
   );
 };
 
-const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecords, seasonDates, teamStructure, onSave, onDelete, saving, role }: any) => {
+// Exported (round 18) so Gym's new Setup page can reuse this exact
+// component/UI for its own "Add Player" flow — see
+// components/gym/athleteAdmin.ts and components/gym/GymSetup.tsx.
+export const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecords, seasonDates, teamStructure, onSave, onDelete, saving, role }: any) => {
   const athlete = athletes.find(a => a.id === athleteId);
   const [name, setName] = useState(athlete?.name || '');
 const [positionNumbers, setPositionNumbers] = useState(athlete?.positionNumbers || []);

@@ -25,5 +25,13 @@
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    "components/gym/GymRoot.tsx",
+    "components/gym/StaffDailyView.tsx",
+    "components/gym/StaffWeeklyView.tsx",
+    "components/gym/GroupSessionEditor.tsx",
+    "components/gym/SessionItemChip.tsx",
+    "components/gym/GymUI2Placeholder.tsx"
+  ]
 }

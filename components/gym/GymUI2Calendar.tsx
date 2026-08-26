@@ -8,7 +8,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { Clipboard, ClipboardCheck, Copy, Loader2, Plus, StickyNote, X } from 'lucide-react';
-import type { GymAthlete as Athlete, GymConditioningExercise, GymExercise, GymExerciseGroup, GymRunningExercise, GymSession, GymSessionGroup, GymSessionItem } from './types';
+import type { GymAthlete as Athlete, GymConditioningExercise, GymExercise, GymExerciseGroupType, GymRunningExercise, GymSession, GymSessionGroup, GymSessionItem } from './types';
 import { fetchAthleteSessionsForDateRange, copySessionItems, deleteSessionItem } from './gymApi';
 import { todayIso } from './WeekStrip';
 import { itemCompactLabel } from './itemDisplay';
@@ -40,7 +40,7 @@ export const GymUI2Calendar = ({
   clubId,
   userId,
   canEdit,
-  exerciseGroups,
+  exerciseGroupTypes,
   exercises,
   conditioningExercises,
   runningExercises,
@@ -56,7 +56,7 @@ export const GymUI2Calendar = ({
   clubId: string;
   userId: string;
   canEdit: boolean;
-  exerciseGroups: GymExerciseGroup[];
+  exerciseGroupTypes: GymExerciseGroupType[];
   exercises: GymExercise[];
   conditioningExercises: GymConditioningExercise[];
   runningExercises: GymRunningExercise[];
@@ -101,7 +101,7 @@ export const GymUI2Calendar = ({
     onExercisesChanged();
   };
 
-  const exerciseGroupIdFor = (exerciseId: string) => exercises.find(e => e.id === exerciseId)?.exerciseGroupId ?? null;
+  const exerciseGroupIdFor = (exerciseId: string) => exercises.find(e => e.id === exerciseId)?.exerciseGroupTypeId ?? null;
 
   const handleCopy = (e: React.MouseEvent, iso: string, items: GymSessionItem[]) => {
     e.stopPropagation();
@@ -258,7 +258,7 @@ export const GymUI2Calendar = ({
               clubId={clubId}
               userId={userId}
               canEdit={canEdit}
-              exerciseGroups={exerciseGroups}
+              exerciseGroupTypes={exerciseGroupTypes}
               exercises={exercises}
               conditioningExercises={conditioningExercises}
               runningExercises={runningExercises}
