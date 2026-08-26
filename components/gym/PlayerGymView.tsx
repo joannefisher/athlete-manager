@@ -10,6 +10,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Loader2, RefreshCw, StickyNote } from 'lucide-react';
 import { WeekStrip, GymViewMode, getWeekDates, todayIso } from './WeekStrip';
 import { fetchAthleteSessionsForDateRange, fetchExerciseGroups, fetchExercises, fetchPlayerDefaults, setPlayerDefault } from './gymApi';
+import { itemDisplayName, itemMetaText } from './itemDisplay';
 import type { GymExercise, GymExerciseGroup, GymPlayerDefaultPrimary, GymSession } from './types';
 
 const fmtDate = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -57,30 +58,26 @@ export const PlayerSessionsView = ({ athleteId }: { athleteId: string }) => {
                 )}
                 {(session?.items || []).map(item => (
                   <div key={item.id} className="px-3.5 py-3">
-                    {item.itemType === 'exercise' ? (
+                    {item.itemType === 'note' ? (
+                      <div className="flex items-start gap-1.5">
+                        <StickyNote className="w-3.5 h-3.5 text-slate-300 mt-0.5 flex-shrink-0" />
+                        <p className="text-[13px] text-slate-700">{item.noteText}</p>
+                      </div>
+                    ) : (
                       <>
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-[13px] font-medium text-slate-800">{item.effectiveExerciseName || item.exerciseName}</span>
-                          {item.isPrimary && (
+                          <span className="text-[13px] font-medium text-slate-800">{itemDisplayName(item)}</span>
+                          {item.itemType === 'exercise' && item.isPrimary && (
                             <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200">Primary</span>
                           )}
-                          {item.wasSwapped && (
+                          {item.itemType === 'exercise' && item.wasSwapped && (
                             <span className="flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200">
                               <RefreshCw className="w-2.5 h-2.5" /> swapped to your default
                             </span>
                           )}
                         </div>
-                        <p className="text-[12px] text-slate-400 mt-0.5">
-                          {[item.sets ? `${item.sets} sets` : null, item.reps ? `${item.reps} reps` : null, item.load ? `@ ${item.load}` : null]
-                            .filter(Boolean)
-                            .join(' × ') || 'No sets/reps/load set'}
-                        </p>
+                        <p className="text-[12px] text-slate-400 mt-0.5">{itemMetaText(item)}</p>
                       </>
-                    ) : (
-                      <div className="flex items-start gap-1.5">
-                        <StickyNote className="w-3.5 h-3.5 text-slate-300 mt-0.5 flex-shrink-0" />
-                        <p className="text-[13px] text-slate-700">{item.noteText}</p>
-                      </div>
                     )}
                   </div>
                 ))}

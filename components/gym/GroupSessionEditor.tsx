@@ -13,6 +13,7 @@ import type { GymExercise, GymExerciseGroup, GymSessionGroup, GymSessionItem, Gy
 import { addItemToGroupSession, createExercise, deleteSessionItem, fetchSessionsForDateRange, searchExercises, setSessionItemsSuperset } from './gymApi';
 import { newSupersetId } from './supersetDnd';
 import { useGymUndo } from './GymUndoContext';
+import { itemDisplayName } from './itemDisplay';
 
 /** One exercise slot while building a Superset for the whole group in one go — see handleAddSupersetToGroup. */
 interface SupersetSlot {
@@ -23,10 +24,12 @@ interface SupersetSlot {
   sets: number | null;
   reps: number | null;
   load: string | null;
+  loadKg: number | null;
+  tempo: string | null;
   isPrimary: boolean;
 }
 
-const emptySlot = (): SupersetSlot => ({ exerciseId: null, exerciseName: '', query: '', showPicker: false, sets: null, reps: null, load: null, isPrimary: false });
+const emptySlot = (): SupersetSlot => ({ exerciseId: null, exerciseName: '', query: '', showPicker: false, sets: null, reps: null, load: null, loadKg: null, tempo: null, isPrimary: false });
 
 const emptyDraft: GymSessionItemDraft = {
   itemType: 'exercise',
@@ -34,9 +37,15 @@ const emptyDraft: GymSessionItemDraft = {
   sets: null,
   reps: null,
   load: null,
+  loadKg: null,
+  tempo: null,
   isPrimary: false,
   side: 'both',
   noteText: null,
+  distanceValue: null,
+  distanceUnit: null,
+  timerLabel: null,
+  durationSeconds: null,
 };
 
 const fmtDate = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -79,7 +88,10 @@ export const GroupSessionEditor = ({
   const [creatingExercise, setCreatingExercise] = useState(false);
   const [createExerciseError, setCreateExerciseError] = useState<string | null>(null);
   const [splitSide, setSplitSide] = useState(false);
-  const [rightDraft, setRightDraft] = useState<{ sets: number | null; reps: number | null; load: string | null }>({ sets: null, reps: null, load: null });
+  const [rightDraft, setRightDraft] = useState<{ sets: number | null; reps: number | null; load: string | null; loadKg: number | null; tempo: string | null }>({ sets: null, reps: null, load: null, loadKg: null, tempo: null });
+  // Timer's Minutes/Seconds inputs are kept separate from draft.durationSeconds for entry ergonomics.
+  const [timerMinutes, setTimerMinutes] = useState<number | null>(null);
+  const [timerSeconds, setTimerSeconds] = useState<number | null>(null);
 
   // Building a Superset (2+ exercises, done together in a fixed order) to add
   // to everyone's session at once — see handleAddSupersetToGroup. Each
@@ -118,10 +130,44 @@ export const GroupSessionEditor = ({
     setAddingNewExercise(false);
     setNewExerciseGroupId('');
     setSplitSide(false);
-    setRightDraft({ sets: null, reps: null, load: null });
+    setRightDraft({ sets: null, reps: null, load: null, loadKg: null, tempo: null });
+    setTimerMinutes(null);
+    setTimerSeconds(null);
     setBuildingSuperset(false);
     setSupersetSlots([emptySlot(), emptySlot()]);
   };
+
+  /** Recombine the Minutes/Seconds inputs into draft.durationSeconds. */
+  const updateTimerDuration = (minutes: number | null, seconds: number | null) => {
+    setTimerMinutes(minutes);
+    setTimerSeconds(seconds);
+    const total = minutes == null && seconds == null ? null : (minutes || 0) * 60 + (seconds || 0);
+    setDraft(d => ({ ...d, durationSeconds: total }));
+  };
+
+  const switchItemType = (t: GymSessionItemDraft['itemType']) => {
+    setDraft({ ...emptyDraft, itemType: t, distanceUnit: t === 'running' ? 'm' : null });
+    setExerciseQuery('');
+    setShowPicker(false);
+    setAddingNewExercise(false);
+    setCreateExerciseError(null);
+    setSplitSide(false);
+    setRightDraft({ sets: null, reps: null, load: null, loadKg: null, tempo: null });
+    setTimerMinutes(null);
+    setTimerSeconds(null);
+    setBuildingSuperset(false);
+    setSupersetSlots([emptySlot(), emptySlot()]);
+  };
+
+  const isExerciseLike = draft.itemType === 'exercise' || draft.itemType === 'conditioning';
+
+  const isDraftValid =
+    isExerciseLike && buildingSuperset ? supersetSlots.every(s => !!s.exerciseId) :
+    isExerciseLike ? !!draft.exerciseId :
+    draft.itemType === 'note' ? !!draft.noteText?.trim() :
+    draft.itemType === 'running' ? draft.distanceValue != null :
+    draft.itemType === 'timer' ? !!draft.timerLabel?.trim() && draft.durationSeconds != null :
+    false;
 
   const updateSlot = (index: number, patch: Partial<SupersetSlot>) => {
     setSupersetSlots(prev => prev.map((s, i) => (i === index ? { ...s, ...patch } : s)));
@@ -167,18 +213,17 @@ export const GroupSessionEditor = ({
   };
 
   const handleAddToGroup = async () => {
-    if (draft.itemType === 'exercise' && !draft.exerciseId) return;
-    if (draft.itemType === 'note' && !draft.noteText?.trim()) return;
+    if (!isDraftValid) return;
     if (members.length === 0) return;
     setSaving(true);
     try {
       const exerciseGroupId =
-        draft.itemType === 'exercise' ? exercises.find(e => e.id === draft.exerciseId)?.exerciseGroupId || null : null;
+        isExerciseLike ? exercises.find(e => e.id === draft.exerciseId)?.exerciseGroupId || null : null;
 
       let created: GymSessionItem[];
       if (draft.itemType === 'exercise' && splitSide) {
         const leftDraft: GymSessionItemDraft = { ...draft, side: 'left' };
-        const rightDraftFull: GymSessionItemDraft = { ...draft, side: 'right', sets: rightDraft.sets, reps: rightDraft.reps, load: rightDraft.load };
+        const rightDraftFull: GymSessionItemDraft = { ...draft, side: 'right', sets: rightDraft.sets, reps: rightDraft.reps, load: rightDraft.load, loadKg: rightDraft.loadKg, tempo: rightDraft.tempo };
         // Sequential, not parallel — each call reads every member's current item count to
         // pick a sort_order, so running Left and Right concurrently could race on that count.
         const createdLeft = await addItemToGroupSession(clubId, group.id, group.memberAthleteIds, date, leftDraft, exerciseGroupId, userId);
@@ -190,7 +235,7 @@ export const GroupSessionEditor = ({
 
       setAddedCount(c => c + created.length);
       pushUndo({
-        label: `Remove "${draft.exerciseName || draft.noteText || 'item'}" from ${group.name}`,
+        label: `Remove "${itemDisplayName(draft)}" from ${group.name}`,
         run: async () => {
           for (const item of created) await deleteSessionItem(item.id);
           await load();
@@ -231,9 +276,15 @@ export const GroupSessionEditor = ({
           sets: slot.sets,
           reps: slot.reps,
           load: slot.load,
+          loadKg: slot.loadKg,
+          tempo: slot.tempo,
           isPrimary: slot.isPrimary,
           side: 'both',
           noteText: null,
+          distanceValue: null,
+          distanceUnit: null,
+          timerLabel: null,
+          durationSeconds: null,
         };
         const created = await addItemToGroupSession(clubId, group.id, group.memberAthleteIds, date, slotDraft, exerciseGroupId, userId);
         allCreatedIds.push(...created.map(i => i.id));
@@ -274,15 +325,26 @@ export const GroupSessionEditor = ({
 
       <div className="bg-white rounded-lg border border-slate-200 p-3.5 mb-3">
         <p className="text-[12px] font-semibold text-slate-600 mb-2.5">Add to everyone's session</p>
-        <div className="flex bg-slate-100 rounded-md p-0.5 text-[12px] font-medium mb-3 w-fit">
-          <button onClick={() => setDraft(d => ({ ...emptyDraft, itemType: 'exercise' }))} className={`px-2.5 py-1 rounded ${draft.itemType === 'exercise' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>
-            Exercise
-          </button>
-          <button onClick={() => setDraft(d => ({ ...emptyDraft, itemType: 'note' }))} className={`px-2.5 py-1 rounded ${draft.itemType === 'note' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>
-            Note
-          </button>
+        <div className="flex flex-wrap bg-slate-100 rounded-md p-0.5 text-[12px] font-medium mb-3 w-fit gap-0.5">
+          {([
+            ['exercise', 'Exercise'],
+            ['conditioning', 'Conditioning'],
+            ['running', 'Running'],
+            ['timer', 'Timer'],
+            ['note', 'Note'],
+          ] as const).map(([type, label]) => (
+            <button
+              key={type}
+              onClick={() => switchItemType(type)}
+              className={`px-2.5 py-1 rounded ${draft.itemType === type ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
+        {/* "Build a superset" stays Exercise-only this round — not explicitly requested for
+            Conditioning, and supersets are inherently a multi-exercise-in-order concept. */}
         {draft.itemType === 'exercise' && (
           <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer mb-2.5">
             <input
@@ -357,8 +419,12 @@ export const GroupSessionEditor = ({
                       className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-white" />
                     <input type="number" min={0} placeholder="Reps" value={slot.reps ?? ''} onChange={e => updateSlot(i, { reps: e.target.value ? Number(e.target.value) : null })}
                       className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-white" />
-                    <input placeholder="Intensity" value={slot.load ?? ''} onChange={e => updateSlot(i, { load: e.target.value || null })}
+                    <input type="number" min={0} placeholder="Load (kg)" value={slot.loadKg ?? ''} onChange={e => updateSlot(i, { loadKg: e.target.value ? Number(e.target.value) : null })}
                       className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-white" />
+                    <input type="number" min={0} max={100} placeholder="Intensity %" value={slot.load ?? ''} onChange={e => updateSlot(i, { load: e.target.value || null })}
+                      className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-white" />
+                    <input placeholder="Tempo e.g. 3-1-1-0" value={slot.tempo ?? ''} onChange={e => updateSlot(i, { tempo: e.target.value || null })}
+                      className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-white col-span-2" />
                   </div>
                   <label className="flex items-center gap-2 text-[11px] text-slate-600 cursor-pointer">
                     <input type="checkbox" checked={slot.isPrimary} onChange={e => updateSlot(i, { isPrimary: e.target.checked })} className="w-3.5 h-3.5" />
@@ -373,7 +439,7 @@ export const GroupSessionEditor = ({
               </button>
             )}
           </div>
-        ) : draft.itemType === 'exercise' ? (
+        ) : isExerciseLike ? (
           <div className="space-y-2.5">
             <div className="relative">
               <label className="block text-[11px] font-medium text-slate-500 mb-1">Exercise</label>
@@ -441,13 +507,15 @@ export const GroupSessionEditor = ({
               </div>
             )}
 
-            <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer">
-              <input type="checkbox" checked={splitSide} onChange={e => setSplitSide(e.target.checked)} className="w-3.5 h-3.5" />
-              Split left / right
-              <span className="text-slate-400">— separate sets/reps/intensity for each side</span>
-            </label>
+            {draft.itemType === 'exercise' && (
+              <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer">
+                <input type="checkbox" checked={splitSide} onChange={e => setSplitSide(e.target.checked)} className="w-3.5 h-3.5" />
+                Split left / right
+                <span className="text-slate-400">— separate sets/reps/load/intensity/tempo for each side</span>
+              </label>
+            )}
 
-            {splitSide ? (
+            {draft.itemType === 'exercise' && splitSide ? (
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <p className="text-[11px] font-semibold text-slate-500">Left</p>
@@ -456,8 +524,12 @@ export const GroupSessionEditor = ({
                       className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
                     <input type="number" min={0} placeholder="Reps" value={draft.reps ?? ''} onChange={e => setDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))}
                       className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
-                    <input placeholder="Intensity" value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))}
+                    <input type="number" min={0} placeholder="Load (kg)" value={draft.loadKg ?? ''} onChange={e => setDraft(d => ({ ...d, loadKg: e.target.value ? Number(e.target.value) : null }))}
                       className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                    <input type="number" min={0} max={100} placeholder="Intensity %" value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))}
+                      className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                    <input placeholder="Tempo e.g. 3-1-1-0" value={draft.tempo ?? ''} onChange={e => setDraft(d => ({ ...d, tempo: e.target.value || null }))}
+                      className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50 col-span-2" />
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -467,8 +539,12 @@ export const GroupSessionEditor = ({
                       className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
                     <input type="number" min={0} placeholder="Reps" value={rightDraft.reps ?? ''} onChange={e => setRightDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))}
                       className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
-                    <input placeholder="Intensity" value={rightDraft.load ?? ''} onChange={e => setRightDraft(d => ({ ...d, load: e.target.value || null }))}
+                    <input type="number" min={0} placeholder="Load (kg)" value={rightDraft.loadKg ?? ''} onChange={e => setRightDraft(d => ({ ...d, loadKg: e.target.value ? Number(e.target.value) : null }))}
                       className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                    <input type="number" min={0} max={100} placeholder="Intensity %" value={rightDraft.load ?? ''} onChange={e => setRightDraft(d => ({ ...d, load: e.target.value || null }))}
+                      className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                    <input placeholder="Tempo e.g. 3-1-1-0" value={rightDraft.tempo ?? ''} onChange={e => setRightDraft(d => ({ ...d, tempo: e.target.value || null }))}
+                      className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50 col-span-2" />
                   </div>
                 </div>
               </div>
@@ -483,17 +559,94 @@ export const GroupSessionEditor = ({
                   <input type="number" min={0} value={draft.reps ?? ''} onChange={e => setDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))} className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-medium text-slate-500 mb-1">Intensity</label>
-                  <input value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))} placeholder="e.g. 60kg" className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <label className="block text-[11px] font-medium text-slate-500 mb-1">Load (kg)</label>
+                  <input type="number" min={0} value={draft.loadKg ?? ''} onChange={e => setDraft(d => ({ ...d, loadKg: e.target.value ? Number(e.target.value) : null }))} placeholder="e.g. 60" className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-500 mb-1">Intensity (%)</label>
+                  <input type="number" min={0} max={100} value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))} placeholder="e.g. 75" className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-[11px] font-medium text-slate-500 mb-1">Tempo</label>
+                  <input value={draft.tempo ?? ''} onChange={e => setDraft(d => ({ ...d, tempo: e.target.value || null }))} placeholder="e.g. 3-1-1-0" className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
               </div>
             )}
 
-            <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer">
-              <input type="checkbox" checked={draft.isPrimary} onChange={e => setDraft(d => ({ ...d, isPrimary: e.target.checked }))} className="w-3.5 h-3.5" />
-              Mark as Primary
-              <span className="text-slate-400">— each player's own default may apply instead of what's picked here</span>
-            </label>
+            {draft.itemType === 'exercise' && (
+              <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer">
+                <input type="checkbox" checked={draft.isPrimary} onChange={e => setDraft(d => ({ ...d, isPrimary: e.target.checked }))} className="w-3.5 h-3.5" />
+                Mark as Primary
+                <span className="text-slate-400">— each player's own default may apply instead of what's picked here</span>
+              </label>
+            )}
+          </div>
+        ) : draft.itemType === 'running' ? (
+          <div className="space-y-2.5">
+            <div className="grid grid-cols-3 gap-2">
+              <div className="col-span-2">
+                <label className="block text-[11px] font-medium text-slate-500 mb-1">Distance</label>
+                <input
+                  ref={setsInputRef}
+                  type="number"
+                  min={0}
+                  value={draft.distanceValue ?? ''}
+                  onChange={e => setDraft(d => ({ ...d, distanceValue: e.target.value ? Number(e.target.value) : null }))}
+                  placeholder="e.g. 400"
+                  className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-slate-500 mb-1">Unit</label>
+                <div className="flex bg-slate-100 rounded-md p-0.5 text-[12px] font-medium">
+                  {(['m', 'km'] as const).map(u => (
+                    <button
+                      key={u}
+                      onClick={() => setDraft(d => ({ ...d, distanceUnit: u }))}
+                      className={`flex-1 py-1.5 rounded ${draft.distanceUnit === u || (!draft.distanceUnit && u === 'm') ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}
+                    >
+                      {u}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : draft.itemType === 'timer' ? (
+          <div className="space-y-2.5">
+            <div>
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Label</label>
+              <input
+                value={draft.timerLabel ?? ''}
+                onChange={e => setDraft(d => ({ ...d, timerLabel: e.target.value || null }))}
+                placeholder="e.g. Plank hold, Rest between sets"
+                className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[11px] font-medium text-slate-500 mb-1">Minutes</label>
+                <input
+                  ref={setsInputRef}
+                  type="number"
+                  min={0}
+                  value={timerMinutes ?? ''}
+                  onChange={e => updateTimerDuration(e.target.value ? Number(e.target.value) : null, timerSeconds)}
+                  className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-slate-500 mb-1">Seconds</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={59}
+                  value={timerSeconds ?? ''}
+                  onChange={e => updateTimerDuration(timerMinutes, e.target.value ? Number(e.target.value) : null)}
+                  className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
           </div>
         ) : (
           <textarea
@@ -507,21 +660,13 @@ export const GroupSessionEditor = ({
 
         <button
           onClick={draft.itemType === 'exercise' && buildingSuperset ? handleAddSupersetToGroup : handleAddToGroup}
-          disabled={
-            saving ||
-            members.length === 0 ||
-            (draft.itemType === 'exercise' && buildingSuperset
-              ? supersetSlots.some(s => !s.exerciseId)
-              : draft.itemType === 'exercise'
-              ? !draft.exerciseId
-              : !draft.noteText?.trim())
-          }
+          disabled={saving || members.length === 0 || !isDraftValid}
           className="mt-3 w-full h-9 flex items-center justify-center gap-1.5 bg-slate-900 text-white rounded-lg text-[13px] font-semibold hover:bg-slate-800 disabled:opacity-40"
         >
           {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
           {draft.itemType === 'exercise' && buildingSuperset
             ? `Add superset to all ${members.length} sessions`
-            : splitSide
+            : splitSide && draft.itemType === 'exercise'
             ? `Add both sides to all ${members.length} sessions`
             : `Add to all ${members.length} sessions`}
         </button>

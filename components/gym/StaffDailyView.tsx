@@ -75,14 +75,24 @@ export const StaffDailyView = ({
           const draft = {
             itemType: item.itemType,
             exerciseId: item.exerciseId,
+            exerciseName: item.exerciseName,
             sets: item.sets,
             reps: item.reps,
             load: item.load,
+            loadKg: item.loadKg,
+            tempo: item.tempo,
             isPrimary: item.isPrimary,
             side: item.side,
             noteText: item.noteText,
+            distanceValue: item.distanceValue,
+            distanceUnit: item.distanceUnit,
+            timerLabel: item.timerLabel,
+            durationSeconds: item.durationSeconds,
           };
-          const exerciseGroupId = item.itemType === 'exercise' ? exercises.find(ex => ex.id === item.exerciseId)?.exerciseGroupId || null : null;
+          const exerciseGroupId =
+            item.itemType === 'exercise' || item.itemType === 'conditioning'
+              ? exercises.find(ex => ex.id === item.exerciseId)?.exerciseGroupId || null
+              : null;
           await saveSessionItem(restored.id, session.athleteId, draft, exerciseGroupId, item.sortOrder, userId);
         }
         load();

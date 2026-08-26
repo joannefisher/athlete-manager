@@ -111,10 +111,23 @@ export interface GymSession {
   items?: GymSessionItem[];
 }
 
-export type GymSessionItemType = 'exercise' | 'note';
+/**
+ * 'exercise' and 'conditioning' share the same Sets/Reps/Load(kg)/Intensity/
+ * Tempo fields and the same Exercise Bank picker — 'conditioning' is just
+ * tagged separately so it can be told apart, never offers "Mark as Primary"
+ * (no per-player default swap for it), and never offers a left/right split.
+ * 'running' is distance-only (no exercise-bank name). 'timer' is a labelled
+ * duration, captured here as data only — see gymApi.ts's migration-0008
+ * comment for what "captured as data only" means for the Player-facing
+ * countdown that's ultimately meant to run off it.
+ */
+export type GymSessionItemType = 'exercise' | 'note' | 'running' | 'conditioning' | 'timer';
 
-/** 'both' (default, one combined entry) or an independent 'left'/'right' half of a split exercise. */
+/** 'both' (default, one combined entry) or an independent 'left'/'right' half of a split exercise. Only ever set for 'exercise' items — every other type is always 'both'. */
 export type GymSessionItemSide = 'both' | 'left' | 'right';
+
+/** Distance unit for a 'running' item. */
+export type GymDistanceUnit = 'm' | 'km';
 
 export interface GymSessionItem {
   id: string;
@@ -122,12 +135,17 @@ export interface GymSessionItem {
   sortOrder: number;
   itemType: GymSessionItemType;
 
-  // exercise fields
+  // exercise / conditioning fields
   exerciseId: string | null;
   exerciseName?: string;
   sets: number | null;
   reps: number | null;
+  /** Free-text %, e.g. "75" — displayed with a "%" suffix. Pre-round-14 sessions may still hold an old free-text value like "60kg" here; those display as-is. */
   load: string | null;
+  /** Weight actually lifted, in kg — a distinct field from `load`/Intensity above. */
+  loadKg: number | null;
+  /** Free text in "X-X-X-X" format, e.g. "3-1-1-0". Not validated/parsed — entered and displayed as typed. */
+  tempo: string | null;
   isPrimary: boolean;
   side: GymSessionItemSide;
   effectiveExerciseId: string | null;
@@ -136,6 +154,15 @@ export interface GymSessionItem {
 
   // note fields
   noteText: string | null;
+
+  // running fields
+  distanceValue: number | null;
+  distanceUnit: GymDistanceUnit | null;
+
+  // timer fields
+  timerLabel: string | null;
+  /** Total duration in seconds — the Minutes/Seconds entry fields combine into this one value. */
+  durationSeconds: number | null;
 
   // Set when this item was created/last synced from a group session plan
   // item (see GymGroupPlanItem below) — used to detect drift so a later plan
@@ -168,9 +195,15 @@ export interface GymSessionItemDraft {
   sets: number | null;
   reps: number | null;
   load: string | null;
+  loadKg: number | null;
+  tempo: string | null;
   isPrimary: boolean;
   side: GymSessionItemSide;
   noteText: string | null;
+  distanceValue: number | null;
+  distanceUnit: GymDistanceUnit | null;
+  timerLabel: string | null;
+  durationSeconds: number | null;
 }
 
 // ── Group session plans ────────────────────────────────────────────────────
@@ -201,10 +234,18 @@ export interface GymGroupPlanItem {
   sets: number | null;
   reps: number | null;
   load: string | null;
+  loadKg: number | null;
+  tempo: string | null;
   isPrimary: boolean;
   side: GymSessionItemSide;
 
   noteText: string | null;
+
+  distanceValue: number | null;
+  distanceUnit: GymDistanceUnit | null;
+
+  timerLabel: string | null;
+  durationSeconds: number | null;
 
   /** Grouping key shared by every member of the same Superset — see GymSessionItem.supersetId above. */
   supersetId: string | null;

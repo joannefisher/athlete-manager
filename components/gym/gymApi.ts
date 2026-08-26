@@ -414,12 +414,18 @@ function mapSessionItem(r: any): GymSessionItem {
     sets: r.sets,
     reps: r.reps,
     load: r.load,
+    loadKg: r.load_kg,
+    tempo: r.tempo,
     isPrimary: r.is_primary,
     side: r.side || 'both',
     effectiveExerciseId: r.effective_exercise_id,
     effectiveExerciseName: r.effective_exercise?.name,
     wasSwapped: r.was_swapped,
     noteText: r.note_text,
+    distanceValue: r.distance_value,
+    distanceUnit: r.distance_unit,
+    timerLabel: r.timer_label,
+    durationSeconds: r.duration_seconds,
     planItemId: r.plan_item_id ?? null,
     supersetId: r.superset_id ?? null,
     createdBy: r.created_by,
@@ -431,7 +437,7 @@ function mapSessionItem(r: any): GymSessionItem {
 }
 
 const SESSION_ITEM_SELECT =
-  'id, session_id, sort_order, item_type, exercise_id, sets, reps, load, is_primary, side, effective_exercise_id, was_swapped, note_text, plan_item_id, superset_id, created_by, created_at, updated_by, updated_at, ' +
+  'id, session_id, sort_order, item_type, exercise_id, sets, reps, load, load_kg, tempo, is_primary, side, effective_exercise_id, was_swapped, note_text, distance_value, distance_unit, timer_label, duration_seconds, plan_item_id, superset_id, created_by, created_at, updated_by, updated_at, ' +
   'exercise:gym_exercises!gym_session_items_exercise_id_fkey(name), ' +
   'effective_exercise:gym_exercises!gym_session_items_effective_exercise_id_fkey(name), ' +
   'creator:user_profiles!gym_session_items_created_by_fkey(full_name)';
@@ -620,9 +626,11 @@ export async function resolvePrimaryExercise(
 // ── Session items (exercises + notes) ───────────────────────────────────
 
 /**
- * Save (create or update) one session item. For exercise items this first
- * resolves the Primary swap rule above. `exerciseGroupId` is required only
- * for exercise items (used to look up the player's default).
+ * Save (create or update) one session item. For exercise/conditioning items
+ * this first resolves the Primary swap rule above (conditioning items are
+ * never marked Primary, so this always short-circuits to a no-op lookup for
+ * them). `exerciseGroupId` is required only for exercise/conditioning items
+ * (used to look up the player's default).
  */
 export async function saveSessionItem(
   sessionId: string,
@@ -634,12 +642,18 @@ export async function saveSessionItem(
 ): Promise<GymSessionItem> {
   let effectiveExerciseId: string | null = null;
   let wasSwapped = false;
+  const isExerciseLike = draft.itemType === 'exercise' || draft.itemType === 'conditioning';
 
-  if (draft.itemType === 'exercise') {
+  if (isExerciseLike) {
     if (!draft.exerciseId || !exerciseGroupId) {
       throw new Error('An exercise must be selected before saving.');
     }
-    const resolved = await resolvePrimaryExercise(athleteId, draft.exerciseId, draft.isPrimary, exerciseGroupId);
+    const resolved = await resolvePrimaryExercise(
+      athleteId,
+      draft.exerciseId,
+      draft.itemType === 'exercise' ? draft.isPrimary : false,
+      exerciseGroupId
+    );
     effectiveExerciseId = resolved.effectiveExerciseId;
     wasSwapped = resolved.wasSwapped;
   }
@@ -648,15 +662,21 @@ export async function saveSessionItem(
     session_id: sessionId,
     sort_order: sortOrder,
     item_type: draft.itemType,
-    exercise_id: draft.itemType === 'exercise' ? draft.exerciseId : null,
-    sets: draft.itemType === 'exercise' ? draft.sets : null,
-    reps: draft.itemType === 'exercise' ? draft.reps : null,
-    load: draft.itemType === 'exercise' ? draft.load : null,
+    exercise_id: isExerciseLike ? draft.exerciseId : null,
+    sets: isExerciseLike ? draft.sets : null,
+    reps: isExerciseLike ? draft.reps : null,
+    load: isExerciseLike ? draft.load : null,
+    load_kg: isExerciseLike ? draft.loadKg : null,
+    tempo: isExerciseLike ? draft.tempo : null,
     is_primary: draft.itemType === 'exercise' ? draft.isPrimary : false,
     side: draft.itemType === 'exercise' ? draft.side : 'both',
     effective_exercise_id: effectiveExerciseId,
     was_swapped: wasSwapped,
     note_text: draft.itemType === 'note' ? draft.noteText : null,
+    distance_value: draft.itemType === 'running' ? draft.distanceValue : null,
+    distance_unit: draft.itemType === 'running' ? draft.distanceUnit : null,
+    timer_label: draft.itemType === 'timer' ? draft.timerLabel : null,
+    duration_seconds: draft.itemType === 'timer' ? draft.durationSeconds : null,
     updated_by: userId,
     updated_at: new Date().toISOString(),
   };
@@ -711,12 +731,19 @@ export function itemToDraft(item: GymSessionItem): GymSessionItemDraft {
   return {
     itemType: item.itemType,
     exerciseId: item.exerciseId,
+    exerciseName: item.exerciseName,
     sets: item.sets,
     reps: item.reps,
     load: item.load,
+    loadKg: item.loadKg,
+    tempo: item.tempo,
     isPrimary: item.isPrimary,
     side: item.side,
     noteText: item.noteText,
+    distanceValue: item.distanceValue,
+    distanceUnit: item.distanceUnit,
+    timerLabel: item.timerLabel,
+    durationSeconds: item.durationSeconds,
   };
 }
 
@@ -751,7 +778,8 @@ export async function copySessionItems(
     // items stay contiguous since they're appended in the same relative order as the source.
     const idsBySuperset = new Map<string, string[]>();
     for (const item of items) {
-      const exerciseGroupId = item.itemType === 'exercise' && item.exerciseId ? exerciseGroupIdFor(item.exerciseId) : null;
+      const exerciseGroupId =
+        (item.itemType === 'exercise' || item.itemType === 'conditioning') && item.exerciseId ? exerciseGroupIdFor(item.exerciseId) : null;
       const saved = await saveSessionItem(session.id, dest.athleteId, itemToDraft(item), exerciseGroupId, sortOrder, userId);
       sortOrder++;
       if (item.supersetId) {
@@ -830,9 +858,15 @@ function mapGroupPlanItem(r: any): GymGroupPlanItem {
     sets: r.sets,
     reps: r.reps,
     load: r.load,
+    loadKg: r.load_kg,
+    tempo: r.tempo,
     isPrimary: r.is_primary,
     side: r.side || 'both',
     noteText: r.note_text,
+    distanceValue: r.distance_value,
+    distanceUnit: r.distance_unit,
+    timerLabel: r.timer_label,
+    durationSeconds: r.duration_seconds,
     supersetId: r.superset_id ?? null,
     createdBy: r.created_by,
     createdByName: r.creator?.full_name,
@@ -843,7 +877,7 @@ function mapGroupPlanItem(r: any): GymGroupPlanItem {
 }
 
 const GROUP_PLAN_ITEM_SELECT =
-  'id, plan_id, sort_order, item_type, exercise_id, sets, reps, load, is_primary, side, note_text, superset_id, created_by, created_at, updated_by, updated_at, ' +
+  'id, plan_id, sort_order, item_type, exercise_id, sets, reps, load, load_kg, tempo, is_primary, side, note_text, distance_value, distance_unit, timer_label, duration_seconds, superset_id, created_by, created_at, updated_by, updated_at, ' +
   'exercise:gym_exercises!gym_group_plan_items_exercise_id_fkey(name), ' +
   'creator:user_profiles!gym_group_plan_items_created_by_fkey(full_name)';
 
@@ -855,9 +889,15 @@ export function groupPlanItemToDraft(item: GymGroupPlanItem): GymSessionItemDraf
     sets: item.sets,
     reps: item.reps,
     load: item.load,
+    loadKg: item.loadKg,
+    tempo: item.tempo,
     isPrimary: item.isPrimary,
     side: item.side,
     noteText: item.noteText,
+    distanceValue: item.distanceValue,
+    distanceUnit: item.distanceUnit,
+    timerLabel: item.timerLabel,
+    durationSeconds: item.durationSeconds,
   };
 }
 
@@ -917,17 +957,24 @@ export async function saveGroupPlanItem(
   sortOrder: number,
   userId: string
 ): Promise<GymGroupPlanItem> {
+  const isExerciseLike = draft.itemType === 'exercise' || draft.itemType === 'conditioning';
   const payload: any = {
     plan_id: planId,
     sort_order: sortOrder,
     item_type: draft.itemType,
-    exercise_id: draft.itemType === 'exercise' ? draft.exerciseId : null,
-    sets: draft.itemType === 'exercise' ? draft.sets : null,
-    reps: draft.itemType === 'exercise' ? draft.reps : null,
-    load: draft.itemType === 'exercise' ? draft.load : null,
+    exercise_id: isExerciseLike ? draft.exerciseId : null,
+    sets: isExerciseLike ? draft.sets : null,
+    reps: isExerciseLike ? draft.reps : null,
+    load: isExerciseLike ? draft.load : null,
+    load_kg: isExerciseLike ? draft.loadKg : null,
+    tempo: isExerciseLike ? draft.tempo : null,
     is_primary: draft.itemType === 'exercise' ? draft.isPrimary : false,
     side: draft.itemType === 'exercise' ? draft.side : 'both',
     note_text: draft.itemType === 'note' ? draft.noteText : null,
+    distance_value: draft.itemType === 'running' ? draft.distanceValue : null,
+    distance_unit: draft.itemType === 'running' ? draft.distanceUnit : null,
+    timer_label: draft.itemType === 'timer' ? draft.timerLabel : null,
+    duration_seconds: draft.itemType === 'timer' ? draft.durationSeconds : null,
     updated_by: userId,
     updated_at: new Date().toISOString(),
   };
@@ -992,9 +1039,15 @@ export async function syncGroupPlanItemChange(
     item.sets === plan.sets &&
     item.reps === plan.reps &&
     item.load === plan.load &&
+    item.loadKg === plan.loadKg &&
+    item.tempo === plan.tempo &&
     item.isPrimary === plan.isPrimary &&
     item.side === plan.side &&
-    item.noteText === plan.noteText;
+    item.noteText === plan.noteText &&
+    item.distanceValue === plan.distanceValue &&
+    item.distanceUnit === plan.distanceUnit &&
+    item.timerLabel === plan.timerLabel &&
+    item.durationSeconds === plan.durationSeconds;
 
   for (const athleteId of memberAthleteIds) {
     const session = memberSessions.find(s => s.athleteId === athleteId);
@@ -1005,7 +1058,7 @@ export async function syncGroupPlanItemChange(
       if (!after) continue;
       const s = await getOrCreateSession(clubId, athleteId, date, userId, groupId);
       const sortOrder = session?.items?.length ?? 0;
-      const eg = after.itemType === 'exercise' && after.exerciseId ? exerciseGroupIdFor(after.exerciseId) : null;
+      const eg = (after.itemType === 'exercise' || after.itemType === 'conditioning') && after.exerciseId ? exerciseGroupIdFor(after.exerciseId) : null;
       const saved = await saveSessionItem(s.id, athleteId, groupPlanItemToDraft(after), eg, sortOrder, userId);
       const { error } = await supabase.from('gym_session_items').update({ plan_item_id: planItemId, superset_id: after.supersetId }).eq('id', saved.id);
       if (error) throw error;
@@ -1026,7 +1079,7 @@ export async function syncGroupPlanItemChange(
         memberSortOrder: null,
         currentDraft: null,
         newDraft: groupPlanItemToDraft(after),
-        exerciseGroupId: after.itemType === 'exercise' && after.exerciseId ? exerciseGroupIdFor(after.exerciseId) : null,
+        exerciseGroupId: (after.itemType === 'exercise' || after.itemType === 'conditioning') && after.exerciseId ? exerciseGroupIdFor(after.exerciseId) : null,
         supersetId: after.supersetId,
       });
       continue;
@@ -1059,7 +1112,7 @@ export async function syncGroupPlanItemChange(
 
     // Plan item edited.
     if (unmodified) {
-      const eg = after.itemType === 'exercise' && after.exerciseId ? exerciseGroupIdFor(after.exerciseId) : null;
+      const eg = (after.itemType === 'exercise' || after.itemType === 'conditioning') && after.exerciseId ? exerciseGroupIdFor(after.exerciseId) : null;
       const saved = await saveSessionItem(memberItem.sessionId, athleteId, { ...groupPlanItemToDraft(after), id: memberItem.id }, eg, memberItem.sortOrder, userId);
       const { error } = await supabase.from('gym_session_items').update({ plan_item_id: planItemId, superset_id: after.supersetId }).eq('id', saved.id);
       if (error) throw error;
@@ -1075,7 +1128,7 @@ export async function syncGroupPlanItemChange(
         memberSortOrder: memberItem.sortOrder,
         currentDraft: itemToDraft(memberItem),
         newDraft: groupPlanItemToDraft(after),
-        exerciseGroupId: after.itemType === 'exercise' && after.exerciseId ? exerciseGroupIdFor(after.exerciseId) : null,
+        exerciseGroupId: (after.itemType === 'exercise' || after.itemType === 'conditioning') && after.exerciseId ? exerciseGroupIdFor(after.exerciseId) : null,
         supersetId: after.supersetId,
       });
     }
@@ -1270,7 +1323,7 @@ export async function moveSessionItems(
   // need to re-apply each one's grouping key to the newly-created items.
   const idsBySuperset = new Map<string, string[]>();
   for (const item of source.items) {
-    const eg = item.itemType === 'exercise' && item.exerciseId ? exerciseGroupIdFor(item.exerciseId) : null;
+    const eg = (item.itemType === 'exercise' || item.itemType === 'conditioning') && item.exerciseId ? exerciseGroupIdFor(item.exerciseId) : null;
     const saved = await saveSessionItem(destSession.id, athleteId, itemToDraft(item), eg, sortOrder, userId);
     movedItemIds.push(saved.id);
     if (item.supersetId) {

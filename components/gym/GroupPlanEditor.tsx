@@ -22,9 +22,10 @@ import {
   resolveGroupPlanConflict,
   createExercise,
   searchExercises,
+  groupPlanItemToDraft,
 } from './gymApi';
 import { applySupersetDrop, groupBySuperset, zoneForOffset, type DropZone } from './supersetDnd';
-import { itemMetaText } from './itemDisplay';
+import { itemDisplayName, itemMetaText } from './itemDisplay';
 import { useGymUndo } from './GymUndoContext';
 
 const emptyDraft: GymSessionItemDraft = {
@@ -33,9 +34,15 @@ const emptyDraft: GymSessionItemDraft = {
   sets: null,
   reps: null,
   load: null,
+  loadKg: null,
+  tempo: null,
   isPrimary: false,
   side: 'both',
   noteText: null,
+  distanceValue: null,
+  distanceUnit: null,
+  timerLabel: null,
+  durationSeconds: null,
 };
 
 const fmtDate = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -44,7 +51,7 @@ const draftLabel = (draft: GymSessionItemDraft | null): string => {
   if (!draft) return 'Removed';
   if (draft.itemType === 'note') return draft.noteText || 'Note';
   const sideTag = draft.side !== 'both' ? ` (${draft.side === 'left' ? 'L' : 'R'})` : '';
-  return `${draft.exerciseName || 'Exercise'}${sideTag} — ${itemMetaText(draft)}`;
+  return `${itemDisplayName(draft)}${sideTag} — ${itemMetaText(draft)}`;
 };
 
 export const GroupPlanEditor = ({
@@ -88,7 +95,10 @@ export const GroupPlanEditor = ({
   const [addingNewExercise, setAddingNewExercise] = useState(false);
   const [newExerciseGroupId, setNewExerciseGroupId] = useState('');
   const [splitSide, setSplitSide] = useState(false);
-  const [rightDraft, setRightDraft] = useState<{ sets: number | null; reps: number | null; load: string | null }>({ sets: null, reps: null, load: null });
+  const [rightDraft, setRightDraft] = useState<{ sets: number | null; reps: number | null; load: string | null; loadKg: number | null; tempo: string | null }>({ sets: null, reps: null, load: null, loadKg: null, tempo: null });
+  // Timer's Minutes/Seconds inputs are kept separate from draft.durationSeconds for entry ergonomics.
+  const [timerMinutes, setTimerMinutes] = useState<number | null>(null);
+  const [timerSeconds, setTimerSeconds] = useState<number | null>(null);
   const [creatingExercise, setCreatingExercise] = useState(false);
   const [createExerciseError, setCreateExerciseError] = useState<string | null>(null);
 
@@ -124,9 +134,41 @@ export const GroupPlanEditor = ({
     setAddingNewExercise(false);
     setNewExerciseGroupId('');
     setSplitSide(false);
-    setRightDraft({ sets: null, reps: null, load: null });
+    setRightDraft({ sets: null, reps: null, load: null, loadKg: null, tempo: null });
+    setTimerMinutes(null);
+    setTimerSeconds(null);
     setCreateExerciseError(null);
   };
+
+  /** Recombine the Minutes/Seconds inputs into draft.durationSeconds. */
+  const updateTimerDuration = (minutes: number | null, seconds: number | null) => {
+    setTimerMinutes(minutes);
+    setTimerSeconds(seconds);
+    const total = minutes == null && seconds == null ? null : (minutes || 0) * 60 + (seconds || 0);
+    setDraft(d => ({ ...d, durationSeconds: total }));
+  };
+
+  const switchItemType = (t: GymSessionItemDraft['itemType']) => {
+    if (editingId) return;
+    setDraft({ ...emptyDraft, itemType: t, distanceUnit: t === 'running' ? 'm' : null });
+    setExerciseQuery('');
+    setShowPicker(false);
+    setAddingNewExercise(false);
+    setCreateExerciseError(null);
+    setSplitSide(false);
+    setRightDraft({ sets: null, reps: null, load: null, loadKg: null, tempo: null });
+    setTimerMinutes(null);
+    setTimerSeconds(null);
+  };
+
+  const isExerciseLike = draft.itemType === 'exercise' || draft.itemType === 'conditioning';
+
+  const isDraftValid =
+    isExerciseLike ? !!draft.exerciseId :
+    draft.itemType === 'note' ? !!draft.noteText?.trim() :
+    draft.itemType === 'running' ? draft.distanceValue != null :
+    draft.itemType === 'timer' ? !!draft.timerLabel?.trim() && draft.durationSeconds != null :
+    false;
 
   const matches = searchExercises(exercises, exerciseQuery);
   const exerciseGroupIdFor = (exerciseId: string) => exercises.find(e => e.id === exerciseId)?.exerciseGroupId ?? null;
@@ -172,34 +214,29 @@ export const GroupPlanEditor = ({
   };
 
   const handleStartEdit = (item: GymGroupPlanItem) => {
-    setDraft({
-      id: item.id,
-      itemType: item.itemType,
-      exerciseId: item.exerciseId,
-      exerciseName: item.exerciseName,
-      sets: item.sets,
-      reps: item.reps,
-      load: item.load,
-      isPrimary: item.isPrimary,
-      side: item.side,
-      noteText: item.noteText,
-    });
+    setDraft({ ...groupPlanItemToDraft(item), id: item.id });
     setEditingId(item.id);
     setExerciseQuery(item.exerciseName || '');
     setShowPicker(false);
     setAddingNewExercise(false);
     setSplitSide(false);
+    if (item.itemType === 'timer' && item.durationSeconds != null) {
+      setTimerMinutes(Math.floor(item.durationSeconds / 60));
+      setTimerSeconds(item.durationSeconds % 60);
+    } else {
+      setTimerMinutes(null);
+      setTimerSeconds(null);
+    }
   };
 
   const handleSave = async () => {
-    if (draft.itemType === 'exercise' && !draft.exerciseId) return;
-    if (draft.itemType === 'note' && !draft.noteText?.trim()) return;
+    if (!isDraftValid) return;
     if (!planId) return;
     setSaving(true);
     try {
       if (!editingId && draft.itemType === 'exercise' && splitSide) {
         const leftDraft: GymSessionItemDraft = { ...draft, side: 'left' };
-        const rightDraftFull: GymSessionItemDraft = { ...draft, side: 'right', sets: rightDraft.sets, reps: rightDraft.reps, load: rightDraft.load };
+        const rightDraftFull: GymSessionItemDraft = { ...draft, side: 'right', sets: rightDraft.sets, reps: rightDraft.reps, load: rightDraft.load, loadKg: rightDraft.loadKg, tempo: rightDraft.tempo };
         const savedLeft = await saveGroupPlanItem(planId, leftDraft, items.length, userId);
         const savedRight = await saveGroupPlanItem(planId, rightDraftFull, items.length + 1, userId);
         await runSync(savedLeft.id, null, savedLeft);
@@ -216,7 +253,7 @@ export const GroupPlanEditor = ({
         const saved = await saveGroupPlanItem(planId, draft, items.length, userId);
         await runSync(saved.id, null, saved);
         pushUndo({
-          label: `Remove "${saved.exerciseName || saved.noteText}" from ${group.name}'s plan`,
+          label: `Remove "${itemDisplayName(saved)}" from ${group.name}'s plan`,
           run: async () => {
             await deleteGroupPlanItem(saved.id);
             await load();
@@ -239,7 +276,7 @@ export const GroupPlanEditor = ({
   };
 
   const handleDelete = async (item: GymGroupPlanItem) => {
-    if (!window.confirm(`Remove "${item.exerciseName || item.noteText}" from ${group.name}'s plan for every player?`)) return;
+    if (!window.confirm(`Remove "${itemDisplayName(item)}" from ${group.name}'s plan for every player?`)) return;
     setSaving(true);
     try {
       await deleteGroupPlanItem(item.id);
@@ -317,17 +354,27 @@ export const GroupPlanEditor = ({
   // being edited (when editingId matches that row).
   const renderForm = () => (
     <>
-      <p className="text-[12px] font-semibold text-slate-600 mb-2.5">{editingId ? 'Edit exercise' : 'Add to everyone\'s plan'}</p>
-      <div className="flex bg-slate-100 rounded-md p-0.5 text-[12px] font-medium mb-3 w-fit">
-        <button onClick={() => setDraft(d => ({ ...emptyDraft, itemType: 'exercise' }))} disabled={!!editingId} className={`px-2.5 py-1 rounded disabled:opacity-40 ${draft.itemType === 'exercise' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>
-          Exercise
-        </button>
-        <button onClick={() => setDraft(d => ({ ...emptyDraft, itemType: 'note' }))} disabled={!!editingId} className={`px-2.5 py-1 rounded disabled:opacity-40 ${draft.itemType === 'note' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>
-          Note
-        </button>
+      <p className="text-[12px] font-semibold text-slate-600 mb-2.5">{editingId ? 'Edit item' : 'Add to everyone\'s plan'}</p>
+      <div className="flex flex-wrap bg-slate-100 rounded-md p-0.5 text-[12px] font-medium mb-3 w-fit gap-0.5">
+        {([
+          ['exercise', 'Exercise'],
+          ['conditioning', 'Conditioning'],
+          ['running', 'Running'],
+          ['timer', 'Timer'],
+          ['note', 'Note'],
+        ] as const).map(([type, label]) => (
+          <button
+            key={type}
+            onClick={() => switchItemType(type)}
+            disabled={!!editingId}
+            className={`px-2.5 py-1 rounded disabled:opacity-40 ${draft.itemType === type ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
-      {draft.itemType === 'exercise' ? (
+      {isExerciseLike ? (
         <div className="space-y-2.5">
           <div className="relative">
             <label className="block text-[11px] font-medium text-slate-500 mb-1">Exercise</label>
@@ -395,21 +442,24 @@ export const GroupPlanEditor = ({
             </div>
           )}
 
-          {!editingId && (
+          {draft.itemType === 'exercise' && !editingId && (
             <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer">
               <input type="checkbox" checked={splitSide} onChange={e => setSplitSide(e.target.checked)} className="w-3.5 h-3.5" />
               Split left / right
+              <span className="text-slate-400">— separate sets/reps/load/intensity/tempo for each side</span>
             </label>
           )}
 
-          {splitSide && !editingId ? (
+          {draft.itemType === 'exercise' && splitSide && !editingId ? (
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <p className="text-[11px] font-semibold text-slate-500">Left</p>
                 <div className="grid grid-cols-3 gap-1.5">
                   <input ref={setsInputRef} type="number" min={0} placeholder="Sets" value={draft.sets ?? ''} onChange={e => setDraft(d => ({ ...d, sets: e.target.value ? Number(e.target.value) : null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
                   <input type="number" min={0} placeholder="Reps" value={draft.reps ?? ''} onChange={e => setDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
-                  <input placeholder="Intensity" value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                  <input type="number" min={0} placeholder="Load (kg)" value={draft.loadKg ?? ''} onChange={e => setDraft(d => ({ ...d, loadKg: e.target.value ? Number(e.target.value) : null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                  <input type="number" min={0} max={100} placeholder="Intensity %" value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                  <input placeholder="Tempo e.g. 3-1-1-0" value={draft.tempo ?? ''} onChange={e => setDraft(d => ({ ...d, tempo: e.target.value || null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50 col-span-2" />
                 </div>
               </div>
               <div className="space-y-2">
@@ -417,7 +467,9 @@ export const GroupPlanEditor = ({
                 <div className="grid grid-cols-3 gap-1.5">
                   <input type="number" min={0} placeholder="Sets" value={rightDraft.sets ?? ''} onChange={e => setRightDraft(d => ({ ...d, sets: e.target.value ? Number(e.target.value) : null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
                   <input type="number" min={0} placeholder="Reps" value={rightDraft.reps ?? ''} onChange={e => setRightDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
-                  <input placeholder="Intensity" value={rightDraft.load ?? ''} onChange={e => setRightDraft(d => ({ ...d, load: e.target.value || null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                  <input type="number" min={0} placeholder="Load (kg)" value={rightDraft.loadKg ?? ''} onChange={e => setRightDraft(d => ({ ...d, loadKg: e.target.value ? Number(e.target.value) : null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                  <input type="number" min={0} max={100} placeholder="Intensity %" value={rightDraft.load ?? ''} onChange={e => setRightDraft(d => ({ ...d, load: e.target.value || null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                  <input placeholder="Tempo e.g. 3-1-1-0" value={rightDraft.tempo ?? ''} onChange={e => setRightDraft(d => ({ ...d, tempo: e.target.value || null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50 col-span-2" />
                 </div>
               </div>
             </div>
@@ -432,16 +484,93 @@ export const GroupPlanEditor = ({
                 <input type="number" min={0} value={draft.reps ?? ''} onChange={e => setDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))} className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
               <div>
-                <label className="block text-[11px] font-medium text-slate-500 mb-1">Intensity</label>
-                <input value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))} placeholder="e.g. 60kg" className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <label className="block text-[11px] font-medium text-slate-500 mb-1">Load (kg)</label>
+                <input type="number" min={0} value={draft.loadKg ?? ''} onChange={e => setDraft(d => ({ ...d, loadKg: e.target.value ? Number(e.target.value) : null }))} placeholder="e.g. 60" className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-slate-500 mb-1">Intensity (%)</label>
+                <input type="number" min={0} max={100} value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))} placeholder="e.g. 75" className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-[11px] font-medium text-slate-500 mb-1">Tempo</label>
+                <input value={draft.tempo ?? ''} onChange={e => setDraft(d => ({ ...d, tempo: e.target.value || null }))} placeholder="e.g. 3-1-1-0" className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
             </div>
           )}
 
-          <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer">
-            <input type="checkbox" checked={draft.isPrimary} onChange={e => setDraft(d => ({ ...d, isPrimary: e.target.checked }))} className="w-3.5 h-3.5" />
-            Mark as Primary
-          </label>
+          {draft.itemType === 'exercise' && (
+            <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer">
+              <input type="checkbox" checked={draft.isPrimary} onChange={e => setDraft(d => ({ ...d, isPrimary: e.target.checked }))} className="w-3.5 h-3.5" />
+              Mark as Primary
+            </label>
+          )}
+        </div>
+      ) : draft.itemType === 'running' ? (
+        <div className="space-y-2.5">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="col-span-2">
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Distance</label>
+              <input
+                ref={setsInputRef}
+                type="number"
+                min={0}
+                value={draft.distanceValue ?? ''}
+                onChange={e => setDraft(d => ({ ...d, distanceValue: e.target.value ? Number(e.target.value) : null }))}
+                placeholder="e.g. 400"
+                className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Unit</label>
+              <div className="flex bg-slate-100 rounded-md p-0.5 text-[12px] font-medium">
+                {(['m', 'km'] as const).map(u => (
+                  <button
+                    key={u}
+                    onClick={() => setDraft(d => ({ ...d, distanceUnit: u }))}
+                    className={`flex-1 py-1.5 rounded ${draft.distanceUnit === u || (!draft.distanceUnit && u === 'm') ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}
+                  >
+                    {u}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : draft.itemType === 'timer' ? (
+        <div className="space-y-2.5">
+          <div>
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">Label</label>
+            <input
+              value={draft.timerLabel ?? ''}
+              onChange={e => setDraft(d => ({ ...d, timerLabel: e.target.value || null }))}
+              placeholder="e.g. Plank hold, Rest between sets"
+              className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Minutes</label>
+              <input
+                ref={setsInputRef}
+                type="number"
+                min={0}
+                value={timerMinutes ?? ''}
+                onChange={e => updateTimerDuration(e.target.value ? Number(e.target.value) : null, timerSeconds)}
+                className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Seconds</label>
+              <input
+                type="number"
+                min={0}
+                max={59}
+                value={timerSeconds ?? ''}
+                onChange={e => updateTimerDuration(timerMinutes, e.target.value ? Number(e.target.value) : null)}
+                className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
         </div>
       ) : (
         <textarea
@@ -456,11 +585,11 @@ export const GroupPlanEditor = ({
       <div className="flex gap-2 mt-3">
         <button
           onClick={handleSave}
-          disabled={saving || members.length === 0 || (draft.itemType === 'exercise' ? !draft.exerciseId : !draft.noteText?.trim())}
+          disabled={saving || members.length === 0 || !isDraftValid}
           className="flex-1 h-9 flex items-center justify-center gap-1.5 bg-slate-900 text-white rounded-lg text-[13px] font-semibold hover:bg-slate-800 disabled:opacity-40"
         >
           {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-          {editingId ? 'Save change' : splitSide ? `Add both sides for all ${members.length}` : `Add for all ${members.length}`}
+          {editingId ? 'Save change' : splitSide && draft.itemType === 'exercise' ? `Add both sides for all ${members.length}` : `Add for all ${members.length}`}
         </button>
         {editingId && (
           <button onClick={resetDraft} className="h-9 px-3 text-[13px] text-slate-500 flex items-center gap-1">
@@ -499,15 +628,18 @@ export const GroupPlanEditor = ({
         {zone === 'after' && <div className="absolute left-0 right-0 bottom-0 h-0.5 bg-blue-500 z-10" />}
         {canEdit && <GripVertical className="w-3.5 h-3.5 text-slate-300 mt-1 flex-shrink-0 cursor-grab" />}
         <div className="flex-1 min-w-0">
-          <p className="text-[13px] font-medium text-slate-800 flex items-center gap-1.5">
+          <p className="text-[13px] font-medium text-slate-800 flex items-center gap-1.5 flex-wrap">
             {item.itemType === 'note' ? <StickyNote className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" /> : null}
-            {item.itemType === 'note' ? item.noteText : item.exerciseName}
-            {item.side !== 'both' && (
+            {item.itemType === 'note' ? item.noteText : itemDisplayName(item)}
+            {item.itemType === 'conditioning' && (
+              <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-teal-50 text-teal-600 border border-teal-200">Conditioning</span>
+            )}
+            {item.itemType === 'exercise' && item.side !== 'both' && (
               <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1 rounded">{item.side === 'left' ? 'L' : 'R'}</span>
             )}
-            {item.isPrimary && <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1 rounded">Primary</span>}
+            {item.itemType === 'exercise' && item.isPrimary && <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1 rounded">Primary</span>}
           </p>
-          {item.itemType === 'exercise' && <p className="text-[11px] text-slate-400">{itemMetaText(item)}</p>}
+          {item.itemType !== 'note' && <p className="text-[11px] text-slate-400">{itemMetaText(item)}</p>}
         </div>
         {canEdit && (
           <div className="flex items-center gap-0.5 flex-shrink-0">

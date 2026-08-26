@@ -1,16 +1,17 @@
 // components/gym/itemDisplay.ts
 // Shared formatting helpers for rendering a session item's real content
-// (exercise name, sets/reps/load, split side, note text) compactly — used
-// by StaffDailyView's per-player row and StaffWeeklyView's per-day cell so
-// both show what's actually planned instead of a bare item count.
+// (name, Sets/Reps/Load(kg)/Intensity/Tempo, distance, duration, split side,
+// note text) compactly — used by StaffDailyView's per-player row and
+// StaffWeeklyView's per-day cell so both show what's actually planned
+// instead of a bare item count, and by SessionItemChip/CopySessionModal/
+// PlayerGymView for the same purpose elsewhere.
 
-import type { GymSessionItem, GymSessionItemSide, GymSessionItemType } from './types';
+import type { GymDistanceUnit, GymSessionItemSide, GymSessionItemType } from './types';
 
-// Shape shared by GymSessionItem (an athlete's own item) and GymGroupPlanItem
-// (a group plan's item, no effectiveExerciseName/wasSwapped fields of its
-// own) — lets these formatters serve both UI 2's Calendar/Compare tabs
-// (per-athlete) and the "All players" group-plan equivalents without
-// duplicating this logic.
+// Shape shared by GymSessionItem (an athlete's own item), GymGroupPlanItem (a
+// group plan's item, no effectiveExerciseName/wasSwapped of its own), and
+// GymSessionItemDraft (a not-yet-saved item) — lets these formatters serve
+// every item-bearing view in the module without duplicating this logic.
 interface ItemLike {
   itemType: GymSessionItemType;
   noteText: string | null;
@@ -20,31 +21,72 @@ interface ItemLike {
   sets: number | null;
   reps: number | null;
   load: string | null;
+  loadKg: number | null;
+  tempo: string | null;
+  distanceValue: number | null;
+  distanceUnit: GymDistanceUnit | null;
+  timerLabel: string | null;
+  durationSeconds: number | null;
 }
 
 export const sideLabel = (side: string): string => (side === 'left' ? 'Left' : side === 'right' ? 'Right' : '');
 
-/** "4 sets × 8 reps × @50kg" — same format SessionEditor uses for its own rows. */
-export function itemMetaText(item: Pick<GymSessionItem, 'sets' | 'reps' | 'load'>): string {
-  return (
-    [item.sets ? `${item.sets} sets` : null, item.reps ? `${item.reps} reps` : null, item.load ? `@ ${item.load}` : null]
-      .filter(Boolean)
-      .join(' × ') || 'No sets/reps/intensity set'
-  );
+/** "75" -> "75%"; anything non-numeric (including old free-text values like "60kg"/"bodyweight" saved before Intensity became %-only) is shown as-is. */
+export function formatIntensityPct(load: string | null): string | null {
+  if (!load) return null;
+  const trimmed = load.trim();
+  return /^\d+(\.\d+)?$/.test(trimmed) ? `${trimmed}%` : trimmed;
+}
+
+/** Total seconds -> "2:05". */
+export function formatDuration(totalSeconds: number | null): string {
+  if (totalSeconds == null) return '';
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+/** "4 sets × 8 reps × 60kg × @75% × tempo 3-1-1-0" for Exercise/Conditioning; distance for Running; duration for Timer. Same format SessionEditor uses for its own rows. */
+export function itemMetaText(item: ItemLike): string {
+  if (item.itemType === 'note') return '';
+  if (item.itemType === 'running') {
+    if (item.distanceValue == null) return 'No distance set';
+    return `${item.distanceValue}${item.distanceUnit || 'm'}`;
+  }
+  if (item.itemType === 'timer') {
+    return item.durationSeconds != null ? formatDuration(item.durationSeconds) : 'No duration set';
+  }
+  // exercise or conditioning
+  const parts = [
+    item.sets ? `${item.sets} sets` : null,
+    item.reps ? `${item.reps} reps` : null,
+    item.loadKg != null ? `${item.loadKg}kg` : null,
+    item.load ? `@ ${formatIntensityPct(item.load)}` : null,
+    item.tempo ? `tempo ${item.tempo}` : null,
+  ].filter(Boolean);
+  return parts.join(' × ') || 'No sets/reps/load set';
 }
 
 export function itemDisplayName(item: ItemLike): string {
-  if (item.itemType !== 'exercise') return item.noteText || 'Note';
+  if (item.itemType === 'note') return item.noteText || 'Note';
+  if (item.itemType === 'running') return 'Running';
+  if (item.itemType === 'timer') return item.timerLabel || 'Timer';
+  // exercise or conditioning
   return item.effectiveExerciseName || item.exerciseName || 'Exercise';
 }
 
-/** One tight line for the week grid, e.g. "Front Squat (L) 4×5 @90kg". */
+/** One tight line for the week grid, e.g. "Front Squat (L) 4×5 @75%/60kg". */
 export function itemCompactLabel(item: ItemLike): string {
-  if (item.itemType !== 'exercise') return item.noteText || 'Note';
+  if (item.itemType === 'note') return item.noteText || 'Note';
   const name = itemDisplayName(item);
+  if (item.itemType === 'running' || item.itemType === 'timer') {
+    const meta = itemMetaText(item);
+    return meta ? `${name} ${meta}` : name;
+  }
+  // exercise or conditioning
   const sideTag = item.side !== 'both' ? ` (${item.side === 'left' ? 'L' : 'R'})` : '';
   const setsReps = item.sets && item.reps ? `${item.sets}×${item.reps}` : item.sets ? `${item.sets} sets` : item.reps ? `${item.reps} reps` : '';
-  const load = item.load ? `@${item.load}` : '';
-  const meta = [setsReps, load].filter(Boolean).join(' ');
+  const loadBits = [item.loadKg != null ? `${item.loadKg}kg` : null, item.load ? formatIntensityPct(item.load) : null].filter(Boolean).join('/');
+  const meta = [setsReps, loadBits ? `@${loadBits}` : ''].filter(Boolean).join(' ');
   return meta ? `${name}${sideTag} ${meta}` : `${name}${sideTag}`;
 }

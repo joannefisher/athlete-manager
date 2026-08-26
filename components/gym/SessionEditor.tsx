@@ -21,10 +21,12 @@ import {
   setSessionItemsSuperset,
   createExercise,
   searchExercises,
+  itemToDraft,
 } from './gymApi';
 import { applySupersetDrop, groupBySuperset, zoneForOffset, type DropZone } from './supersetDnd';
 import { CopySessionModal } from './CopySessionModal';
 import { useGymUndo } from './GymUndoContext';
+import { itemDisplayName, itemMetaText } from './itemDisplay';
 
 const emptyDraft: GymSessionItemDraft = {
   itemType: 'exercise',
@@ -32,9 +34,15 @@ const emptyDraft: GymSessionItemDraft = {
   sets: null,
   reps: null,
   load: null,
+  loadKg: null,
+  tempo: null,
   isPrimary: false,
   side: 'both',
   noteText: null,
+  distanceValue: null,
+  distanceUnit: null,
+  timerLabel: null,
+  durationSeconds: null,
 };
 
 const fmtDate = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -83,7 +91,11 @@ export const SessionEditor = ({
   const [creatingExercise, setCreatingExercise] = useState(false);
   const [createExerciseError, setCreateExerciseError] = useState<string | null>(null);
   const [splitSide, setSplitSide] = useState(false);
-  const [rightDraft, setRightDraft] = useState<{ sets: number | null; reps: number | null; load: string | null }>({ sets: null, reps: null, load: null });
+  const [rightDraft, setRightDraft] = useState<{ sets: number | null; reps: number | null; load: string | null; loadKg: number | null; tempo: string | null }>({ sets: null, reps: null, load: null, loadKg: null, tempo: null });
+  // Timer's Minutes/Seconds inputs are kept separate from draft.durationSeconds
+  // for entry ergonomics — each keystroke recombines them into that one field.
+  const [timerMinutes, setTimerMinutes] = useState<number | null>(null);
+  const [timerSeconds, setTimerSeconds] = useState<number | null>(null);
 
   const [ownerFilter, setOwnerFilter] = useState<string>('all');
   // Superset drag-and-drop — see supersetDnd.ts. draggedIds holds either one
@@ -136,7 +148,17 @@ export const SessionEditor = ({
     setAddingNewExercise(false);
     setNewExerciseGroupId('');
     setSplitSide(false);
-    setRightDraft({ sets: null, reps: null, load: null });
+    setRightDraft({ sets: null, reps: null, load: null, loadKg: null, tempo: null });
+    setTimerMinutes(null);
+    setTimerSeconds(null);
+  };
+
+  /** Recombine the Minutes/Seconds inputs into draft.durationSeconds. */
+  const updateTimerDuration = (minutes: number | null, seconds: number | null) => {
+    setTimerMinutes(minutes);
+    setTimerSeconds(seconds);
+    const total = minutes == null && seconds == null ? null : (minutes || 0) * 60 + (seconds || 0);
+    setDraft(d => ({ ...d, durationSeconds: total }));
   };
 
   const matches = searchExercises(exercises, exerciseQuery);
@@ -173,39 +195,37 @@ export const SessionEditor = ({
   };
 
   const handleStartEdit = (item: GymSessionItem) => {
-    setDraft({
-      id: item.id,
-      itemType: item.itemType,
-      exerciseId: item.exerciseId,
-      exerciseName: item.exerciseName,
-      sets: item.sets,
-      reps: item.reps,
-      load: item.load,
-      isPrimary: item.isPrimary,
-      side: item.side,
-      noteText: item.noteText,
-    });
+    setDraft({ ...itemToDraft(item), id: item.id });
     setEditingSortOrder(item.sortOrder);
     setExerciseQuery(item.exerciseName || '');
     setShowPicker(false);
     setAddingNewExercise(false);
     setSplitSide(false);
+    if (item.itemType === 'timer' && item.durationSeconds != null) {
+      setTimerMinutes(Math.floor(item.durationSeconds / 60));
+      setTimerSeconds(item.durationSeconds % 60);
+    } else {
+      setTimerMinutes(null);
+      setTimerSeconds(null);
+    }
   };
 
   const exerciseGroupIdForDraft = (d: GymSessionItemDraft) => exercises.find(e => e.id === d.exerciseId)?.exerciseGroupId || null;
 
   const handleAddItem = async () => {
-    if (draft.itemType === 'exercise' && !draft.exerciseId) return;
+    if ((draft.itemType === 'exercise' || draft.itemType === 'conditioning') && !draft.exerciseId) return;
     if (draft.itemType === 'note' && !draft.noteText?.trim()) return;
+    if (draft.itemType === 'running' && draft.distanceValue == null) return;
+    if (draft.itemType === 'timer' && (!draft.timerLabel?.trim() || draft.durationSeconds == null)) return;
     setSaving(true);
     try {
       const s = await ensureSession();
-      const exerciseGroupId = draft.itemType === 'exercise' ? exerciseGroupIdForDraft(draft) : null;
+      const exerciseGroupId = draft.itemType === 'exercise' || draft.itemType === 'conditioning' ? exerciseGroupIdForDraft(draft) : null;
 
       if (!draft.id && draft.itemType === 'exercise' && splitSide) {
         // New split entry — save two independent items, Left then Right.
         const leftDraft: GymSessionItemDraft = { ...draft, side: 'left' };
-        const rightDraftFull: GymSessionItemDraft = { ...draft, side: 'right', sets: rightDraft.sets, reps: rightDraft.reps, load: rightDraft.load };
+        const rightDraftFull: GymSessionItemDraft = { ...draft, side: 'right', sets: rightDraft.sets, reps: rightDraft.reps, load: rightDraft.load, loadKg: rightDraft.loadKg, tempo: rightDraft.tempo };
         const savedLeft = await saveSessionItem(s.id, athleteId, leftDraft, exerciseGroupId, items.length, userId);
         const savedRight = await saveSessionItem(s.id, athleteId, rightDraftFull, exerciseGroupId, items.length + 1, userId);
         setItems(prev => [...prev, savedLeft, savedRight]);
@@ -231,18 +251,9 @@ export const SessionEditor = ({
         pushUndo({
           label: `Undo edit to "${previousItem.exerciseName || previousItem.noteText || 'item'}"`,
           run: async () => {
-            const oldDraft: GymSessionItemDraft = {
-              id: previousItem.id,
-              itemType: previousItem.itemType,
-              exerciseId: previousItem.exerciseId,
-              sets: previousItem.sets,
-              reps: previousItem.reps,
-              load: previousItem.load,
-              isPrimary: previousItem.isPrimary,
-              side: previousItem.side,
-              noteText: previousItem.noteText,
-            };
-            const restoredGroupId = previousItem.itemType === 'exercise' ? exerciseGroupIdForDraft(oldDraft) : null;
+            const oldDraft: GymSessionItemDraft = { ...itemToDraft(previousItem), id: previousItem.id };
+            const restoredGroupId =
+              previousItem.itemType === 'exercise' || previousItem.itemType === 'conditioning' ? exerciseGroupIdForDraft(oldDraft) : null;
             const restored = await saveSessionItem(sessionId, athleteId, oldDraft, restoredGroupId, previousItem.sortOrder, userId);
             setItems(prev => prev.map(i => (i.id === restored.id ? restored : i)));
           },
@@ -278,17 +289,8 @@ export const SessionEditor = ({
       pushUndo({
         label: `Restore "${item.exerciseName || item.noteText || 'item'}"`,
         run: async () => {
-          const oldDraft: GymSessionItemDraft = {
-            itemType: item.itemType,
-            exerciseId: item.exerciseId,
-            sets: item.sets,
-            reps: item.reps,
-            load: item.load,
-            isPrimary: item.isPrimary,
-            side: item.side,
-            noteText: item.noteText,
-          };
-          const restoredGroupId = item.itemType === 'exercise' ? exerciseGroupIdForDraft(oldDraft) : null;
+          const oldDraft = itemToDraft(item);
+          const restoredGroupId = item.itemType === 'exercise' || item.itemType === 'conditioning' ? exerciseGroupIdForDraft(oldDraft) : null;
           const restored = await saveSessionItem(sessionId, athleteId, oldDraft, restoredGroupId, item.sortOrder, userId);
           setItems(prev => [...prev, restored].sort((a, b) => a.sortOrder - b.sortOrder));
         },
@@ -323,17 +325,8 @@ export const SessionEditor = ({
         run: async () => {
           const idMap = new Map<string, string>();
           for (const item of toDelete) {
-            const oldDraft: GymSessionItemDraft = {
-              itemType: item.itemType,
-              exerciseId: item.exerciseId,
-              sets: item.sets,
-              reps: item.reps,
-              load: item.load,
-              isPrimary: item.isPrimary,
-              side: item.side,
-              noteText: item.noteText,
-            };
-            const restoredGroupId = item.itemType === 'exercise' ? exerciseGroupIdForDraft(oldDraft) : null;
+            const oldDraft = itemToDraft(item);
+            const restoredGroupId = item.itemType === 'exercise' || item.itemType === 'conditioning' ? exerciseGroupIdForDraft(oldDraft) : null;
             const restored = await saveSessionItem(sessionId, athleteId, oldDraft, restoredGroupId, item.sortOrder, userId);
             idMap.set(item.id, restored.id);
             setItems(prev => [...prev, restored].sort((a, b) => a.sortOrder - b.sortOrder));
@@ -438,24 +431,51 @@ export const SessionEditor = ({
   // The add/edit form body — used both for the bottom "add new item" panel
   // (when draft.id is unset) and inline in place of the row being edited
   // (when draft.id matches that row) via renderItemRow below.
+  const switchItemType = (t: GymSessionItemDraft['itemType']) => {
+    if (draft.id) return; // the type toggle is disabled while editing an existing item anyway
+    setDraft({ ...emptyDraft, itemType: t, distanceUnit: t === 'running' ? 'm' : null });
+    setExerciseQuery('');
+    setShowPicker(false);
+    setAddingNewExercise(false);
+    setCreateExerciseError(null);
+    setSplitSide(false);
+    setRightDraft({ sets: null, reps: null, load: null, loadKg: null, tempo: null });
+    setTimerMinutes(null);
+    setTimerSeconds(null);
+  };
+
+  const isExerciseLike = draft.itemType === 'exercise' || draft.itemType === 'conditioning';
+
+  // Mirrors handleAddItem's own validation gate, kept in sync with it so the
+  // Save/Add button's disabled state never lags behind what would actually
+  // be rejected on submit.
+  const isDraftValid =
+    isExerciseLike ? !!draft.exerciseId :
+    draft.itemType === 'note' ? !!draft.noteText?.trim() :
+    draft.itemType === 'running' ? draft.distanceValue != null :
+    draft.itemType === 'timer' ? !!draft.timerLabel?.trim() && draft.durationSeconds != null :
+    false;
+
   const renderForm = () => (
     <>
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex bg-slate-100 rounded-md p-0.5 text-[12px] font-medium w-fit">
-          <button
-            onClick={() => setDraft(d => ({ ...(draft.id ? d : emptyDraft), itemType: 'exercise' }))}
-            disabled={!!draft.id}
-            className={`px-2.5 py-1 rounded disabled:opacity-40 ${draft.itemType === 'exercise' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}
-          >
-            Exercise
-          </button>
-          <button
-            onClick={() => setDraft(d => ({ ...(draft.id ? d : emptyDraft), itemType: 'note' }))}
-            disabled={!!draft.id}
-            className={`px-2.5 py-1 rounded disabled:opacity-40 ${draft.itemType === 'note' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}
-          >
-            Note
-          </button>
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div className="flex flex-wrap bg-slate-100 rounded-md p-0.5 text-[12px] font-medium w-fit gap-0.5">
+          {([
+            ['exercise', 'Exercise'],
+            ['conditioning', 'Conditioning'],
+            ['running', 'Running'],
+            ['timer', 'Timer'],
+            ['note', 'Note'],
+          ] as const).map(([type, label]) => (
+            <button
+              key={type}
+              onClick={() => switchItemType(type)}
+              disabled={!!draft.id}
+              className={`px-2.5 py-1 rounded disabled:opacity-40 ${draft.itemType === type ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
         {draft.id && (
           <span className="flex items-center gap-1 text-[11px] font-medium text-blue-600">
@@ -465,7 +485,7 @@ export const SessionEditor = ({
         )}
       </div>
 
-      {draft.itemType === 'exercise' ? (
+      {isExerciseLike ? (
         <div className="space-y-2.5">
           <div className="relative">
             <label className="block text-[11px] font-medium text-slate-500 mb-1">Exercise</label>
@@ -550,15 +570,15 @@ export const SessionEditor = ({
             </div>
           )}
 
-          {!draft.id && (
+          {draft.itemType === 'exercise' && !draft.id && (
             <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer">
               <input type="checkbox" checked={splitSide} onChange={e => setSplitSide(e.target.checked)} className="w-3.5 h-3.5" />
               Split left / right
-              <span className="text-slate-400">— separate sets/reps/intensity for each side</span>
+              <span className="text-slate-400">— separate sets/reps/load/intensity/tempo for each side</span>
             </label>
           )}
 
-          {splitSide && !draft.id ? (
+          {draft.itemType === 'exercise' && splitSide && !draft.id ? (
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <p className="text-[11px] font-semibold text-slate-500">Left</p>
@@ -567,8 +587,12 @@ export const SessionEditor = ({
                     className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
                   <input type="number" min={0} placeholder="Reps" value={draft.reps ?? ''} onChange={e => setDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))}
                     className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
-                  <input placeholder="Intensity" value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))}
+                  <input type="number" min={0} placeholder="Load (kg)" value={draft.loadKg ?? ''} onChange={e => setDraft(d => ({ ...d, loadKg: e.target.value ? Number(e.target.value) : null }))}
                     className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                  <input type="number" min={0} max={100} placeholder="Intensity %" value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))}
+                    className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                  <input placeholder="Tempo e.g. 3-1-1-0" value={draft.tempo ?? ''} onChange={e => setDraft(d => ({ ...d, tempo: e.target.value || null }))}
+                    className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50 col-span-2" />
                 </div>
               </div>
               <div className="space-y-2">
@@ -578,8 +602,12 @@ export const SessionEditor = ({
                     className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
                   <input type="number" min={0} placeholder="Reps" value={rightDraft.reps ?? ''} onChange={e => setRightDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))}
                     className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
-                  <input placeholder="Intensity" value={rightDraft.load ?? ''} onChange={e => setRightDraft(d => ({ ...d, load: e.target.value || null }))}
+                  <input type="number" min={0} placeholder="Load (kg)" value={rightDraft.loadKg ?? ''} onChange={e => setRightDraft(d => ({ ...d, loadKg: e.target.value ? Number(e.target.value) : null }))}
                     className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                  <input type="number" min={0} max={100} placeholder="Intensity %" value={rightDraft.load ?? ''} onChange={e => setRightDraft(d => ({ ...d, load: e.target.value || null }))}
+                    className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                  <input placeholder="Tempo e.g. 3-1-1-0" value={rightDraft.tempo ?? ''} onChange={e => setRightDraft(d => ({ ...d, tempo: e.target.value || null }))}
+                    className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50 col-span-2" />
                 </div>
               </div>
             </div>
@@ -596,18 +624,97 @@ export const SessionEditor = ({
                   className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
               <div>
-                <label className="block text-[11px] font-medium text-slate-500 mb-1">Intensity</label>
-                <input value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))} placeholder="e.g. 60kg"
+                <label className="block text-[11px] font-medium text-slate-500 mb-1">Load (kg)</label>
+                <input type="number" min={0} value={draft.loadKg ?? ''} onChange={e => setDraft(d => ({ ...d, loadKg: e.target.value ? Number(e.target.value) : null }))} placeholder="e.g. 60"
+                  className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-slate-500 mb-1">Intensity (%)</label>
+                <input type="number" min={0} max={100} value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))} placeholder="e.g. 75"
+                  className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-[11px] font-medium text-slate-500 mb-1">Tempo</label>
+                <input value={draft.tempo ?? ''} onChange={e => setDraft(d => ({ ...d, tempo: e.target.value || null }))} placeholder="e.g. 3-1-1-0"
                   className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
             </div>
           )}
 
-          <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer">
-            <input type="checkbox" checked={draft.isPrimary} onChange={e => setDraft(d => ({ ...d, isPrimary: e.target.checked }))} className="w-3.5 h-3.5" />
-            Mark as Primary
-            <span className="text-slate-400">— may be swapped to the player's own default for this exercise's group</span>
-          </label>
+          {draft.itemType === 'exercise' && (
+            <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer">
+              <input type="checkbox" checked={draft.isPrimary} onChange={e => setDraft(d => ({ ...d, isPrimary: e.target.checked }))} className="w-3.5 h-3.5" />
+              Mark as Primary
+              <span className="text-slate-400">— may be swapped to the player's own default for this exercise's group</span>
+            </label>
+          )}
+        </div>
+      ) : draft.itemType === 'running' ? (
+        <div className="space-y-2.5">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="col-span-2">
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Distance</label>
+              <input
+                ref={setsInputRef}
+                type="number"
+                min={0}
+                value={draft.distanceValue ?? ''}
+                onChange={e => setDraft(d => ({ ...d, distanceValue: e.target.value ? Number(e.target.value) : null }))}
+                placeholder="e.g. 400"
+                className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Unit</label>
+              <div className="flex bg-slate-100 rounded-md p-0.5 text-[12px] font-medium">
+                {(['m', 'km'] as const).map(u => (
+                  <button
+                    key={u}
+                    onClick={() => setDraft(d => ({ ...d, distanceUnit: u }))}
+                    className={`flex-1 py-1.5 rounded ${draft.distanceUnit === u || (!draft.distanceUnit && u === 'm') ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}
+                  >
+                    {u}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : draft.itemType === 'timer' ? (
+        <div className="space-y-2.5">
+          <div>
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">Label</label>
+            <input
+              value={draft.timerLabel ?? ''}
+              onChange={e => setDraft(d => ({ ...d, timerLabel: e.target.value || null }))}
+              placeholder="e.g. Plank hold, Rest between sets"
+              className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Minutes</label>
+              <input
+                ref={setsInputRef}
+                type="number"
+                min={0}
+                value={timerMinutes ?? ''}
+                onChange={e => updateTimerDuration(e.target.value ? Number(e.target.value) : null, timerSeconds)}
+                className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Seconds</label>
+              <input
+                type="number"
+                min={0}
+                max={59}
+                value={timerSeconds ?? ''}
+                onChange={e => updateTimerDuration(timerMinutes, e.target.value ? Number(e.target.value) : null)}
+                className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
         </div>
       ) : (
         <textarea
@@ -622,7 +729,7 @@ export const SessionEditor = ({
       <div className="flex gap-2 mt-3">
         <button
           onClick={handleAddItem}
-          disabled={saving || (draft.itemType === 'exercise' ? !draft.exerciseId : !draft.noteText?.trim())}
+          disabled={saving || !isDraftValid}
           className="flex-1 h-9 flex items-center justify-center gap-1.5 bg-slate-900 text-white rounded-lg text-[13px] font-semibold hover:bg-slate-800 disabled:opacity-40"
         >
           {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
@@ -679,21 +786,31 @@ export const SessionEditor = ({
           {idx + 1}
         </span>
         <div className="flex-1 min-w-0">
-          {item.itemType === 'exercise' ? (
+          {item.itemType === 'note' ? (
+            <div className="flex items-start gap-1.5">
+              <StickyNote className="w-3.5 h-3.5 text-slate-300 mt-0.5 flex-shrink-0" />
+              <p className="text-[13px] text-slate-700">{item.noteText}</p>
+            </div>
+          ) : (
             <>
               <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-[13px] font-medium text-slate-800">{item.effectiveExerciseName || item.exerciseName}</span>
-                {item.side !== 'both' && (
+                <span className="text-[13px] font-medium text-slate-800">{itemDisplayName(item)}</span>
+                {item.itemType === 'conditioning' && (
+                  <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-teal-50 text-teal-600 border border-teal-200">
+                    Conditioning
+                  </span>
+                )}
+                {item.itemType === 'exercise' && item.side !== 'both' && (
                   <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
                     {sideLabel(item.side)}
                   </span>
                 )}
-                {item.isPrimary && (
+                {item.itemType === 'exercise' && item.isPrimary && (
                   <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200">
                     Primary
                   </span>
                 )}
-                {item.wasSwapped && (
+                {item.itemType === 'exercise' && item.wasSwapped && (
                   <span
                     title={`Swapped from "${item.exerciseName}" to this player's default`}
                     className="flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200"
@@ -702,17 +819,8 @@ export const SessionEditor = ({
                   </span>
                 )}
               </div>
-              <p className="text-[12px] text-slate-400 mt-0.5">
-                {[item.sets ? `${item.sets} sets` : null, item.reps ? `${item.reps} reps` : null, item.load ? `@ ${item.load}` : null]
-                  .filter(Boolean)
-                  .join(' × ') || 'No sets/reps/intensity set'}
-              </p>
+              <p className="text-[12px] text-slate-400 mt-0.5">{itemMetaText(item)}</p>
             </>
-          ) : (
-            <div className="flex items-start gap-1.5">
-              <StickyNote className="w-3.5 h-3.5 text-slate-300 mt-0.5 flex-shrink-0" />
-              <p className="text-[13px] text-slate-700">{item.noteText}</p>
-            </div>
           )}
           {item.createdByName && <p className="text-[10px] text-slate-300 mt-1">added by {item.createdByName}</p>}
         </div>

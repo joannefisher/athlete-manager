@@ -140,7 +140,7 @@ export const CopySessionModal = ({
             </div>
             {items.map(item => (
               <div key={item.id} className="px-3 py-1.5 text-[12.5px] text-slate-700">
-                {item.itemType === 'exercise' ? itemDisplayName(item) : item.noteText}
+                {item.itemType === 'note' ? item.noteText : itemDisplayName(item)}
               </div>
             ))}
             {items.length === 0 && <div className="px-3 py-4 text-center text-[12px] text-slate-400">Nothing selected to copy.</div>}
