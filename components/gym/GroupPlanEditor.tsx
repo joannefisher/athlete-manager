@@ -7,7 +7,7 @@
 // accept-new/keep-current decision (a member had already modified or
 // removed their own copy of it) via the confirmation modal below.
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   AlertTriangle, Check, Edit2, GripVertical, Link2, Loader2, Plus, StickyNote, Trash2, Users, X,
 } from 'lucide-react';
@@ -89,6 +89,11 @@ export const GroupPlanEditor = ({
   const [newExerciseGroupId, setNewExerciseGroupId] = useState('');
   const [splitSide, setSplitSide] = useState(false);
   const [rightDraft, setRightDraft] = useState<{ sets: number | null; reps: number | null; load: string | null }>({ sets: null, reps: null, load: null });
+  const [creatingExercise, setCreatingExercise] = useState(false);
+  const [createExerciseError, setCreateExerciseError] = useState<string | null>(null);
+
+  // Focus jumps straight to Sets right after an exercise is picked/created.
+  const setsInputRef = useRef<HTMLInputElement>(null);
 
   // Superset drag-and-drop — see supersetDnd.ts / SessionEditor.tsx (same mechanism, applied
   // to this shared group plan's own item order instead of one athlete's session).
@@ -120,18 +125,39 @@ export const GroupPlanEditor = ({
     setNewExerciseGroupId('');
     setSplitSide(false);
     setRightDraft({ sets: null, reps: null, load: null });
+    setCreateExerciseError(null);
   };
 
   const matches = searchExercises(exercises, exerciseQuery);
   const exerciseGroupIdFor = (exerciseId: string) => exercises.find(e => e.id === exerciseId)?.exerciseGroupId ?? null;
 
+  const handlePickExercise = (ex: GymExercise) => {
+    setDraft(d => ({ ...d, exerciseId: ex.id, exerciseName: ex.name }));
+    setExerciseQuery(ex.name);
+    setShowPicker(false);
+    setTimeout(() => setsInputRef.current?.focus(), 0);
+  };
+
   const handleCreateExercise = async () => {
     if (!exerciseQuery.trim() || !newExerciseGroupId) return;
-    const created = await createExercise(clubId, exerciseQuery.trim(), newExerciseGroupId, userId);
-    onExercisesChanged();
-    setDraft(d => ({ ...d, exerciseId: created.id, exerciseName: created.name }));
-    setAddingNewExercise(false);
-    setShowPicker(false);
+    setCreatingExercise(true);
+    setCreateExerciseError(null);
+    try {
+      const created = await createExercise(clubId, exerciseQuery.trim(), newExerciseGroupId, userId);
+      onExercisesChanged();
+      setDraft(d => ({ ...d, exerciseId: created.id, exerciseName: created.name }));
+      setAddingNewExercise(false);
+      setShowPicker(false);
+      setTimeout(() => setsInputRef.current?.focus(), 0);
+    } catch (err: any) {
+      if (err?.code === '23505') {
+        setCreateExerciseError('An exercise with this name already exists in this group\'s exercise bank.');
+      } else {
+        setCreateExerciseError(err?.message || 'Failed to create this exercise — please try again.');
+      }
+    } finally {
+      setCreatingExercise(false);
+    }
   };
 
   const runSync = async (planItemId: string, before: GymGroupPlanItem | null, after: GymGroupPlanItem | null) => {
@@ -286,7 +312,174 @@ export const GroupPlanEditor = ({
     }
   };
 
+  // Shared add/edit form body — used both for the bottom "add to everyone's
+  // plan" panel (when editingId is unset) and inline in place of the row
+  // being edited (when editingId matches that row).
+  const renderForm = () => (
+    <>
+      <p className="text-[12px] font-semibold text-slate-600 mb-2.5">{editingId ? 'Edit exercise' : 'Add to everyone\'s plan'}</p>
+      <div className="flex bg-slate-100 rounded-md p-0.5 text-[12px] font-medium mb-3 w-fit">
+        <button onClick={() => setDraft(d => ({ ...emptyDraft, itemType: 'exercise' }))} disabled={!!editingId} className={`px-2.5 py-1 rounded disabled:opacity-40 ${draft.itemType === 'exercise' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>
+          Exercise
+        </button>
+        <button onClick={() => setDraft(d => ({ ...emptyDraft, itemType: 'note' }))} disabled={!!editingId} className={`px-2.5 py-1 rounded disabled:opacity-40 ${draft.itemType === 'note' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>
+          Note
+        </button>
+      </div>
+
+      {draft.itemType === 'exercise' ? (
+        <div className="space-y-2.5">
+          <div className="relative">
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">Exercise</label>
+            {draft.exerciseId ? (
+              <div className="flex items-center justify-between gap-2 h-9 px-3 border border-emerald-200 rounded-lg bg-emerald-50">
+                <span className="flex items-center gap-1.5 text-[13px] font-medium text-emerald-800 truncate">
+                  <Check className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                  {draft.exerciseName}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraft(d => ({ ...d, exerciseId: null, exerciseName: undefined }));
+                    setExerciseQuery('');
+                    setShowPicker(true);
+                  }}
+                  className="text-[11px] font-medium text-emerald-700 hover:underline flex-shrink-0"
+                >
+                  Change
+                </button>
+              </div>
+            ) : (
+              <>
+                <input
+                  value={exerciseQuery}
+                  onChange={e => { setExerciseQuery(e.target.value); setShowPicker(true); }}
+                  onFocus={() => setShowPicker(true)}
+                  placeholder="Start typing…"
+                  className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                {showPicker && exerciseQuery.trim() && (
+                  <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+                    {matches.map(ex => (
+                      <button key={ex.id} onClick={() => handlePickExercise(ex)} className="w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50 flex justify-between">
+                        <span>{ex.name}</span>
+                        <span className="text-[11px] text-slate-400">{ex.exerciseGroupName}</span>
+                      </button>
+                    ))}
+                    <button onClick={() => setAddingNewExercise(true)} className="w-full text-left px-3 py-2 text-[13px] text-blue-600 hover:bg-blue-50 flex items-center gap-1 border-t border-slate-100">
+                      <Plus className="w-3.5 h-3.5" /> Add "{exerciseQuery.trim()}" as new exercise
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {addingNewExercise && (
+            <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 space-y-2">
+              <label className="block text-[11px] font-medium text-slate-500">Exercise group</label>
+              <select value={newExerciseGroupId} onChange={e => setNewExerciseGroupId(e.target.value)} className="w-full h-8 px-2 text-[13px] border border-slate-200 rounded bg-white">
+                <option value="">Select a group…</option>
+                {exerciseGroups.map(g => <option key={g.id} value={g.id}>{g.name}{g.typeName ? ` (${g.typeName})` : ''}</option>)}
+              </select>
+              {createExerciseError && (
+                <p className="text-[11px] text-red-600">{createExerciseError}</p>
+              )}
+              <div className="flex gap-2">
+                <button onClick={handleCreateExercise} disabled={!newExerciseGroupId || creatingExercise} className="h-8 px-3 text-[12px] font-medium bg-slate-900 text-white rounded disabled:opacity-40 flex items-center gap-1.5">
+                  {creatingExercise && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {creatingExercise ? 'Creating…' : 'Create exercise'}
+                </button>
+                <button onClick={() => { setAddingNewExercise(false); setCreateExerciseError(null); }} disabled={creatingExercise} className="h-8 px-3 text-[12px] text-slate-500 disabled:opacity-40">Cancel</button>
+              </div>
+            </div>
+          )}
+
+          {!editingId && (
+            <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer">
+              <input type="checkbox" checked={splitSide} onChange={e => setSplitSide(e.target.checked)} className="w-3.5 h-3.5" />
+              Split left / right
+            </label>
+          )}
+
+          {splitSide && !editingId ? (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <p className="text-[11px] font-semibold text-slate-500">Left</p>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <input ref={setsInputRef} type="number" min={0} placeholder="Sets" value={draft.sets ?? ''} onChange={e => setDraft(d => ({ ...d, sets: e.target.value ? Number(e.target.value) : null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                  <input type="number" min={0} placeholder="Reps" value={draft.reps ?? ''} onChange={e => setDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                  <input placeholder="Intensity" value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <p className="text-[11px] font-semibold text-slate-500">Right</p>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <input type="number" min={0} placeholder="Sets" value={rightDraft.sets ?? ''} onChange={e => setRightDraft(d => ({ ...d, sets: e.target.value ? Number(e.target.value) : null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                  <input type="number" min={0} placeholder="Reps" value={rightDraft.reps ?? ''} onChange={e => setRightDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                  <input placeholder="Intensity" value={rightDraft.load ?? ''} onChange={e => setRightDraft(d => ({ ...d, load: e.target.value || null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="block text-[11px] font-medium text-slate-500 mb-1">Sets</label>
+                <input ref={setsInputRef} type="number" min={0} value={draft.sets ?? ''} onChange={e => setDraft(d => ({ ...d, sets: e.target.value ? Number(e.target.value) : null }))} className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-slate-500 mb-1">Reps</label>
+                <input type="number" min={0} value={draft.reps ?? ''} onChange={e => setDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))} className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-slate-500 mb-1">Intensity</label>
+                <input value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))} placeholder="e.g. 60kg" className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            </div>
+          )}
+
+          <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer">
+            <input type="checkbox" checked={draft.isPrimary} onChange={e => setDraft(d => ({ ...d, isPrimary: e.target.checked }))} className="w-3.5 h-3.5" />
+            Mark as Primary
+          </label>
+        </div>
+      ) : (
+        <textarea
+          value={draft.noteText ?? ''}
+          onChange={e => setDraft(d => ({ ...d, noteText: e.target.value }))}
+          placeholder="Note for everyone's session…"
+          rows={3}
+          className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+      )}
+
+      <div className="flex gap-2 mt-3">
+        <button
+          onClick={handleSave}
+          disabled={saving || members.length === 0 || (draft.itemType === 'exercise' ? !draft.exerciseId : !draft.noteText?.trim())}
+          className="flex-1 h-9 flex items-center justify-center gap-1.5 bg-slate-900 text-white rounded-lg text-[13px] font-semibold hover:bg-slate-800 disabled:opacity-40"
+        >
+          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+          {editingId ? 'Save change' : splitSide ? `Add both sides for all ${members.length}` : `Add for all ${members.length}`}
+        </button>
+        {editingId && (
+          <button onClick={resetDraft} className="h-9 px-3 text-[13px] text-slate-500 flex items-center gap-1">
+            <X className="w-3.5 h-3.5" /> Cancel
+          </button>
+        )}
+      </div>
+    </>
+  );
+
   const renderPlanItemRow = (item: GymGroupPlanItem) => {
+    // Editing happens right here, in place of this row.
+    if (editingId === item.id) {
+      return (
+        <div key={item.id} className="px-3.5 py-3 bg-blue-50/60 border-l-2 border-blue-400">
+          {renderForm()}
+        </div>
+      );
+    }
     const zone = dropTarget?.id === item.id ? dropTarget.zone : null;
     return (
       <div
@@ -390,131 +583,9 @@ export const GroupPlanEditor = ({
         </div>
       )}
 
-      {canEdit && (
+      {canEdit && !editingId && (
         <div className="bg-white rounded-lg border border-slate-200 p-3.5">
-          <p className="text-[12px] font-semibold text-slate-600 mb-2.5">{editingId ? 'Edit exercise' : 'Add to everyone\'s plan'}</p>
-          <div className="flex bg-slate-100 rounded-md p-0.5 text-[12px] font-medium mb-3 w-fit">
-            <button onClick={() => setDraft(d => ({ ...emptyDraft, itemType: 'exercise' }))} className={`px-2.5 py-1 rounded ${draft.itemType === 'exercise' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>
-              Exercise
-            </button>
-            <button onClick={() => setDraft(d => ({ ...emptyDraft, itemType: 'note' }))} className={`px-2.5 py-1 rounded ${draft.itemType === 'note' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>
-              Note
-            </button>
-          </div>
-
-          {draft.itemType === 'exercise' ? (
-            <div className="space-y-2.5">
-              <div className="relative">
-                <label className="block text-[11px] font-medium text-slate-500 mb-1">Exercise</label>
-                <input
-                  value={exerciseQuery}
-                  onChange={e => { setExerciseQuery(e.target.value); setDraft(d => ({ ...d, exerciseId: null })); setShowPicker(true); }}
-                  onFocus={() => setShowPicker(true)}
-                  placeholder="Start typing…"
-                  className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                {showPicker && exerciseQuery.trim() && (
-                  <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto">
-                    {matches.map(ex => (
-                      <button key={ex.id} onClick={() => { setDraft(d => ({ ...d, exerciseId: ex.id, exerciseName: ex.name })); setExerciseQuery(ex.name); setShowPicker(false); }} className="w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50 flex justify-between">
-                        <span>{ex.name}</span>
-                        <span className="text-[11px] text-slate-400">{ex.exerciseGroupName}</span>
-                      </button>
-                    ))}
-                    <button onClick={() => setAddingNewExercise(true)} className="w-full text-left px-3 py-2 text-[13px] text-blue-600 hover:bg-blue-50 flex items-center gap-1 border-t border-slate-100">
-                      <Plus className="w-3.5 h-3.5" /> Add "{exerciseQuery.trim()}" as new exercise
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {addingNewExercise && (
-                <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 space-y-2">
-                  <label className="block text-[11px] font-medium text-slate-500">Exercise group</label>
-                  <select value={newExerciseGroupId} onChange={e => setNewExerciseGroupId(e.target.value)} className="w-full h-8 px-2 text-[13px] border border-slate-200 rounded bg-white">
-                    <option value="">Select a group…</option>
-                    {exerciseGroups.map(g => <option key={g.id} value={g.id}>{g.name}{g.typeName ? ` (${g.typeName})` : ''}</option>)}
-                  </select>
-                  <div className="flex gap-2">
-                    <button onClick={handleCreateExercise} disabled={!newExerciseGroupId} className="h-8 px-3 text-[12px] font-medium bg-slate-900 text-white rounded disabled:opacity-40">Create exercise</button>
-                    <button onClick={() => setAddingNewExercise(false)} className="h-8 px-3 text-[12px] text-slate-500">Cancel</button>
-                  </div>
-                </div>
-              )}
-
-              {!editingId && (
-                <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer">
-                  <input type="checkbox" checked={splitSide} onChange={e => setSplitSide(e.target.checked)} className="w-3.5 h-3.5" />
-                  Split left / right
-                </label>
-              )}
-
-              {splitSide && !editingId ? (
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <p className="text-[11px] font-semibold text-slate-500">Left</p>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      <input type="number" min={0} placeholder="Sets" value={draft.sets ?? ''} onChange={e => setDraft(d => ({ ...d, sets: e.target.value ? Number(e.target.value) : null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
-                      <input type="number" min={0} placeholder="Reps" value={draft.reps ?? ''} onChange={e => setDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
-                      <input placeholder="Intensity" value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <p className="text-[11px] font-semibold text-slate-500">Right</p>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      <input type="number" min={0} placeholder="Sets" value={rightDraft.sets ?? ''} onChange={e => setRightDraft(d => ({ ...d, sets: e.target.value ? Number(e.target.value) : null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
-                      <input type="number" min={0} placeholder="Reps" value={rightDraft.reps ?? ''} onChange={e => setRightDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
-                      <input placeholder="Intensity" value={rightDraft.load ?? ''} onChange={e => setRightDraft(d => ({ ...d, load: e.target.value || null }))} className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <label className="block text-[11px] font-medium text-slate-500 mb-1">Sets</label>
-                    <input type="number" min={0} value={draft.sets ?? ''} onChange={e => setDraft(d => ({ ...d, sets: e.target.value ? Number(e.target.value) : null }))} className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-medium text-slate-500 mb-1">Reps</label>
-                    <input type="number" min={0} value={draft.reps ?? ''} onChange={e => setDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))} className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-medium text-slate-500 mb-1">Intensity</label>
-                    <input value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))} placeholder="e.g. 60kg" className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                </div>
-              )}
-
-              <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer">
-                <input type="checkbox" checked={draft.isPrimary} onChange={e => setDraft(d => ({ ...d, isPrimary: e.target.checked }))} className="w-3.5 h-3.5" />
-                Mark as Primary
-              </label>
-            </div>
-          ) : (
-            <textarea
-              value={draft.noteText ?? ''}
-              onChange={e => setDraft(d => ({ ...d, noteText: e.target.value }))}
-              placeholder="Note for everyone's session…"
-              rows={3}
-              className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          )}
-
-          <div className="flex gap-2 mt-3">
-            <button
-              onClick={handleSave}
-              disabled={saving || members.length === 0 || (draft.itemType === 'exercise' ? !draft.exerciseId : !draft.noteText?.trim())}
-              className="flex-1 h-9 flex items-center justify-center gap-1.5 bg-slate-900 text-white rounded-lg text-[13px] font-semibold hover:bg-slate-800 disabled:opacity-40"
-            >
-              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-              {editingId ? 'Save change' : splitSide ? `Add both sides for all ${members.length}` : `Add for all ${members.length}`}
-            </button>
-            {editingId && (
-              <button onClick={resetDraft} className="h-9 px-3 text-[13px] text-slate-500 flex items-center gap-1">
-                <X className="w-3.5 h-3.5" /> Cancel
-              </button>
-            )}
-          </div>
+          {renderForm()}
         </div>
       )}
 

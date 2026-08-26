@@ -1,11 +1,15 @@
 // components/gym/CopySessionModal.tsx
-// "Copy session…" flow launched from SessionEditor: pick which items to
-// copy (everything by default, or a subset — with an "only what I added"
-// shortcut), which players to copy them to (any number, hand-picked or
-// unioned in from a saved group), and which date via a week strip with
-// prev/next arrows. Can be run again for another destination; each run is
-// independent and never overwrites what's already there at the destination.
-// Pushes a single undo action that removes everything it just created.
+// "Copy session…" flow launched from SessionEditor: which items to copy is
+// now decided one level up, in SessionEditor's own item list (its Select
+// mode — see there), so this modal just receives that already-chosen set
+// of items and picks who to copy them to (any number, hand-picked or
+// unioned in from a saved group, pre-selected with the session's own
+// athlete/group since that's the overwhelmingly common case — copying to a
+// different date for the same person/group) and which date via a week
+// strip with prev/next arrows. Can be run again for another destination;
+// each run is independent and never overwrites what's already there at the
+// destination. Pushes a single undo action that removes everything it just
+// created.
 
 import React, { useState } from 'react';
 import { Check, ChevronLeft, ChevronRight, Loader2, Users, X } from 'lucide-react';
@@ -14,6 +18,7 @@ import type { GymExercise, GymSessionGroup, GymSessionItem } from './types';
 import { copySessionItems, deleteSessionItem } from './gymApi';
 import { useGymUndo } from './GymUndoContext';
 import { getWeekDates } from './WeekStrip';
+import { itemDisplayName } from './itemDisplay';
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const fmtDayNum = (d: string) => new Date(d + 'T00:00:00').getDate();
@@ -28,6 +33,7 @@ export const CopySessionModal = ({
   items,
   exercises,
   sourceAthleteId,
+  sourceGroupId,
   sourceDate,
   athletes,
   sessionGroups,
@@ -38,6 +44,8 @@ export const CopySessionModal = ({
   items: GymSessionItem[];
   exercises: GymExercise[];
   sourceAthleteId: string;
+  /** The group this session was created from (GymSession.sourceGroupId), if any — its members are pre-selected as destinations too. */
+  sourceGroupId?: string | null;
   sourceDate: string;
   athletes: Athlete[];
   sessionGroups: GymSessionGroup[];
@@ -46,8 +54,17 @@ export const CopySessionModal = ({
   onClose: () => void;
 }) => {
   const { pushUndo } = useGymUndo();
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(items.map(i => i.id)));
-  const [destAthleteIds, setDestAthleteIds] = useState<Set<string>>(new Set());
+  // Destination defaults to the athlete (and, if this session came from one, the
+  // whole group) the session is being copied FROM — copying to a different date
+  // for the same person/group is by far the most common case.
+  const [destAthleteIds, setDestAthleteIds] = useState<Set<string>>(() => {
+    const initial = new Set<string>([sourceAthleteId]);
+    if (sourceGroupId) {
+      const group = sessionGroups.find(g => g.id === sourceGroupId);
+      group?.memberAthleteIds.forEach(id => initial.add(id));
+    }
+    return initial;
+  });
   const [groupToAdd, setGroupToAdd] = useState('');
   const [destDate, setDestDate] = useState(sourceDate);
   const [saving, setSaving] = useState(false);
@@ -55,16 +72,6 @@ export const CopySessionModal = ({
   const [error, setError] = useState<string | null>(null);
 
   const weekDates = getWeekDates(destDate);
-
-  const toggleItem = (id: string) => {
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  };
-  const selectOnlyMine = () => setSelectedIds(new Set(items.filter(i => i.createdBy === userId).map(i => i.id)));
-  const selectAllItems = () => setSelectedIds(new Set(items.map(i => i.id)));
 
   const toggleAthlete = (athleteId: string) => {
     setDestAthleteIds(prev => {
@@ -84,9 +91,8 @@ export const CopySessionModal = ({
   const exerciseGroupIdFor = (exerciseId: string) => exercises.find(e => e.id === exerciseId)?.exerciseGroupId ?? null;
 
   const handleCopy = async () => {
-    const selectedItems = items.filter(i => selectedIds.has(i.id));
-    if (selectedItems.length === 0) {
-      setError('Select at least one item to copy.');
+    if (items.length === 0) {
+      setError('Nothing selected to copy.');
       return;
     }
     if (destAthleteIds.size === 0) {
@@ -98,10 +104,10 @@ export const CopySessionModal = ({
     setSaving(true);
     try {
       const destinations = Array.from(destAthleteIds).map(athleteId => ({ athleteId, date: destDate }));
-      const results = await copySessionItems(selectedItems, destinations, exerciseGroupIdFor, clubId, userId);
+      const results = await copySessionItems(items, destinations, exerciseGroupIdFor, clubId, userId);
       const names = Array.from(destAthleteIds).map(id => athletes.find(a => a.id === id)?.name).filter(Boolean);
       const dateLabel = new Date(destDate + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-      setDone(`Copied ${selectedItems.length} item${selectedItems.length !== 1 ? 's' : ''} to ${names.length} player${names.length !== 1 ? 's' : ''} for ${dateLabel}.`);
+      setDone(`Copied ${items.length} item${items.length !== 1 ? 's' : ''} to ${names.length} player${names.length !== 1 ? 's' : ''} for ${dateLabel}.`);
       pushUndo({
         label: `Undo copy to ${names.length} player${names.length !== 1 ? 's' : ''}`,
         run: async () => {
@@ -127,29 +133,17 @@ export const CopySessionModal = ({
         </div>
 
         <div className="p-4 space-y-4">
-          {/* Item selection */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-[11px] font-medium text-slate-500">What to copy</label>
-              <div className="flex items-center gap-2 text-[11px]">
-                <button onClick={selectAllItems} className="text-blue-600 hover:underline">All</button>
-                <button onClick={selectOnlyMine} className="text-blue-600 hover:underline">Only items I added</button>
+          {/* What's being copied — chosen up front via SessionEditor's own Select mode */}
+          <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-32 overflow-y-auto bg-slate-50/60">
+            <div className="px-3 py-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wide bg-white border-b border-slate-100">
+              Copying {items.length} item{items.length !== 1 ? 's' : ''}
+            </div>
+            {items.map(item => (
+              <div key={item.id} className="px-3 py-1.5 text-[12.5px] text-slate-700">
+                {item.itemType === 'exercise' ? itemDisplayName(item) : item.noteText}
               </div>
-            </div>
-            <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-36 overflow-y-auto">
-              {items.map(item => (
-                <label key={item.id} className="flex items-start gap-2 px-3 py-2 text-[13px] cursor-pointer hover:bg-slate-50">
-                  <input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleItem(item.id)} className="mt-0.5 w-3.5 h-3.5" />
-                  <span className="flex-1 min-w-0">
-                    <span className="text-slate-800">
-                      {item.itemType === 'exercise' ? (item.effectiveExerciseName || item.exerciseName) : item.noteText}
-                    </span>
-                    {item.createdByName && <span className="block text-[10px] text-slate-400">added by {item.createdByName}</span>}
-                  </span>
-                </label>
-              ))}
-              {items.length === 0 && <div className="px-3 py-4 text-center text-[12px] text-slate-400">Nothing to copy yet.</div>}
-            </div>
+            ))}
+            {items.length === 0 && <div className="px-3 py-4 text-center text-[12px] text-slate-400">Nothing selected to copy.</div>}
           </div>
 
           {/* Destination players */}

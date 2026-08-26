@@ -6,7 +6,7 @@
 // link into that athlete's own SessionEditor for fine-grained edits/deletes
 // without touching the rest of the group.
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { ArrowLeft, Check, ChevronRight, Link2, Loader2, Plus, Trash2, Users } from 'lucide-react';
 import type { GymAthlete as Athlete } from './types';
 import type { GymExercise, GymExerciseGroup, GymSessionGroup, GymSessionItem, GymSessionItemDraft } from './types';
@@ -87,6 +87,11 @@ export const GroupSessionEditor = ({
   const [buildingSuperset, setBuildingSuperset] = useState(false);
   const [supersetSlots, setSupersetSlots] = useState<SupersetSlot[]>([emptySlot(), emptySlot()]);
 
+  // Focus jumps straight to Sets right after an exercise is picked/created,
+  // in both the main add-form and (indexed) each Superset slot.
+  const setsInputRef = useRef<HTMLInputElement>(null);
+  const slotSetsInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -121,10 +126,21 @@ export const GroupSessionEditor = ({
   const updateSlot = (index: number, patch: Partial<SupersetSlot>) => {
     setSupersetSlots(prev => prev.map((s, i) => (i === index ? { ...s, ...patch } : s)));
   };
+  const pickSlotExercise = (index: number, ex: GymExercise) => {
+    updateSlot(index, { exerciseId: ex.id, exerciseName: ex.name, query: ex.name, showPicker: false });
+    setTimeout(() => slotSetsInputRefs.current[index]?.focus(), 0);
+  };
   const addSlot = () => setSupersetSlots(prev => (prev.length >= 6 ? prev : [...prev, emptySlot()]));
   const removeSlot = (index: number) => setSupersetSlots(prev => (prev.length <= 2 ? prev : prev.filter((_, i) => i !== index)));
 
   const matches = searchExercises(exercises, exerciseQuery);
+
+  const handlePickExercise = (ex: GymExercise) => {
+    setDraft(d => ({ ...d, exerciseId: ex.id, exerciseName: ex.name }));
+    setExerciseQuery(ex.name);
+    setShowPicker(false);
+    setTimeout(() => setsInputRef.current?.focus(), 0);
+  };
 
   const handleCreateExercise = async () => {
     if (!exerciseQuery.trim() || !newExerciseGroupId) return;
@@ -136,6 +152,7 @@ export const GroupSessionEditor = ({
       setDraft(d => ({ ...d, exerciseId: created.id, exerciseName: created.name }));
       setAddingNewExercise(false);
       setShowPicker(false);
+      setTimeout(() => setsInputRef.current?.focus(), 0);
     } catch (err: any) {
       // Postgres unique-violation — most commonly this name was used by an
       // exercise that's since been merged away (see migration 0006).
@@ -295,30 +312,48 @@ export const GroupSessionEditor = ({
                     )}
                   </div>
                   <div className="relative">
-                    <input
-                      value={slot.query}
-                      onChange={e => updateSlot(i, { query: e.target.value, exerciseId: null, showPicker: true })}
-                      onFocus={() => updateSlot(i, { showPicker: true })}
-                      placeholder="Start typing…"
-                      className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    {slot.showPicker && slot.query.trim() && (
-                      <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto">
-                        {slotMatches.map(ex => (
-                          <button
-                            key={ex.id}
-                            onClick={() => updateSlot(i, { exerciseId: ex.id, exerciseName: ex.name, query: ex.name, showPicker: false })}
-                            className="w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50 flex justify-between"
-                          >
-                            <span>{ex.name}</span>
-                            <span className="text-[11px] text-slate-400">{ex.exerciseGroupName}</span>
-                          </button>
-                        ))}
+                    {slot.exerciseId ? (
+                      <div className="flex items-center justify-between gap-2 h-9 px-3 border border-emerald-200 rounded-lg bg-emerald-50">
+                        <span className="flex items-center gap-1.5 text-[13px] font-medium text-emerald-800 truncate">
+                          <Check className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                          {slot.exerciseName}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => updateSlot(i, { exerciseId: null, exerciseName: '', query: '', showPicker: true })}
+                          className="text-[11px] font-medium text-emerald-700 hover:underline flex-shrink-0"
+                        >
+                          Change
+                        </button>
                       </div>
+                    ) : (
+                      <>
+                        <input
+                          value={slot.query}
+                          onChange={e => updateSlot(i, { query: e.target.value, showPicker: true })}
+                          onFocus={() => updateSlot(i, { showPicker: true })}
+                          placeholder="Start typing…"
+                          className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        {slot.showPicker && slot.query.trim() && (
+                          <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+                            {slotMatches.map(ex => (
+                              <button
+                                key={ex.id}
+                                onClick={() => pickSlotExercise(i, ex)}
+                                className="w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50 flex justify-between"
+                              >
+                                <span>{ex.name}</span>
+                                <span className="text-[11px] text-slate-400">{ex.exerciseGroupName}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                   <div className="grid grid-cols-3 gap-1.5">
-                    <input type="number" min={0} placeholder="Sets" value={slot.sets ?? ''} onChange={e => updateSlot(i, { sets: e.target.value ? Number(e.target.value) : null })}
+                    <input ref={el => { slotSetsInputRefs.current[i] = el; }} type="number" min={0} placeholder="Sets" value={slot.sets ?? ''} onChange={e => updateSlot(i, { sets: e.target.value ? Number(e.target.value) : null })}
                       className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-white" />
                     <input type="number" min={0} placeholder="Reps" value={slot.reps ?? ''} onChange={e => updateSlot(i, { reps: e.target.value ? Number(e.target.value) : null })}
                       className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-white" />
@@ -342,25 +377,47 @@ export const GroupSessionEditor = ({
           <div className="space-y-2.5">
             <div className="relative">
               <label className="block text-[11px] font-medium text-slate-500 mb-1">Exercise</label>
-              <input
-                value={exerciseQuery}
-                onChange={e => { setExerciseQuery(e.target.value); setDraft(d => ({ ...d, exerciseId: null })); setShowPicker(true); }}
-                onFocus={() => setShowPicker(true)}
-                placeholder="Start typing…"
-                className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              {showPicker && exerciseQuery.trim() && (
-                <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto">
-                  {matches.map(ex => (
-                    <button key={ex.id} onClick={() => { setDraft(d => ({ ...d, exerciseId: ex.id, exerciseName: ex.name })); setExerciseQuery(ex.name); setShowPicker(false); }} className="w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50 flex justify-between">
-                      <span>{ex.name}</span>
-                      <span className="text-[11px] text-slate-400">{ex.exerciseGroupName}</span>
-                    </button>
-                  ))}
-                  <button onClick={() => setAddingNewExercise(true)} className="w-full text-left px-3 py-2 text-[13px] text-blue-600 hover:bg-blue-50 flex items-center gap-1 border-t border-slate-100">
-                    <Plus className="w-3.5 h-3.5" /> Add "{exerciseQuery.trim()}" as new exercise
+              {draft.exerciseId ? (
+                <div className="flex items-center justify-between gap-2 h-9 px-3 border border-emerald-200 rounded-lg bg-emerald-50">
+                  <span className="flex items-center gap-1.5 text-[13px] font-medium text-emerald-800 truncate">
+                    <Check className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                    {draft.exerciseName}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDraft(d => ({ ...d, exerciseId: null, exerciseName: undefined }));
+                      setExerciseQuery('');
+                      setShowPicker(true);
+                    }}
+                    className="text-[11px] font-medium text-emerald-700 hover:underline flex-shrink-0"
+                  >
+                    Change
                   </button>
                 </div>
+              ) : (
+                <>
+                  <input
+                    value={exerciseQuery}
+                    onChange={e => { setExerciseQuery(e.target.value); setShowPicker(true); }}
+                    onFocus={() => setShowPicker(true)}
+                    placeholder="Start typing…"
+                    className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  {showPicker && exerciseQuery.trim() && (
+                    <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+                      {matches.map(ex => (
+                        <button key={ex.id} onClick={() => handlePickExercise(ex)} className="w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50 flex justify-between">
+                          <span>{ex.name}</span>
+                          <span className="text-[11px] text-slate-400">{ex.exerciseGroupName}</span>
+                        </button>
+                      ))}
+                      <button onClick={() => setAddingNewExercise(true)} className="w-full text-left px-3 py-2 text-[13px] text-blue-600 hover:bg-blue-50 flex items-center gap-1 border-t border-slate-100">
+                        <Plus className="w-3.5 h-3.5" /> Add "{exerciseQuery.trim()}" as new exercise
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
@@ -395,7 +452,7 @@ export const GroupSessionEditor = ({
                 <div className="space-y-2">
                   <p className="text-[11px] font-semibold text-slate-500">Left</p>
                   <div className="grid grid-cols-3 gap-1.5">
-                    <input type="number" min={0} placeholder="Sets" value={draft.sets ?? ''} onChange={e => setDraft(d => ({ ...d, sets: e.target.value ? Number(e.target.value) : null }))}
+                    <input ref={setsInputRef} type="number" min={0} placeholder="Sets" value={draft.sets ?? ''} onChange={e => setDraft(d => ({ ...d, sets: e.target.value ? Number(e.target.value) : null }))}
                       className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
                     <input type="number" min={0} placeholder="Reps" value={draft.reps ?? ''} onChange={e => setDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))}
                       className="w-full h-8 px-1.5 text-[12px] border border-slate-200 rounded bg-slate-50" />
@@ -419,7 +476,7 @@ export const GroupSessionEditor = ({
               <div className="grid grid-cols-3 gap-2">
                 <div>
                   <label className="block text-[11px] font-medium text-slate-500 mb-1">Sets</label>
-                  <input type="number" min={0} value={draft.sets ?? ''} onChange={e => setDraft(d => ({ ...d, sets: e.target.value ? Number(e.target.value) : null }))} className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <input ref={setsInputRef} type="number" min={0} value={draft.sets ?? ''} onChange={e => setDraft(d => ({ ...d, sets: e.target.value ? Number(e.target.value) : null }))} className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div>
                   <label className="block text-[11px] font-medium text-slate-500 mb-1">Reps</label>
