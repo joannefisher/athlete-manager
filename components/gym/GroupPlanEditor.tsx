@@ -11,7 +11,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   AlertTriangle, Check, Edit2, GripVertical, Link2, Loader2, Plus, StickyNote, Trash2, Users, X,
 } from 'lucide-react';
-import type { GymAthlete as Athlete, GymExercise, GymExerciseGroup, GymGroupPlanConflict, GymGroupPlanItem, GymSessionGroup, GymSessionItemDraft } from './types';
+import type { GymAthlete as Athlete, GymConditioningExercise, GymExercise, GymExerciseGroup, GymGroupPlanConflict, GymGroupPlanItem, GymRunningExercise, GymSessionGroup, GymSessionItemDraft } from './types';
 import {
   getOrCreateGroupPlan,
   fetchGroupPlanItems,
@@ -22,6 +22,10 @@ import {
   resolveGroupPlanConflict,
   createExercise,
   searchExercises,
+  createConditioningExercise,
+  searchConditioningExercises,
+  createRunningExercise,
+  searchRunningExercises,
   groupPlanItemToDraft,
 } from './gymApi';
 import { applySupersetDrop, groupBySuperset, zoneForOffset, type DropZone } from './supersetDnd';
@@ -39,6 +43,8 @@ const emptyDraft: GymSessionItemDraft = {
   isPrimary: false,
   side: 'both',
   noteText: null,
+  conditioningExerciseId: null,
+  runningExerciseId: null,
   distanceValue: null,
   distanceUnit: null,
   timerLabel: null,
@@ -63,6 +69,8 @@ export const GroupPlanEditor = ({
   athletes,
   exerciseGroups,
   exercises,
+  conditioningExercises,
+  runningExercises,
   onExercisesChanged,
   onMemberChanged,
 }: {
@@ -74,6 +82,8 @@ export const GroupPlanEditor = ({
   athletes: Athlete[];
   exerciseGroups: GymExerciseGroup[];
   exercises: GymExercise[];
+  conditioningExercises: GymConditioningExercise[];
+  runningExercises: GymRunningExercise[];
   onExercisesChanged: () => void;
   /** Called after any change that fans out to members, so a parent showing per-member counts elsewhere can refresh. */
   onMemberChanged?: () => void;
@@ -101,6 +111,7 @@ export const GroupPlanEditor = ({
   const [timerSeconds, setTimerSeconds] = useState<number | null>(null);
   const [creatingExercise, setCreatingExercise] = useState(false);
   const [createExerciseError, setCreateExerciseError] = useState<string | null>(null);
+  const [newRunningDistance, setNewRunningDistance] = useState('');
 
   // Focus jumps straight to Sets right after an exercise is picked/created.
   const setsInputRef = useRef<HTMLInputElement>(null);
@@ -138,6 +149,7 @@ export const GroupPlanEditor = ({
     setTimerMinutes(null);
     setTimerSeconds(null);
     setCreateExerciseError(null);
+    setNewRunningDistance('');
   };
 
   /** Recombine the Minutes/Seconds inputs into draft.durationSeconds. */
@@ -159,18 +171,20 @@ export const GroupPlanEditor = ({
     setRightDraft({ sets: null, reps: null, load: null, loadKg: null, tempo: null });
     setTimerMinutes(null);
     setTimerSeconds(null);
+    setNewRunningDistance('');
   };
 
-  const isExerciseLike = draft.itemType === 'exercise' || draft.itemType === 'conditioning';
-
   const isDraftValid =
-    isExerciseLike ? !!draft.exerciseId :
+    draft.itemType === 'exercise' ? !!draft.exerciseId :
+    draft.itemType === 'conditioning' ? !!draft.conditioningExerciseId :
+    draft.itemType === 'running' ? !!draft.runningExerciseId :
     draft.itemType === 'note' ? !!draft.noteText?.trim() :
-    draft.itemType === 'running' ? draft.distanceValue != null :
     draft.itemType === 'timer' ? !!draft.timerLabel?.trim() && draft.durationSeconds != null :
     false;
 
   const matches = searchExercises(exercises, exerciseQuery);
+  const conditioningMatches = searchConditioningExercises(conditioningExercises, exerciseQuery);
+  const runningMatches = searchRunningExercises(runningExercises, exerciseQuery);
   const exerciseGroupIdFor = (exerciseId: string) => exercises.find(e => e.id === exerciseId)?.exerciseGroupId ?? null;
 
   const handlePickExercise = (ex: GymExercise) => {
@@ -202,6 +216,64 @@ export const GroupPlanEditor = ({
     }
   };
 
+  const handlePickConditioningExercise = (ex: GymConditioningExercise) => {
+    setDraft(d => ({ ...d, conditioningExerciseId: ex.id, conditioningExerciseName: ex.name }));
+    setExerciseQuery(ex.name);
+    setShowPicker(false);
+    setTimeout(() => setsInputRef.current?.focus(), 0);
+  };
+
+  const handleCreateConditioningExercise = async () => {
+    if (!exerciseQuery.trim()) return;
+    setCreatingExercise(true);
+    setCreateExerciseError(null);
+    try {
+      const created = await createConditioningExercise(clubId, exerciseQuery.trim(), userId);
+      onExercisesChanged();
+      setDraft(d => ({ ...d, conditioningExerciseId: created.id, conditioningExerciseName: created.name }));
+      setAddingNewExercise(false);
+      setShowPicker(false);
+      setTimeout(() => setsInputRef.current?.focus(), 0);
+    } catch (err: any) {
+      if (err?.code === '23505') {
+        setCreateExerciseError('A conditioning exercise with this name already exists.');
+      } else {
+        setCreateExerciseError(err?.message || 'Failed to create this exercise — please try again.');
+      }
+    } finally {
+      setCreatingExercise(false);
+    }
+  };
+
+  const handlePickRunningExercise = (ex: GymRunningExercise) => {
+    setDraft(d => ({ ...d, runningExerciseId: ex.id, runningExerciseName: ex.name, runningExerciseDistanceMeters: ex.distanceMeters }));
+    setExerciseQuery(ex.name);
+    setShowPicker(false);
+  };
+
+  const handleCreateRunningExercise = async () => {
+    const distance = Number(newRunningDistance);
+    if (!exerciseQuery.trim() || !newRunningDistance || !(distance > 0)) return;
+    setCreatingExercise(true);
+    setCreateExerciseError(null);
+    try {
+      const created = await createRunningExercise(clubId, exerciseQuery.trim(), distance, userId);
+      onExercisesChanged();
+      setDraft(d => ({ ...d, runningExerciseId: created.id, runningExerciseName: created.name, runningExerciseDistanceMeters: created.distanceMeters }));
+      setAddingNewExercise(false);
+      setShowPicker(false);
+      setNewRunningDistance('');
+    } catch (err: any) {
+      if (err?.code === '23505') {
+        setCreateExerciseError('A running exercise with this name already exists.');
+      } else {
+        setCreateExerciseError(err?.message || 'Failed to create this exercise — please try again.');
+      }
+    } finally {
+      setCreatingExercise(false);
+    }
+  };
+
   const runSync = async (planItemId: string, before: GymGroupPlanItem | null, after: GymGroupPlanItem | null) => {
     const result = await syncGroupPlanItemChange(clubId, group.id, group.memberAthleteIds, date, planItemId, before, after, exerciseGroupIdFor, userId);
     if (result.conflicts.length > 0) {
@@ -216,7 +288,7 @@ export const GroupPlanEditor = ({
   const handleStartEdit = (item: GymGroupPlanItem) => {
     setDraft({ ...groupPlanItemToDraft(item), id: item.id });
     setEditingId(item.id);
-    setExerciseQuery(item.exerciseName || '');
+    setExerciseQuery(item.exerciseName || item.conditioningExerciseName || item.runningExerciseName || '');
     setShowPicker(false);
     setAddingNewExercise(false);
     setSplitSide(false);
@@ -374,7 +446,7 @@ export const GroupPlanEditor = ({
         ))}
       </div>
 
-      {isExerciseLike ? (
+      {draft.itemType === 'exercise' ? (
         <div className="space-y-2.5">
           <div className="relative">
             <label className="block text-[11px] font-medium text-slate-500 mb-1">Exercise</label>
@@ -505,36 +577,152 @@ export const GroupPlanEditor = ({
             </label>
           )}
         </div>
-      ) : draft.itemType === 'running' ? (
+      ) : draft.itemType === 'conditioning' ? (
         <div className="space-y-2.5">
-          <div className="grid grid-cols-3 gap-2">
-            <div className="col-span-2">
-              <label className="block text-[11px] font-medium text-slate-500 mb-1">Distance</label>
-              <input
-                ref={setsInputRef}
-                type="number"
-                min={0}
-                value={draft.distanceValue ?? ''}
-                onChange={e => setDraft(d => ({ ...d, distanceValue: e.target.value ? Number(e.target.value) : null }))}
-                placeholder="e.g. 400"
-                className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] font-medium text-slate-500 mb-1">Unit</label>
-              <div className="flex bg-slate-100 rounded-md p-0.5 text-[12px] font-medium">
-                {(['m', 'km'] as const).map(u => (
-                  <button
-                    key={u}
-                    onClick={() => setDraft(d => ({ ...d, distanceUnit: u }))}
-                    className={`flex-1 py-1.5 rounded ${draft.distanceUnit === u || (!draft.distanceUnit && u === 'm') ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}
-                  >
-                    {u}
-                  </button>
-                ))}
+          <div className="relative">
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">Conditioning exercise</label>
+            {draft.conditioningExerciseId ? (
+              <div className="flex items-center justify-between gap-2 h-9 px-3 border border-emerald-200 rounded-lg bg-emerald-50">
+                <span className="flex items-center gap-1.5 text-[13px] font-medium text-emerald-800 truncate">
+                  <Check className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                  {draft.conditioningExerciseName}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraft(d => ({ ...d, conditioningExerciseId: null, conditioningExerciseName: undefined }));
+                    setExerciseQuery('');
+                    setShowPicker(true);
+                  }}
+                  className="text-[11px] font-medium text-emerald-700 hover:underline flex-shrink-0"
+                >
+                  Change
+                </button>
+              </div>
+            ) : (
+              <>
+                <input
+                  ref={setsInputRef}
+                  value={exerciseQuery}
+                  onChange={e => { setExerciseQuery(e.target.value); setShowPicker(true); }}
+                  onFocus={() => setShowPicker(true)}
+                  placeholder="Start typing…"
+                  className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                {showPicker && exerciseQuery.trim() && (
+                  <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+                    {conditioningMatches.map(ex => (
+                      <button key={ex.id} onClick={() => handlePickConditioningExercise(ex)} className="w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50">
+                        {ex.name}
+                      </button>
+                    ))}
+                    <button onClick={() => setAddingNewExercise(true)} className="w-full text-left px-3 py-2 text-[13px] text-blue-600 hover:bg-blue-50 flex items-center gap-1 border-t border-slate-100">
+                      <Plus className="w-3.5 h-3.5" /> Add "{exerciseQuery.trim()}" as new conditioning exercise
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {addingNewExercise && (
+            <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 space-y-2">
+              {createExerciseError && <p className="text-[11px] text-red-600">{createExerciseError}</p>}
+              <div className="flex gap-2">
+                <button onClick={handleCreateConditioningExercise} disabled={creatingExercise} className="h-8 px-3 text-[12px] font-medium bg-slate-900 text-white rounded disabled:opacity-40 flex items-center gap-1.5">
+                  {creatingExercise && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {creatingExercise ? 'Creating…' : 'Create conditioning exercise'}
+                </button>
+                <button onClick={() => { setAddingNewExercise(false); setCreateExerciseError(null); }} disabled={creatingExercise} className="h-8 px-3 text-[12px] text-slate-500 disabled:opacity-40">Cancel</button>
               </div>
             </div>
+          )}
+
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Sets</label>
+              <input type="number" min={0} value={draft.sets ?? ''} onChange={e => setDraft(d => ({ ...d, sets: e.target.value ? Number(e.target.value) : null }))} className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Reps</label>
+              <input type="number" min={0} value={draft.reps ?? ''} onChange={e => setDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))} className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Intensity (%)</label>
+              <input type="number" min={0} max={100} value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))} placeholder="e.g. 75" className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
           </div>
+        </div>
+      ) : draft.itemType === 'running' ? (
+        <div className="space-y-2.5">
+          <div className="relative">
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">Running exercise</label>
+            {draft.runningExerciseId ? (
+              <div className="flex items-center justify-between gap-2 h-9 px-3 border border-emerald-200 rounded-lg bg-emerald-50">
+                <span className="flex items-center gap-1.5 text-[13px] font-medium text-emerald-800 truncate">
+                  <Check className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                  {draft.runningExerciseName}
+                  <span className="text-emerald-600/70 font-normal">— {draft.runningExerciseDistanceMeters}m</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraft(d => ({ ...d, runningExerciseId: null, runningExerciseName: undefined, runningExerciseDistanceMeters: undefined }));
+                    setExerciseQuery('');
+                    setShowPicker(true);
+                  }}
+                  className="text-[11px] font-medium text-emerald-700 hover:underline flex-shrink-0"
+                >
+                  Change
+                </button>
+              </div>
+            ) : (
+              <>
+                <input
+                  value={exerciseQuery}
+                  onChange={e => { setExerciseQuery(e.target.value); setShowPicker(true); }}
+                  onFocus={() => setShowPicker(true)}
+                  placeholder="Start typing…"
+                  className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                {showPicker && exerciseQuery.trim() && (
+                  <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+                    {runningMatches.map(ex => (
+                      <button key={ex.id} onClick={() => handlePickRunningExercise(ex)} className="w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50 flex justify-between">
+                        <span>{ex.name}</span>
+                        <span className="text-[11px] text-slate-400">{ex.distanceMeters}m</span>
+                      </button>
+                    ))}
+                    <button onClick={() => setAddingNewExercise(true)} className="w-full text-left px-3 py-2 text-[13px] text-blue-600 hover:bg-blue-50 flex items-center gap-1 border-t border-slate-100">
+                      <Plus className="w-3.5 h-3.5" /> Add "{exerciseQuery.trim()}" as new running exercise
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {addingNewExercise && (
+            <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 space-y-2">
+              <label className="block text-[11px] font-medium text-slate-500">Distance (metres)</label>
+              <input
+                type="number"
+                min={0}
+                value={newRunningDistance}
+                onChange={e => setNewRunningDistance(e.target.value)}
+                placeholder="e.g. 400"
+                className="w-full h-8 px-2 text-[13px] border border-slate-200 rounded bg-white"
+              />
+              {createExerciseError && <p className="text-[11px] text-red-600">{createExerciseError}</p>}
+              <div className="flex gap-2">
+                <button onClick={handleCreateRunningExercise} disabled={!newRunningDistance || creatingExercise} className="h-8 px-3 text-[12px] font-medium bg-slate-900 text-white rounded disabled:opacity-40 flex items-center gap-1.5">
+                  {creatingExercise && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {creatingExercise ? 'Creating…' : 'Create running exercise'}
+                </button>
+                <button onClick={() => { setAddingNewExercise(false); setCreateExerciseError(null); setNewRunningDistance(''); }} disabled={creatingExercise} className="h-8 px-3 text-[12px] text-slate-500 disabled:opacity-40">Cancel</button>
+              </div>
+            </div>
+          )}
         </div>
       ) : draft.itemType === 'timer' ? (
         <div className="space-y-2.5">

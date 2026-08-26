@@ -12,7 +12,6 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { ArrowLeft, ChevronLeft, Dumbbell, Library, Loader2, Settings, Users, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import type { Role } from './AthleteManager';
-import { GymRoot } from './gym/GymRoot';
 import { GymUI2Root } from './gym/GymUI2Root';
 import { PlayerSessionsView, PlayerDefaultsView } from './gym/PlayerGymView';
 import { ExerciseBankAdmin } from './gym/ExerciseBankAdmin';
@@ -23,11 +22,6 @@ import { GymUndoProvider, GymUndoButton } from './gym/GymUndoContext';
 import type { GymAthlete, GymSessionGroup, GymTeamPosition } from './gym/types';
 
 type Page = 'sessions' | 'groups' | 'exercise-bank' | 'defaults';
-// UI 1 is today's live sessions experience (GymRoot) — kept exactly as-is.
-// UI 2 is the calendar-first redesign (Concept C: scope switcher + date
-// stepper + Day/Calendar/Compare tabs — see GymUI2Root) built from the
-// approved mockup direction.
-type UiVersion = 'ui1' | 'ui2';
 
 export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: string; authUser: any; onBack: () => void }) {
   const isPlayer = role === 'Player';
@@ -40,7 +34,6 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
   const [linkedAthleteId, setLinkedAthleteId] = useState<string | null>(null);
   const [myName, setMyName] = useState<string | null>(null);
   const [page, setPage] = useState<Page>('sessions');
-  const [uiVersion, setUiVersion] = useState<UiVersion>('ui1');
 
   useEffect(() => {
     let cancelled = false;
@@ -168,15 +161,6 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
               </button>
             ))}
           </div>
-          {!isPlayer && page === 'sessions' && (
-            <div className="flex bg-slate-100 rounded-md p-0.5 text-[11px] font-medium">
-              {(['ui1', 'ui2'] as UiVersion[]).map(v => (
-                <button key={v} onClick={() => setUiVersion(v)} className={`px-2 py-1 rounded ${uiVersion === v ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>
-                  {v === 'ui1' ? 'UI 1' : 'UI 2'}
-                </button>
-              ))}
-            </div>
-          )}
           {!isPlayer && <GymUndoButton variant="mobile" />}
         </header>
 
@@ -190,23 +174,7 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
           </div>
           {!isPlayer && (
             <div className="flex items-center gap-3">
-              {page === 'sessions' && (
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Layout</span>
-                  <div className="flex bg-slate-100 rounded-md p-0.5 text-[12px] font-medium">
-                    {(['ui1', 'ui2'] as UiVersion[]).map(v => (
-                      <button
-                        key={v}
-                        onClick={() => setUiVersion(v)}
-                        className={`px-3 py-1 rounded ${uiVersion === v ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
-                      >
-                        {v === 'ui1' ? 'UI 1' : 'UI 2'}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {/* Undo lives here — on the main content header, not tucked into the sidebar — so it's visible whatever page/layout is open. */}
+              {/* Undo lives here — on the main content header, not tucked into the sidebar — so it's visible whatever page is open. */}
               <GymUndoButton variant="canvas" />
             </div>
           )}
@@ -243,10 +211,8 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
           <div className="max-w-2xl mx-auto p-4 md:p-6 space-y-3 w-full">
             <ExerciseBankAdmin clubId={clubId} currentUserId={authUser.id} canEdit={canEdit} role={role} />
           </div>
-        ) : uiVersion === 'ui2' ? (
-          <GymUI2Root athletes={athletes} teamStructure={teamStructure} role={role} userId={authUser.id} clubId={clubId} />
         ) : (
-          <GymRoot athletes={athletes} teamStructure={teamStructure} role={role} userId={authUser.id} clubId={clubId} />
+          <GymUI2Root athletes={athletes} teamStructure={teamStructure} role={role} userId={authUser.id} clubId={clubId} />
         )}
       </div>
     </div>

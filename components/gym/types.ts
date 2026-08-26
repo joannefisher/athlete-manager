@@ -38,6 +38,27 @@ export interface GymExerciseGroup {
   typeName?: string; // convenience, joined in for display
 }
 
+/** Flat conditioning-exercise list — its own list, separate from gym_exercises/exercise groups. */
+export interface GymConditioningExercise {
+  id: string;
+  clubId: string;
+  name: string;
+  archived: boolean;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+/** Flat running-exercise list — name + a distance in metres, looked up live (never snapshotted onto a session item). */
+export interface GymRunningExercise {
+  id: string;
+  clubId: string;
+  name: string;
+  distanceMeters: number;
+  archived: boolean;
+  createdBy: string | null;
+  createdAt: string;
+}
+
 export type GymExerciseStatus = 'pending' | 'approved';
 
 export interface GymExercise {
@@ -112,11 +133,15 @@ export interface GymSession {
 }
 
 /**
- * 'exercise' and 'conditioning' share the same Sets/Reps/Load(kg)/Intensity/
- * Tempo fields and the same Exercise Bank picker — 'conditioning' is just
- * tagged separately so it can be told apart, never offers "Mark as Primary"
- * (no per-player default swap for it), and never offers a left/right split.
- * 'running' is distance-only (no exercise-bank name). 'timer' is a labelled
+ * 'exercise' picks from the Gym exercise bank (gym_exercises) and carries
+ * Sets/Reps/Load(kg)/Intensity/Tempo, an optional left/right split, and the
+ * Primary-swap rule. 'conditioning' picks from its own separate flat list
+ * (gym_conditioning_exercises — no exercise-bank/group tie) and carries only
+ * Sets/Reps/Intensity — no Load(kg)/Tempo (UI-only restriction, not enforced
+ * at the DB level), never offers "Mark as Primary", and never offers a
+ * left/right split. 'running' picks from its own flat list
+ * (gym_running_exercises) — its distance is looked up live from that list's
+ * distance_meters, never entered/stored per-item. 'timer' is a labelled
  * duration, captured here as data only — see gymApi.ts's migration-0008
  * comment for what "captured as data only" means for the Player-facing
  * countdown that's ultimately meant to run off it.
@@ -135,16 +160,17 @@ export interface GymSessionItem {
   sortOrder: number;
   itemType: GymSessionItemType;
 
-  // exercise / conditioning fields
+  // exercise fields — exercise_id/effectiveExerciseId etc. are 'exercise'-only from round 16 on
   exerciseId: string | null;
   exerciseName?: string;
+  /** Sets/Reps/Intensity are shared by 'exercise' and 'conditioning'; Load(kg)/Tempo (below) are 'exercise'-only. */
   sets: number | null;
   reps: number | null;
   /** Free-text %, e.g. "75" — displayed with a "%" suffix. Pre-round-14 sessions may still hold an old free-text value like "60kg" here; those display as-is. */
   load: string | null;
-  /** Weight actually lifted, in kg — a distinct field from `load`/Intensity above. */
+  /** Weight actually lifted, in kg — 'exercise' items only. */
   loadKg: number | null;
-  /** Free text in "X-X-X-X" format, e.g. "3-1-1-0". Not validated/parsed — entered and displayed as typed. */
+  /** Free text in "X-X-X-X" format, e.g. "3-1-1-0" — 'exercise' items only. Not validated/parsed — entered and displayed as typed. */
   tempo: string | null;
   isPrimary: boolean;
   side: GymSessionItemSide;
@@ -155,8 +181,19 @@ export interface GymSessionItem {
   // note fields
   noteText: string | null;
 
-  // running fields
+  // conditioning fields — its own flat list (gym_conditioning_exercises), no exercise-bank/group tie
+  conditioningExerciseId: string | null;
+  conditioningExerciseName?: string;
+
+  // running fields — its own flat list (gym_running_exercises); distance is looked up live via
+  // runningExerciseDistanceMeters (joined in), never entered/stored per-item. distanceValue/distanceUnit
+  // below are superseded from round 16 on — left in place only so old rows aren't destroyed.
+  runningExerciseId: string | null;
+  runningExerciseName?: string;
+  runningExerciseDistanceMeters?: number | null;
+  /** @deprecated superseded by runningExerciseId/runningExerciseDistanceMeters — no longer written to. */
   distanceValue: number | null;
+  /** @deprecated superseded by runningExerciseId/runningExerciseDistanceMeters — no longer written to. */
   distanceUnit: GymDistanceUnit | null;
 
   // timer fields
@@ -200,7 +237,14 @@ export interface GymSessionItemDraft {
   isPrimary: boolean;
   side: GymSessionItemSide;
   noteText: string | null;
+  conditioningExerciseId: string | null;
+  conditioningExerciseName?: string;
+  runningExerciseId: string | null;
+  runningExerciseName?: string;
+  runningExerciseDistanceMeters?: number | null;
+  /** @deprecated superseded by runningExerciseId/runningExerciseDistanceMeters — no longer written to. */
   distanceValue: number | null;
+  /** @deprecated superseded by runningExerciseId/runningExerciseDistanceMeters — no longer written to. */
   distanceUnit: GymDistanceUnit | null;
   timerLabel: string | null;
   durationSeconds: number | null;
@@ -241,7 +285,14 @@ export interface GymGroupPlanItem {
 
   noteText: string | null;
 
+  conditioningExerciseId: string | null;
+  conditioningExerciseName?: string;
+  runningExerciseId: string | null;
+  runningExerciseName?: string;
+  runningExerciseDistanceMeters?: number | null;
+  /** @deprecated superseded by runningExerciseId/runningExerciseDistanceMeters — no longer written to. */
   distanceValue: number | null;
+  /** @deprecated superseded by runningExerciseId/runningExerciseDistanceMeters — no longer written to. */
   distanceUnit: GymDistanceUnit | null;
 
   timerLabel: string | null;

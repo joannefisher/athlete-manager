@@ -8,7 +8,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { Clipboard, ClipboardCheck, Copy, Loader2, Plus, StickyNote, X } from 'lucide-react';
-import type { GymAthlete as Athlete, GymExercise, GymExerciseGroup, GymSession, GymSessionGroup, GymSessionItem } from './types';
+import type { GymAthlete as Athlete, GymConditioningExercise, GymExercise, GymExerciseGroup, GymRunningExercise, GymSession, GymSessionGroup, GymSessionItem } from './types';
 import { fetchAthleteSessionsForDateRange, copySessionItems, deleteSessionItem } from './gymApi';
 import { todayIso } from './WeekStrip';
 import { itemCompactLabel } from './itemDisplay';
@@ -42,6 +42,8 @@ export const GymUI2Calendar = ({
   canEdit,
   exerciseGroups,
   exercises,
+  conditioningExercises,
+  runningExercises,
   athletes,
   sessionGroups,
   onExercisesChanged,
@@ -56,6 +58,8 @@ export const GymUI2Calendar = ({
   canEdit: boolean;
   exerciseGroups: GymExerciseGroup[];
   exercises: GymExercise[];
+  conditioningExercises: GymConditioningExercise[];
+  runningExercises: GymRunningExercise[];
   athletes: Athlete[];
   sessionGroups: GymSessionGroup[];
   onExercisesChanged: () => void;
@@ -256,6 +260,8 @@ export const GymUI2Calendar = ({
               canEdit={canEdit}
               exerciseGroups={exerciseGroups}
               exercises={exercises}
+              conditioningExercises={conditioningExercises}
+              runningExercises={runningExercises}
               athletes={athletes}
               sessionGroups={sessionGroups}
               onExercisesChanged={() => {

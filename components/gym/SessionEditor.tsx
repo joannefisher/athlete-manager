@@ -6,12 +6,12 @@
 // owner filter, and a "Copy session…" action. Every mutation here pushes an
 // inverse action onto the shared undo stack (GymUndoContext) right after it
 // succeeds. Reused both as the desktop split-pane's right column and as the
-// full-screen mobile destination — see GymRoot.tsx.
+// full-screen mobile destination — see GymUI2Root.tsx.
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { ArrowLeft, Check, CheckSquare, Copy, Edit2, GripVertical, Link2, Loader2, Plus, RefreshCw, StickyNote, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Check, Copy, Edit2, GripVertical, Link2, Loader2, Plus, RefreshCw, StickyNote, Trash2, X } from 'lucide-react';
 import type { GymAthlete as Athlete } from './types';
-import type { GymExercise, GymExerciseGroup, GymSession, GymSessionGroup, GymSessionItem, GymSessionItemDraft } from './types';
+import type { GymConditioningExercise, GymExercise, GymExerciseGroup, GymRunningExercise, GymSession, GymSessionGroup, GymSessionItem, GymSessionItemDraft } from './types';
 import {
   fetchAthleteSessionsForDateRange,
   getOrCreateSession,
@@ -21,6 +21,10 @@ import {
   setSessionItemsSuperset,
   createExercise,
   searchExercises,
+  createConditioningExercise,
+  searchConditioningExercises,
+  createRunningExercise,
+  searchRunningExercises,
   itemToDraft,
 } from './gymApi';
 import { applySupersetDrop, groupBySuperset, zoneForOffset, type DropZone } from './supersetDnd';
@@ -39,6 +43,8 @@ const emptyDraft: GymSessionItemDraft = {
   isPrimary: false,
   side: 'both',
   noteText: null,
+  conditioningExerciseId: null,
+  runningExerciseId: null,
   distanceValue: null,
   distanceUnit: null,
   timerLabel: null,
@@ -57,6 +63,8 @@ export const SessionEditor = ({
   canEdit,
   exerciseGroups,
   exercises,
+  conditioningExercises,
+  runningExercises,
   athletes,
   sessionGroups,
   onExercisesChanged,
@@ -70,6 +78,8 @@ export const SessionEditor = ({
   canEdit: boolean;
   exerciseGroups: GymExerciseGroup[];
   exercises: GymExercise[];
+  conditioningExercises: GymConditioningExercise[];
+  runningExercises: GymRunningExercise[];
   athletes: Athlete[];
   sessionGroups: GymSessionGroup[];
   onExercisesChanged: () => void;
@@ -96,6 +106,9 @@ export const SessionEditor = ({
   // for entry ergonomics — each keystroke recombines them into that one field.
   const [timerMinutes, setTimerMinutes] = useState<number | null>(null);
   const [timerSeconds, setTimerSeconds] = useState<number | null>(null);
+  // Distance (metres) entered only while creating a brand-new Running-list
+  // entry — the picked/created entry's own distance is what actually saves.
+  const [newRunningDistance, setNewRunningDistance] = useState('');
 
   const [ownerFilter, setOwnerFilter] = useState<string>('all');
   // Superset drag-and-drop — see supersetDnd.ts. draggedIds holds either one
@@ -107,9 +120,11 @@ export const SessionEditor = ({
   const [dropTarget, setDropTarget] = useState<{ id: string; zone: DropZone } | null>(null);
   const [showCopyModal, setShowCopyModal] = useState(false);
 
-  // Select mode — multi-select items directly in the list (rather than only
-  // inside the Copy modal), so the same selection drives both Copy and Delete.
-  const [selectMode, setSelectMode] = useState(false);
+  // Multi-select items directly in the list (rather than only inside the Copy
+  // modal), so the same selection drives both Copy and Delete — always
+  // available (no separate "Select" mode to switch into first). Whenever a
+  // session (re)loads, every item starts pre-selected, same as clicking the
+  // old "Select" button used to do.
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
 
   // Focus jumps straight to Sets right after an exercise is picked/created,
@@ -123,6 +138,7 @@ export const SessionEditor = ({
       const found = sessions[0] || null;
       setSession(found);
       setItems(found?.items || []);
+      setSelectedItemIds(new Set((found?.items || []).map(i => i.id)));
     } catch (err) {
       console.error('[SessionEditor] failed to load session', err);
     } finally {
@@ -151,6 +167,7 @@ export const SessionEditor = ({
     setRightDraft({ sets: null, reps: null, load: null, loadKg: null, tempo: null });
     setTimerMinutes(null);
     setTimerSeconds(null);
+    setNewRunningDistance('');
   };
 
   /** Recombine the Minutes/Seconds inputs into draft.durationSeconds. */
@@ -162,6 +179,8 @@ export const SessionEditor = ({
   };
 
   const matches = searchExercises(exercises, exerciseQuery);
+  const conditioningMatches = searchConditioningExercises(conditioningExercises, exerciseQuery);
+  const runningMatches = searchRunningExercises(runningExercises, exerciseQuery);
 
   const handlePickExercise = (ex: GymExercise) => {
     setDraft(d => ({ ...d, exerciseId: ex.id, exerciseName: ex.name }));
@@ -194,10 +213,68 @@ export const SessionEditor = ({
     }
   };
 
+  const handlePickConditioningExercise = (ex: GymConditioningExercise) => {
+    setDraft(d => ({ ...d, conditioningExerciseId: ex.id, conditioningExerciseName: ex.name }));
+    setExerciseQuery(ex.name);
+    setShowPicker(false);
+    setTimeout(() => setsInputRef.current?.focus(), 0);
+  };
+
+  const handleCreateConditioningExercise = async () => {
+    if (!exerciseQuery.trim()) return;
+    setCreatingExercise(true);
+    setCreateExerciseError(null);
+    try {
+      const created = await createConditioningExercise(clubId, exerciseQuery.trim(), userId);
+      onExercisesChanged();
+      setDraft(d => ({ ...d, conditioningExerciseId: created.id, conditioningExerciseName: created.name }));
+      setAddingNewExercise(false);
+      setShowPicker(false);
+      setTimeout(() => setsInputRef.current?.focus(), 0);
+    } catch (err: any) {
+      if (err?.code === '23505') {
+        setCreateExerciseError('A conditioning exercise with this name already exists.');
+      } else {
+        setCreateExerciseError(err?.message || 'Failed to create this exercise — please try again.');
+      }
+    } finally {
+      setCreatingExercise(false);
+    }
+  };
+
+  const handlePickRunningExercise = (ex: GymRunningExercise) => {
+    setDraft(d => ({ ...d, runningExerciseId: ex.id, runningExerciseName: ex.name, runningExerciseDistanceMeters: ex.distanceMeters }));
+    setExerciseQuery(ex.name);
+    setShowPicker(false);
+  };
+
+  const handleCreateRunningExercise = async () => {
+    const distance = Number(newRunningDistance);
+    if (!exerciseQuery.trim() || !newRunningDistance || !(distance > 0)) return;
+    setCreatingExercise(true);
+    setCreateExerciseError(null);
+    try {
+      const created = await createRunningExercise(clubId, exerciseQuery.trim(), distance, userId);
+      onExercisesChanged();
+      setDraft(d => ({ ...d, runningExerciseId: created.id, runningExerciseName: created.name, runningExerciseDistanceMeters: created.distanceMeters }));
+      setAddingNewExercise(false);
+      setShowPicker(false);
+      setNewRunningDistance('');
+    } catch (err: any) {
+      if (err?.code === '23505') {
+        setCreateExerciseError('A running exercise with this name already exists.');
+      } else {
+        setCreateExerciseError(err?.message || 'Failed to create this exercise — please try again.');
+      }
+    } finally {
+      setCreatingExercise(false);
+    }
+  };
+
   const handleStartEdit = (item: GymSessionItem) => {
     setDraft({ ...itemToDraft(item), id: item.id });
     setEditingSortOrder(item.sortOrder);
-    setExerciseQuery(item.exerciseName || '');
+    setExerciseQuery(item.exerciseName || item.conditioningExerciseName || item.runningExerciseName || '');
     setShowPicker(false);
     setAddingNewExercise(false);
     setSplitSide(false);
@@ -213,14 +290,15 @@ export const SessionEditor = ({
   const exerciseGroupIdForDraft = (d: GymSessionItemDraft) => exercises.find(e => e.id === d.exerciseId)?.exerciseGroupId || null;
 
   const handleAddItem = async () => {
-    if ((draft.itemType === 'exercise' || draft.itemType === 'conditioning') && !draft.exerciseId) return;
+    if (draft.itemType === 'exercise' && !draft.exerciseId) return;
+    if (draft.itemType === 'conditioning' && !draft.conditioningExerciseId) return;
+    if (draft.itemType === 'running' && !draft.runningExerciseId) return;
     if (draft.itemType === 'note' && !draft.noteText?.trim()) return;
-    if (draft.itemType === 'running' && draft.distanceValue == null) return;
     if (draft.itemType === 'timer' && (!draft.timerLabel?.trim() || draft.durationSeconds == null)) return;
     setSaving(true);
     try {
       const s = await ensureSession();
-      const exerciseGroupId = draft.itemType === 'exercise' || draft.itemType === 'conditioning' ? exerciseGroupIdForDraft(draft) : null;
+      const exerciseGroupId = draft.itemType === 'exercise' ? exerciseGroupIdForDraft(draft) : null;
 
       if (!draft.id && draft.itemType === 'exercise' && splitSide) {
         // New split entry — save two independent items, Left then Right.
@@ -252,8 +330,7 @@ export const SessionEditor = ({
           label: `Undo edit to "${previousItem.exerciseName || previousItem.noteText || 'item'}"`,
           run: async () => {
             const oldDraft: GymSessionItemDraft = { ...itemToDraft(previousItem), id: previousItem.id };
-            const restoredGroupId =
-              previousItem.itemType === 'exercise' || previousItem.itemType === 'conditioning' ? exerciseGroupIdForDraft(oldDraft) : null;
+            const restoredGroupId = previousItem.itemType === 'exercise' ? exerciseGroupIdForDraft(oldDraft) : null;
             const restored = await saveSessionItem(sessionId, athleteId, oldDraft, restoredGroupId, previousItem.sortOrder, userId);
             setItems(prev => prev.map(i => (i.id === restored.id ? restored : i)));
           },
@@ -290,7 +367,7 @@ export const SessionEditor = ({
         label: `Restore "${item.exerciseName || item.noteText || 'item'}"`,
         run: async () => {
           const oldDraft = itemToDraft(item);
-          const restoredGroupId = item.itemType === 'exercise' || item.itemType === 'conditioning' ? exerciseGroupIdForDraft(oldDraft) : null;
+          const restoredGroupId = item.itemType === 'exercise' ? exerciseGroupIdForDraft(oldDraft) : null;
           const restored = await saveSessionItem(sessionId, athleteId, oldDraft, restoredGroupId, item.sortOrder, userId);
           setItems(prev => [...prev, restored].sort((a, b) => a.sortOrder - b.sortOrder));
         },
@@ -316,7 +393,6 @@ export const SessionEditor = ({
     for (const id of ids) await deleteSessionItem(id);
     setItems(prev => prev.filter(i => !idSet.has(i.id)));
     setSelectedItemIds(new Set());
-    setSelectMode(false);
     if (draft.id && idSet.has(draft.id)) resetDraft();
 
     if (sessionId && toDelete.length > 0) {
@@ -326,7 +402,7 @@ export const SessionEditor = ({
           const idMap = new Map<string, string>();
           for (const item of toDelete) {
             const oldDraft = itemToDraft(item);
-            const restoredGroupId = item.itemType === 'exercise' || item.itemType === 'conditioning' ? exerciseGroupIdForDraft(oldDraft) : null;
+            const restoredGroupId = item.itemType === 'exercise' ? exerciseGroupIdForDraft(oldDraft) : null;
             const restored = await saveSessionItem(sessionId, athleteId, oldDraft, restoredGroupId, item.sortOrder, userId);
             idMap.set(item.id, restored.id);
             setItems(prev => [...prev, restored].sort((a, b) => a.sortOrder - b.sortOrder));
@@ -442,17 +518,17 @@ export const SessionEditor = ({
     setRightDraft({ sets: null, reps: null, load: null, loadKg: null, tempo: null });
     setTimerMinutes(null);
     setTimerSeconds(null);
+    setNewRunningDistance('');
   };
-
-  const isExerciseLike = draft.itemType === 'exercise' || draft.itemType === 'conditioning';
 
   // Mirrors handleAddItem's own validation gate, kept in sync with it so the
   // Save/Add button's disabled state never lags behind what would actually
   // be rejected on submit.
   const isDraftValid =
-    isExerciseLike ? !!draft.exerciseId :
+    draft.itemType === 'exercise' ? !!draft.exerciseId :
+    draft.itemType === 'conditioning' ? !!draft.conditioningExerciseId :
+    draft.itemType === 'running' ? !!draft.runningExerciseId :
     draft.itemType === 'note' ? !!draft.noteText?.trim() :
-    draft.itemType === 'running' ? draft.distanceValue != null :
     draft.itemType === 'timer' ? !!draft.timerLabel?.trim() && draft.durationSeconds != null :
     false;
 
@@ -485,7 +561,7 @@ export const SessionEditor = ({
         )}
       </div>
 
-      {isExerciseLike ? (
+      {draft.itemType === 'exercise' ? (
         <div className="space-y-2.5">
           <div className="relative">
             <label className="block text-[11px] font-medium text-slate-500 mb-1">Exercise</label>
@@ -649,36 +725,161 @@ export const SessionEditor = ({
             </label>
           )}
         </div>
-      ) : draft.itemType === 'running' ? (
+      ) : draft.itemType === 'conditioning' ? (
         <div className="space-y-2.5">
-          <div className="grid grid-cols-3 gap-2">
-            <div className="col-span-2">
-              <label className="block text-[11px] font-medium text-slate-500 mb-1">Distance</label>
-              <input
-                ref={setsInputRef}
-                type="number"
-                min={0}
-                value={draft.distanceValue ?? ''}
-                onChange={e => setDraft(d => ({ ...d, distanceValue: e.target.value ? Number(e.target.value) : null }))}
-                placeholder="e.g. 400"
-                className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] font-medium text-slate-500 mb-1">Unit</label>
-              <div className="flex bg-slate-100 rounded-md p-0.5 text-[12px] font-medium">
-                {(['m', 'km'] as const).map(u => (
-                  <button
-                    key={u}
-                    onClick={() => setDraft(d => ({ ...d, distanceUnit: u }))}
-                    className={`flex-1 py-1.5 rounded ${draft.distanceUnit === u || (!draft.distanceUnit && u === 'm') ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}
-                  >
-                    {u}
-                  </button>
-                ))}
+          <div className="relative">
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">Conditioning exercise</label>
+            {draft.conditioningExerciseId ? (
+              <div className="flex items-center justify-between gap-2 h-9 px-3 border border-emerald-200 rounded-lg bg-emerald-50">
+                <span className="flex items-center gap-1.5 text-[13px] font-medium text-emerald-800 truncate">
+                  <Check className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                  {draft.conditioningExerciseName}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraft(d => ({ ...d, conditioningExerciseId: null, conditioningExerciseName: undefined }));
+                    setExerciseQuery('');
+                    setShowPicker(true);
+                  }}
+                  className="text-[11px] font-medium text-emerald-700 hover:underline flex-shrink-0"
+                >
+                  Change
+                </button>
+              </div>
+            ) : (
+              <>
+                <input
+                  ref={setsInputRef}
+                  value={exerciseQuery}
+                  onChange={e => { setExerciseQuery(e.target.value); setShowPicker(true); }}
+                  onFocus={() => setShowPicker(true)}
+                  placeholder="Start typing…"
+                  className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                {showPicker && exerciseQuery.trim() && (
+                  <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+                    {conditioningMatches.map(ex => (
+                      <button key={ex.id} onClick={() => handlePickConditioningExercise(ex)} className="w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50">
+                        {ex.name}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setAddingNewExercise(true)}
+                      className="w-full text-left px-3 py-2 text-[13px] text-blue-600 hover:bg-blue-50 flex items-center gap-1 border-t border-slate-100"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add "{exerciseQuery.trim()}" as new conditioning exercise
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {addingNewExercise && (
+            <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 space-y-2">
+              {createExerciseError && <p className="text-[11px] text-red-600">{createExerciseError}</p>}
+              <div className="flex gap-2">
+                <button onClick={handleCreateConditioningExercise} disabled={creatingExercise} className="h-8 px-3 text-[12px] font-medium bg-slate-900 text-white rounded disabled:opacity-40 flex items-center gap-1.5">
+                  {creatingExercise && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {creatingExercise ? 'Creating…' : 'Create conditioning exercise'}
+                </button>
+                <button onClick={() => { setAddingNewExercise(false); setCreateExerciseError(null); }} disabled={creatingExercise} className="h-8 px-3 text-[12px] text-slate-500 disabled:opacity-40">Cancel</button>
               </div>
             </div>
+          )}
+
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Sets</label>
+              <input type="number" min={0} value={draft.sets ?? ''} onChange={e => setDraft(d => ({ ...d, sets: e.target.value ? Number(e.target.value) : null }))}
+                className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Reps</label>
+              <input type="number" min={0} value={draft.reps ?? ''} onChange={e => setDraft(d => ({ ...d, reps: e.target.value ? Number(e.target.value) : null }))}
+                className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Intensity (%)</label>
+              <input type="number" min={0} max={100} value={draft.load ?? ''} onChange={e => setDraft(d => ({ ...d, load: e.target.value || null }))} placeholder="e.g. 75"
+                className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
           </div>
+        </div>
+      ) : draft.itemType === 'running' ? (
+        <div className="space-y-2.5">
+          <div className="relative">
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">Running exercise</label>
+            {draft.runningExerciseId ? (
+              <div className="flex items-center justify-between gap-2 h-9 px-3 border border-emerald-200 rounded-lg bg-emerald-50">
+                <span className="flex items-center gap-1.5 text-[13px] font-medium text-emerald-800 truncate">
+                  <Check className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                  {draft.runningExerciseName}
+                  <span className="text-emerald-600/70 font-normal">— {draft.runningExerciseDistanceMeters}m</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraft(d => ({ ...d, runningExerciseId: null, runningExerciseName: undefined, runningExerciseDistanceMeters: undefined }));
+                    setExerciseQuery('');
+                    setShowPicker(true);
+                  }}
+                  className="text-[11px] font-medium text-emerald-700 hover:underline flex-shrink-0"
+                >
+                  Change
+                </button>
+              </div>
+            ) : (
+              <>
+                <input
+                  value={exerciseQuery}
+                  onChange={e => { setExerciseQuery(e.target.value); setShowPicker(true); }}
+                  onFocus={() => setShowPicker(true)}
+                  placeholder="Start typing…"
+                  className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                {showPicker && exerciseQuery.trim() && (
+                  <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+                    {runningMatches.map(ex => (
+                      <button key={ex.id} onClick={() => handlePickRunningExercise(ex)} className="w-full text-left px-3 py-2 text-[13px] hover:bg-slate-50 flex justify-between">
+                        <span>{ex.name}</span>
+                        <span className="text-[11px] text-slate-400">{ex.distanceMeters}m</span>
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setAddingNewExercise(true)}
+                      className="w-full text-left px-3 py-2 text-[13px] text-blue-600 hover:bg-blue-50 flex items-center gap-1 border-t border-slate-100"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add "{exerciseQuery.trim()}" as new running exercise
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {addingNewExercise && (
+            <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 space-y-2">
+              <label className="block text-[11px] font-medium text-slate-500">Distance (metres)</label>
+              <input
+                type="number"
+                min={0}
+                value={newRunningDistance}
+                onChange={e => setNewRunningDistance(e.target.value)}
+                placeholder="e.g. 400"
+                className="w-full h-8 px-2 text-[13px] border border-slate-200 rounded bg-white"
+              />
+              {createExerciseError && <p className="text-[11px] text-red-600">{createExerciseError}</p>}
+              <div className="flex gap-2">
+                <button onClick={handleCreateRunningExercise} disabled={!newRunningDistance || creatingExercise} className="h-8 px-3 text-[12px] font-medium bg-slate-900 text-white rounded disabled:opacity-40 flex items-center gap-1.5">
+                  {creatingExercise && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {creatingExercise ? 'Creating…' : 'Create running exercise'}
+                </button>
+                <button onClick={() => { setAddingNewExercise(false); setCreateExerciseError(null); setNewRunningDistance(''); }} disabled={creatingExercise} className="h-8 px-3 text-[12px] text-slate-500 disabled:opacity-40">Cancel</button>
+              </div>
+            </div>
+          )}
         </div>
       ) : draft.itemType === 'timer' ? (
         <div className="space-y-2.5">
@@ -758,7 +959,7 @@ export const SessionEditor = ({
     return (
       <div
         key={item.id}
-        draggable={canReorder && !selectMode}
+        draggable={canReorder}
         onDragStart={() => handleDragStartItem(item.id)}
         onDragOver={e => handleDragOverRow(e, item.id)}
         onDrop={() => handleDropOnRow(item.id)}
@@ -766,22 +967,19 @@ export const SessionEditor = ({
         className={[
           'px-3.5 py-3 flex items-start gap-2 relative',
           draggedIds?.includes(item.id) ? 'opacity-40' : '',
-          selectMode && selectedItemIds.has(item.id) ? 'bg-blue-50/60' : '',
+          selectedItemIds.has(item.id) ? 'bg-blue-50/60' : '',
           zone === 'merge' ? 'bg-indigo-100/70' : '',
         ].filter(Boolean).join(' ')}
       >
         {zone === 'before' && <div className="absolute left-0 right-0 top-0 h-0.5 bg-blue-500 z-10" />}
         {zone === 'after' && <div className="absolute left-0 right-0 bottom-0 h-0.5 bg-blue-500 z-10" />}
-        {selectMode ? (
-          <input
-            type="checkbox"
-            checked={selectedItemIds.has(item.id)}
-            onChange={() => toggleSelected(item.id)}
-            className="w-3.5 h-3.5 mt-1 flex-shrink-0"
-          />
-        ) : (
-          canReorder && <GripVertical className="w-3.5 h-3.5 text-slate-300 mt-1 flex-shrink-0 cursor-grab" />
-        )}
+        <input
+          type="checkbox"
+          checked={selectedItemIds.has(item.id)}
+          onChange={() => toggleSelected(item.id)}
+          className="w-3.5 h-3.5 mt-1 flex-shrink-0"
+        />
+        {canReorder && <GripVertical className="w-3.5 h-3.5 text-slate-300 mt-1 flex-shrink-0 cursor-grab" />}
         <span className="w-5 h-5 rounded-full bg-slate-100 text-slate-400 text-[10px] font-semibold flex items-center justify-center flex-shrink-0 mt-0.5">
           {idx + 1}
         </span>
@@ -824,7 +1022,7 @@ export const SessionEditor = ({
           )}
           {item.createdByName && <p className="text-[10px] text-slate-300 mt-1">added by {item.createdByName}</p>}
         </div>
-        {canEdit && !selectMode && (
+        {canEdit && (
           <div className="flex items-center gap-0.5 flex-shrink-0">
             <button onClick={() => handleStartEdit(item)} className="p-1 rounded hover:bg-slate-100 text-slate-300 hover:text-slate-600">
               <Edit2 className="w-3.5 h-3.5" />
@@ -854,22 +1052,12 @@ export const SessionEditor = ({
         </button>
       )}
 
-      <div className="bg-white rounded-lg border border-slate-200 p-4 mb-3 flex items-start justify-between gap-3">
-        <div>
-          <p className="text-[15px] font-bold text-slate-900">{athlete?.name || 'Session'}</p>
-          <p className="text-[12px] text-slate-400">{fmtDate(date)}</p>
-        </div>
-        {canEdit && items.length > 0 && !selectMode && (
-          <button
-            onClick={() => { setSelectMode(true); setSelectedItemIds(new Set(items.map(i => i.id))); }}
-            className="h-8 px-2.5 flex items-center gap-1.5 text-[12px] font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 whitespace-nowrap"
-          >
-            <CheckSquare className="w-3.5 h-3.5" /> Select
-          </button>
-        )}
+      <div className="bg-white rounded-lg border border-slate-200 p-4 mb-3">
+        <p className="text-[15px] font-bold text-slate-900">{athlete?.name || 'Session'}</p>
+        <p className="text-[12px] text-slate-400">{fmtDate(date)}</p>
       </div>
 
-      {selectMode && (
+      {canEdit && items.length > 0 && (
         <div className="bg-white rounded-lg border border-slate-200 p-2.5 mb-3 flex items-center gap-2 flex-wrap">
           <span className="text-[12px] font-medium text-slate-600">{selectedItemIds.size} selected</span>
           <button onClick={() => setSelectedItemIds(new Set(items.map(i => i.id)))} className="text-[11px] text-blue-600 hover:underline">All</button>
@@ -890,7 +1078,8 @@ export const SessionEditor = ({
             <Trash2 className="w-3.5 h-3.5" /> Delete selected
           </button>
           <button
-            onClick={() => { setSelectMode(false); setSelectedItemIds(new Set()); }}
+            onClick={() => setSelectedItemIds(new Set())}
+            title="Clear selection"
             className="p-1.5 rounded hover:bg-slate-100 text-slate-400"
           >
             <X className="w-4 h-4" />

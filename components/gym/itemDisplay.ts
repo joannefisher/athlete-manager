@@ -6,7 +6,7 @@
 // instead of a bare item count, and by SessionItemChip/CopySessionModal/
 // PlayerGymView for the same purpose elsewhere.
 
-import type { GymDistanceUnit, GymSessionItemSide, GymSessionItemType } from './types';
+import type { GymSessionItemSide, GymSessionItemType } from './types';
 
 // Shape shared by GymSessionItem (an athlete's own item), GymGroupPlanItem (a
 // group plan's item, no effectiveExerciseName/wasSwapped of its own), and
@@ -17,14 +17,15 @@ interface ItemLike {
   noteText: string | null;
   exerciseName?: string;
   effectiveExerciseName?: string;
+  conditioningExerciseName?: string;
+  runningExerciseName?: string;
+  runningExerciseDistanceMeters?: number | null;
   side: GymSessionItemSide;
   sets: number | null;
   reps: number | null;
   load: string | null;
   loadKg: number | null;
   tempo: string | null;
-  distanceValue: number | null;
-  distanceUnit: GymDistanceUnit | null;
   timerLabel: string | null;
   durationSeconds: number | null;
 }
@@ -46,17 +47,25 @@ export function formatDuration(totalSeconds: number | null): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-/** "4 sets × 8 reps × 60kg × @75% × tempo 3-1-1-0" for Exercise/Conditioning; distance for Running; duration for Timer. Same format SessionEditor uses for its own rows. */
+/** "4 sets × 8 reps × 60kg × @75% × tempo 3-1-1-0" for Exercise (Conditioning drops the kg/tempo parts); distance for Running; duration for Timer. Same format SessionEditor uses for its own rows. */
 export function itemMetaText(item: ItemLike): string {
   if (item.itemType === 'note') return '';
   if (item.itemType === 'running') {
-    if (item.distanceValue == null) return 'No distance set';
-    return `${item.distanceValue}${item.distanceUnit || 'm'}`;
+    return item.runningExerciseDistanceMeters != null ? `${item.runningExerciseDistanceMeters}m` : 'No distance set';
   }
   if (item.itemType === 'timer') {
     return item.durationSeconds != null ? formatDuration(item.durationSeconds) : 'No duration set';
   }
-  // exercise or conditioning
+  if (item.itemType === 'conditioning') {
+    // No Load(kg)/Tempo for Conditioning — removed round 16.
+    const parts = [
+      item.sets ? `${item.sets} sets` : null,
+      item.reps ? `${item.reps} reps` : null,
+      item.load ? `@ ${formatIntensityPct(item.load)}` : null,
+    ].filter(Boolean);
+    return parts.join(' × ') || 'No sets/reps set';
+  }
+  // exercise
   const parts = [
     item.sets ? `${item.sets} sets` : null,
     item.reps ? `${item.reps} reps` : null,
@@ -69,9 +78,10 @@ export function itemMetaText(item: ItemLike): string {
 
 export function itemDisplayName(item: ItemLike): string {
   if (item.itemType === 'note') return item.noteText || 'Note';
-  if (item.itemType === 'running') return 'Running';
+  if (item.itemType === 'running') return item.runningExerciseName || 'Running';
   if (item.itemType === 'timer') return item.timerLabel || 'Timer';
-  // exercise or conditioning
+  if (item.itemType === 'conditioning') return item.conditioningExerciseName || 'Conditioning';
+  // exercise
   return item.effectiveExerciseName || item.exerciseName || 'Exercise';
 }
 
@@ -83,7 +93,11 @@ export function itemCompactLabel(item: ItemLike): string {
     const meta = itemMetaText(item);
     return meta ? `${name} ${meta}` : name;
   }
-  // exercise or conditioning
+  if (item.itemType === 'conditioning') {
+    const meta = itemMetaText(item);
+    return meta && meta !== 'No sets/reps set' ? `${name} ${meta}` : name;
+  }
+  // exercise
   const sideTag = item.side !== 'both' ? ` (${item.side === 'left' ? 'L' : 'R'})` : '';
   const setsReps = item.sets && item.reps ? `${item.sets}×${item.reps}` : item.sets ? `${item.sets} sets` : item.reps ? `${item.reps} reps` : '';
   const loadBits = [item.loadKg != null ? `${item.loadKg}kg` : null, item.load ? formatIntensityPct(item.load) : null].filter(Boolean).join('/');

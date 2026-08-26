@@ -8,14 +8,15 @@
 // mode, "This Week" in Calendar mode), and three tabs: Day (the existing
 // SessionEditor, full width, no split-pane), Calendar (month grid with full
 // session detail inline, plus add-without-leaving-Calendar), and Compare
-// (same-weekday-past-weeks, or players-on-a-date). UI 1 (GymRoot) is
-// untouched — this is a sibling, switched to from Gym.tsx's UI 1/UI 2 toggle.
+// (same-weekday-past-weeks, or players-on-a-date). This is now the only Gym
+// sessions UI — the earlier "UI 1" (GymRoot/StaffDailyView/StaffWeeklyView/
+// GroupSessionEditor) was removed once this UI was preferred (round 16).
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import type { Role } from '../AthleteManager';
-import type { GymAthlete as Athlete, GymExerciseGroup, GymExercise, GymSessionGroup, GymTeamPosition } from './types';
-import { fetchExerciseGroups, fetchExercises, fetchSessionGroups } from './gymApi';
+import type { GymAthlete as Athlete, GymConditioningExercise, GymExerciseGroup, GymExercise, GymRunningExercise, GymSessionGroup, GymTeamPosition } from './types';
+import { fetchExerciseGroups, fetchExercises, fetchConditioningExercises, fetchRunningExercises, fetchSessionGroups } from './gymApi';
 import { todayIso } from './WeekStrip';
 import { gymCanEdit } from './permissions';
 import { SessionEditor } from './SessionEditor';
@@ -49,6 +50,8 @@ export const GymUI2Root = ({
   const [loading, setLoading] = useState(true);
   const [exerciseGroups, setExerciseGroups] = useState<GymExerciseGroup[]>([]);
   const [exercises, setExercises] = useState<GymExercise[]>([]);
+  const [conditioningExercises, setConditioningExercises] = useState<GymConditioningExercise[]>([]);
+  const [runningExercises, setRunningExercises] = useState<GymRunningExercise[]>([]);
   const [sessionGroups, setSessionGroups] = useState<GymSessionGroup[]>([]);
 
   const [scopeMode, setScopeMode] = useState<ScopeMode>('player');
@@ -72,13 +75,17 @@ export const GymUI2Root = ({
   const loadReferenceData = useCallback(async () => {
     if (!hasLoadedReferenceDataOnce.current) setLoading(true);
     try {
-      const [groups, exs, sGroups] = await Promise.all([
+      const [groups, exs, condExs, runExs, sGroups] = await Promise.all([
         fetchExerciseGroups(clubId),
         fetchExercises(clubId),
+        fetchConditioningExercises(clubId),
+        fetchRunningExercises(clubId),
         fetchSessionGroups(clubId),
       ]);
       setExerciseGroups(groups);
       setExercises(exs);
+      setConditioningExercises(condExs);
+      setRunningExercises(runExs);
       setSessionGroups(sGroups);
     } catch (err) {
       console.error('[GymUI2Root] failed to load reference data', err);
@@ -285,6 +292,8 @@ export const GymUI2Root = ({
             athletes={athletes}
             exerciseGroups={exerciseGroups}
             exercises={exercises}
+            conditioningExercises={conditioningExercises}
+            runningExercises={runningExercises}
             onExercisesChanged={loadReferenceData}
           />
         ) : tab === 'calendar' ? (
@@ -298,6 +307,8 @@ export const GymUI2Root = ({
             athletes={athletes}
             exerciseGroups={exerciseGroups}
             exercises={exercises}
+            conditioningExercises={conditioningExercises}
+            runningExercises={runningExercises}
             onExercisesChanged={loadReferenceData}
             selectedDate={date}
             onSelectDate={setDate}
@@ -328,6 +339,8 @@ export const GymUI2Root = ({
           canEdit={canEditGym}
           exerciseGroups={exerciseGroups}
           exercises={exercises}
+          conditioningExercises={conditioningExercises}
+          runningExercises={runningExercises}
           athletes={athletes}
           sessionGroups={sessionGroups}
           onExercisesChanged={loadReferenceData}
@@ -343,6 +356,8 @@ export const GymUI2Root = ({
           canEdit={canEditGym}
           exerciseGroups={exerciseGroups}
           exercises={exercises}
+          conditioningExercises={conditioningExercises}
+          runningExercises={runningExercises}
           athletes={athletes}
           sessionGroups={sessionGroups}
           onExercisesChanged={loadReferenceData}

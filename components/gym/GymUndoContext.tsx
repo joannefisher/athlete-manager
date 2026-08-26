@@ -2,10 +2,10 @@
 // Single-level "undo the last action" for the Gym module. Deliberately not a
 // full history stack — pushUndo() replaces whatever was pending, matching
 // "undoes the last action" literally. Mounted once in Gym.tsx around the
-// staff UI; each mutating action in SessionEditor/StaffDailyView/
-// CopySessionModal/GroupSessionEditor captures what it needs to reverse
-// itself (the old value, or the ids it just created) and calls pushUndo
-// right after its own save succeeds.
+// staff UI; each mutating action in SessionEditor/CopySessionModal/
+// GroupPlanEditor/GymUI2Calendar/GymUI2GroupCalendar captures what it needs
+// to reverse itself (the old value, or the ids it just created) and calls
+// pushUndo right after its own save succeeds.
 
 import React, { createContext, useCallback, useContext, useState } from 'react';
 import { Loader2, RotateCcw } from 'lucide-react';
