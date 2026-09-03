@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Calendar, Plus, Trash2, Edit2, Check, X, ChevronLeft, Loader2, ArrowLeft, Upload } from 'lucide-react';
+import { Calendar, Plus, Trash2, Edit2, Check, X, ChevronLeft, Loader2, ArrowLeft, Upload, Settings } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import type { Role } from './AthleteManager';
 
@@ -466,7 +466,7 @@ export function MainSchedule({ role, clubId, authUser, onBack }: {
           <button onClick={() => setPage('setup')}
             className={`w-full text-left px-2.5 py-2 rounded flex items-center gap-2.5 text-[13px] transition-colors relative ${page === 'setup' ? 'bg-white/[0.08] text-slate-100 font-medium' : 'text-white/40 hover:bg-white/[0.06] hover:text-white/70'}`}>
             {page === 'setup' && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-violet-400 rounded-r" />}
-            <Calendar className="w-3.5 h-3.5 shrink-0" />Setup
+            <Settings className="w-3.5 h-3.5 shrink-0" />Setup
           </button>
         </nav>
         <div className="p-3 border-t border-white/[0.06]">
@@ -479,7 +479,8 @@ export function MainSchedule({ role, clubId, authUser, onBack }: {
               </select>
             </div>
           )}
-          <p className="text-[10px] text-white/25 uppercase tracking-wider mb-1">Signed in as</p>
+          {/* Wording/classes aligned to match Gym's sidebar footer exactly (2026-09-03 fix — was "Signed in as" with different type-scale classes). */}
+          <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] mb-1">Signed in</p>
           <p className="text-[11px] text-white/50 truncate">{authUser?.email}</p>
           <p className="text-[10px] text-white/30 mt-0.5">{effectiveRole}</p>
           {/* Was missing entirely (2026-09-03 audit fix) — the only one of the

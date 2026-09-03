@@ -260,7 +260,7 @@ export const GroupPicker = ({
   };
 
   return (
-    <div className="max-w-md md:max-w-2xl mx-auto p-4 md:p-6">
+    <div className="w-full p-4 md:p-6 space-y-3">
       <button onClick={handleBack} className="flex items-center gap-1 text-[13px] text-slate-500 hover:text-slate-700 mb-3">
         <ArrowLeft className="w-3.5 h-3.5" /> Back
       </button>
@@ -271,6 +271,9 @@ export const GroupPicker = ({
         {sessionGroups.map(group => {
           const isEditing = editingGroupId === group.id;
           const memberCount = isEditing ? editingMembers.length : group.memberAthleteIds.length;
+          const members = isEditing
+            ? []
+            : group.memberAthleteIds.map(id => athletes.find(a => a.id === id)).filter(Boolean) as Athlete[];
           return (
             <div key={group.id} className="p-3.5">
               <div className="flex items-start justify-between">
@@ -286,6 +289,19 @@ export const GroupPicker = ({
               >
                 {isEditing ? 'Done' : `${memberCount} player${memberCount !== 1 ? 's' : ''}`}
               </button>
+              {/* Read-only member names, shown with the extra width a full-page
+                  layout provides (2026-09-03 fix — previously only the count
+                  was visible unless you clicked into edit mode). Replaced by
+                  the interactive/editable pill grid below while editing. */}
+              {!isEditing && members.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {members.map(a => (
+                    <span key={a.id} className="text-[11px] px-2 py-1 rounded-full border bg-slate-50 text-slate-500 border-slate-200">
+                      {a.name}
+                    </span>
+                  ))}
+                </div>
+              )}
               {isEditing && (
                 <div className="mt-2">
                   <PositionFilterRow

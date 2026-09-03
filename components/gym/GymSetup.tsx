@@ -93,11 +93,13 @@ export const GymSetup = ({
   useEffect(() => { load(); }, [load]);
 
   // Mirrors TrainingPlanner.tsx's own "Add" button exactly — a blank insert,
-  // then straight into the full profile editor.
+  // then straight into the full profile editor. club_id is set explicitly
+  // (2026-09-03 bug fix) — see athleteAdmin.ts's saveGymAthlete comment for
+  // why this was the cause of "Add Player doesn't allow player creation."
   const handleAddPlayer = async () => {
     const { data, error } = await supabase
       .from('athletes')
-      .insert({ name: 'New Athlete', status: 'Available', notes: '', is_public: false, avatar: 'NA', photo_url: '' })
+      .insert({ name: 'New Athlete', status: 'Available', notes: '', is_public: false, avatar: 'NA', photo_url: '', club_id: clubId })
       .select()
       .single();
     if (!error && data) {
@@ -110,7 +112,7 @@ export const GymSetup = ({
     for (const row of rows) {
       const { data, error } = await supabase
         .from('athletes')
-        .insert({ name: row.name, status: row.status, notes: row.notes, is_public: row.isPublic, avatar: row.avatar, photo_url: '' })
+        .insert({ name: row.name, status: row.status, notes: row.notes, is_public: row.isPublic, avatar: row.avatar, photo_url: '', club_id: clubId })
         .select()
         .single();
       if (!error && data && row.positionNumbers.length > 0) {
@@ -161,7 +163,7 @@ export const GymSetup = ({
         onSave={async (athlete: GymFullAthlete) => {
           setSaving(true);
           try {
-            await saveGymAthlete(athlete);
+            await saveGymAthlete(athlete, clubId);
             await load();
           } finally {
             setSaving(false);

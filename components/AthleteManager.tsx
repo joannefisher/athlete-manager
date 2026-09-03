@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Target, Zap, Calendar, Loader2, X, AlertCircle, Check, Plus, Trash2, Link, Dumbbell, Edit2, UserCog } from 'lucide-react';
+import { Target, Zap, Calendar, Loader2, X, AlertCircle, Check, Plus, Trash2, Link, Dumbbell, Edit2, UserCog, ArrowLeft, ChevronLeft, Search } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { TrainingPlanner } from './TrainingPlanner';
 import { MainSchedule } from './MainSchedule';
@@ -173,6 +173,9 @@ const UserManagementPanel = ({ clubId, currentUserId }: { clubId: string; curren
   const [savingDetails, setSavingDetails] = useState(false);
   const [resettingPasswordId, setResettingPasswordId] = useState<string | null>(null);
   const [rowMessage, setRowMessage] = useState<{ id: string; text: string; error?: boolean } | null>(null);
+  // Search existing users by name (2026-09-03 fix) — the user list had no
+  // filter of any kind before this.
+  const [userSearchQuery, setUserSearchQuery] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -317,9 +320,26 @@ const UserManagementPanel = ({ clubId, currentUserId }: { clubId: string; curren
 
   if (loading) return <div className="flex justify-center py-12"><Loader2 className="w-5 h-5 animate-spin text-slate-400" /></div>;
 
+  const filteredUsers = userSearchQuery.trim()
+    ? users.filter(u => (u.full_name || '').toLowerCase().includes(userSearchQuery.trim().toLowerCase()))
+    : users;
+
   return (
     <div className="max-w-2xl mx-auto space-y-3">
-      {users.map(user => {
+      <div className="relative">
+        <Search className="w-3.5 h-3.5 text-slate-300 absolute left-3 top-1/2 -translate-y-1/2" />
+        <input
+          type="text"
+          placeholder="Search users by name…"
+          value={userSearchQuery}
+          onChange={e => setUserSearchQuery(e.target.value)}
+          className="w-full h-9 pl-9 pr-3 text-[12px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+        />
+      </div>
+      {filteredUsers.length === 0 && (
+        <p className="text-[12px] text-slate-400 text-center py-4">No users match "{userSearchQuery}".</p>
+      )}
+      {filteredUsers.map(user => {
         const linkedAthlete = athletes.find((a: any) => a.id === user.linked_athlete_id);
         const isActive = user.is_active !== false;
         const isEditingDetails = editingDetailsUserId === user.id;
@@ -412,25 +432,36 @@ const UserManagementPanel = ({ clubId, currentUserId }: { clubId: string; curren
         <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-3">Create new user</p>
         <div className="space-y-2">
           <div className="flex gap-2">
-            <input type="text" placeholder="First name" value={inviteFirstName} onChange={e => { setInviteFirstName(e.target.value); setInviteError(''); }}
-              className="flex-1 h-9 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
-            <input type="text" placeholder="Last name" value={inviteLastName} onChange={e => { setInviteLastName(e.target.value); setInviteError(''); }}
-              className="flex-1 h-9 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+            <div className="flex-1">
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">First name <span className="text-red-500">*</span></label>
+              <input type="text" value={inviteFirstName} onChange={e => { setInviteFirstName(e.target.value); setInviteError(''); }}
+                className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+            </div>
+            <div className="flex-1">
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Last name <span className="text-red-500">*</span></label>
+              <input type="text" value={inviteLastName} onChange={e => { setInviteLastName(e.target.value); setInviteError(''); }}
+                className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+            </div>
           </div>
-          <input type="email" placeholder="Email address" value={inviteEmail} onChange={e => { setInviteEmail(e.target.value); setInviteError(''); }}
-            className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
-          <div className="flex gap-2">
-            <select value={inviteRole} onChange={e => setInviteRole(e.target.value as Role)}
-              className="flex-1 h-9 px-2 text-[12px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
-              {ALL_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-            </select>
+          <div>
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">Email address <span className="text-red-500">*</span></label>
+            <input type="email" value={inviteEmail} onChange={e => { setInviteEmail(e.target.value); setInviteError(''); }}
+              className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          </div>
+          <div className="flex gap-2 items-end">
+            <div className="flex-1">
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Role <span className="text-red-500">*</span></label>
+              <select value={inviteRole} onChange={e => setInviteRole(e.target.value as Role)}
+                className="w-full h-9 px-2 text-[12px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+                {ALL_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </div>
             <button onClick={inviteUser} disabled={inviting}
               className="h-9 px-4 bg-slate-900 text-white rounded-lg text-[12px] font-medium hover:bg-slate-700 disabled:opacity-50 flex items-center gap-1.5">
               {inviting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
               {inviting ? 'Sending…' : 'Invite'}
             </button>
           </div>
-          <p className="text-[11px] text-slate-400">First name, last name, email and role are all required. New users are created in this club only and can't be moved to another club.</p>
           {inviteError && <p className="text-[11px] text-red-600 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{inviteError}</p>}
           {inviteSuccess && <p className="text-[11px] text-green-600 flex items-center gap-1"><Check className="w-3 h-3" />{inviteSuccess}</p>}
         </div>
@@ -490,34 +521,73 @@ const LandingPage = ({ role, onOpenApp }: {
 // ── User Management App shell ────────────────────────────────────────────────
 // Promoted from a header pill on the landing page to its own app tile
 // (2026-09-03), per Joanne's answer ("User Management will become a 5th
-// App"). Same minimal single-page shell pattern as Main Schedule — no
-// sub-navigation needed since the panel is the whole app.
-const UserManagementApp = ({ clubId, currentUserId, onBack }: { clubId: string; currentUserId: string; onBack: () => void }) => {
+// App"). Originally given its own minimal header-bar layout; rebuilt
+// (2026-09-03, same-day follow-up) onto the exact same dark-sidebar shell
+// every other app uses (Gym.tsx is the reference — see its own shell, lines
+// ~123-166) per Joanne's explicit ask to align "All Apps"/"Signed in"
+// structure across every app. No "View as" here — this app is already
+// Admin-only, so role-impersonation doesn't apply. The nav list has exactly
+// one, always-active "Users" entry — there's only one page, but this keeps
+// the same visual grammar (a Menu label + highlighted current item) the
+// other sidebars use rather than omitting the nav section entirely.
+const UserManagementApp = ({ clubId, currentUserId, authUser, onBack }: { clubId: string; currentUserId: string; authUser: any; onBack: () => void }) => {
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="bg-slate-900 px-6 py-4 sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button onClick={onBack} className="flex items-center gap-1.5 text-white/40 hover:text-white/70 text-[12px] transition-colors">
-              <Target className="w-3 h-3" />All Apps
-            </button>
-            <div className="w-px h-4 bg-white/10" />
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded bg-slate-700 flex items-center justify-center">
-                <UserCog className="w-3.5 h-3.5 text-white" strokeWidth={2.5} />
-              </div>
-              <span className="text-[14px] font-semibold text-white tracking-tight">User Management</span>
+    <div className="min-h-screen bg-slate-50 flex">
+      <aside className="hidden md:flex flex-col w-52 shrink-0 bg-slate-900 sticky top-0 h-screen">
+        <div className="px-4 py-5 border-b border-white/[0.06]">
+          <button onClick={onBack} className="flex items-center gap-1.5 text-white/40 hover:text-white/70 text-[11px] mb-3 transition-colors">
+            <ArrowLeft className="w-3 h-3" />All Apps
+          </button>
+          <div className="flex items-center gap-2.5">
+            <div className="w-6 h-6 rounded bg-slate-700 flex items-center justify-center shrink-0">
+              <UserCog className="w-3.5 h-3.5 text-white" strokeWidth={2.5} />
             </div>
+            <span className="text-[13px] font-semibold text-slate-100 tracking-tight">User Management</span>
           </div>
-          <button onClick={() => supabase.auth.signOut()}
-            className="h-8 px-3 text-[12px] text-white/50 hover:text-white border border-white/10 rounded-lg hover:bg-white/[0.06] transition-colors">
-            Sign out
+        </div>
+        <nav className="flex-1 p-2 pt-3 space-y-0.5">
+          <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] px-2.5 pb-2">Menu</p>
+          <div className="w-full text-left px-2.5 py-2 rounded flex items-center gap-2.5 text-[13px] relative bg-white/[0.08] text-slate-100 font-medium">
+            <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-red-400 rounded-r" />
+            <UserCog className="w-3.5 h-3.5 shrink-0" />Users
+          </div>
+        </nav>
+        <div className="p-3 border-t border-white/[0.06]">
+          <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] mb-1">Signed in</p>
+          <p className="text-[11px] text-white/50 truncate">{authUser?.email}</p>
+          <p className="text-[10px] text-white/30 mt-0.5">Admin</p>
+          <button onClick={() => supabase.auth.signOut()} className="mt-2 w-full flex items-center gap-2 px-2.5 py-1.5 text-[12px] text-white/40 hover:text-white/70 hover:bg-white/[0.06] rounded transition-colors">
+            <X className="w-3 h-3" />Sign out
           </button>
         </div>
-      </header>
-      <main className="max-w-4xl mx-auto px-6 py-10">
-        <UserManagementPanel clubId={clubId} currentUserId={currentUserId} />
-      </main>
+      </aside>
+
+      <div className="flex-1 flex flex-col min-h-screen min-w-0">
+        {/* Mobile header */}
+        <header className="md:hidden bg-white border-b border-slate-200 px-4 py-3 flex items-center gap-3 sticky top-0 z-10">
+          <button onClick={onBack} className="p-1.5 hover:bg-slate-100 rounded-lg">
+            <ChevronLeft className="w-5 h-5 text-slate-600" />
+          </button>
+          <h1 className="text-[15px] font-semibold text-slate-900 flex-1">User Management</h1>
+          <button onClick={() => supabase.auth.signOut()} className="p-1.5 hover:bg-slate-100 rounded-lg" title="Sign out">
+            <X className="w-4 h-4 text-slate-600" />
+          </button>
+        </header>
+
+        {/* Desktop page header */}
+        <div className="hidden md:flex items-center justify-between bg-white border-b border-slate-200 px-6 py-3.5">
+          <div>
+            <h2 className="text-[15px] font-semibold text-slate-900 leading-none">Users</h2>
+            <p className="text-[11px] text-slate-400 mt-1 font-light">
+              {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+            </p>
+          </div>
+        </div>
+
+        <main className="max-w-4xl mx-auto px-4 md:px-6 py-6 md:py-10 w-full">
+          <UserManagementPanel clubId={clubId} currentUserId={currentUserId} />
+        </main>
+      </div>
     </div>
   );
 };
@@ -597,7 +667,7 @@ export default function AthleteManager() {
     return <Gym role={role} clubId={clubId} authUser={authUser} onBack={() => setActiveApp(null)} />;
   if (activeApp === 'user-management')
     return role === 'Admin'
-      ? <UserManagementApp clubId={clubId} currentUserId={authUser.id} onBack={() => setActiveApp(null)} />
+      ? <UserManagementApp clubId={clubId} currentUserId={authUser.id} authUser={authUser} onBack={() => setActiveApp(null)} />
       : <LandingPage role={role} onOpenApp={setActiveApp} />;
 
   return (

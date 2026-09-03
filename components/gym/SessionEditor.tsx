@@ -634,7 +634,7 @@ export const SessionEditor = ({
                       </button>
                     ))}
                     <button
-                      onClick={() => setAddingNewExercise(true)}
+                      onClick={() => { setAddingNewExercise(true); setShowPicker(false); }}
                       className="w-full text-left px-3 py-2 text-[13px] text-blue-600 hover:bg-blue-50 flex items-center gap-1 border-t border-slate-100"
                     >
                       <Plus className="w-3.5 h-3.5" /> Add "{exerciseQuery.trim()}" as new exercise
@@ -666,7 +666,6 @@ export const SessionEditor = ({
             <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer">
               <input type="checkbox" checked={splitSide} onChange={e => setSplitSide(e.target.checked)} className="w-3.5 h-3.5" />
               Split left / right
-              <span className="text-slate-400">— separate sets/reps/load/intensity/tempo for each side</span>
             </label>
           )}
 
@@ -734,11 +733,13 @@ export const SessionEditor = ({
           )}
 
           {draft.itemType === 'exercise' && (
-            <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer">
-              <input type="checkbox" checked={draft.isPrimary} onChange={e => setDraft(d => ({ ...d, isPrimary: e.target.checked }))} className="w-3.5 h-3.5" />
-              Mark as Primary
-              <span className="text-slate-400">— may be swapped to the player's own default for this exercise's group</span>
-            </label>
+            <div>
+              <label className="flex items-center gap-2 text-[12px] text-slate-600 cursor-pointer">
+                <input type="checkbox" checked={draft.isPrimary} onChange={e => setDraft(d => ({ ...d, isPrimary: e.target.checked }))} className="w-3.5 h-3.5" />
+                Primary Exercise
+              </label>
+              <p className="text-[11px] text-slate-400 mt-1 ml-6">may be swapped to the player's own default for this exercise's group</p>
+            </div>
           )}
         </div>
       ) : draft.itemType === 'conditioning' ? (
@@ -781,7 +782,7 @@ export const SessionEditor = ({
                       </button>
                     ))}
                     <button
-                      onClick={() => setAddingNewExercise(true)}
+                      onClick={() => { setAddingNewExercise(true); setShowPicker(false); }}
                       className="w-full text-left px-3 py-2 text-[13px] text-blue-600 hover:bg-blue-50 flex items-center gap-1 border-t border-slate-100"
                     >
                       <Plus className="w-3.5 h-3.5" /> Add "{exerciseQuery.trim()}" as new conditioning exercise
@@ -864,7 +865,7 @@ export const SessionEditor = ({
                       </button>
                     ))}
                     <button
-                      onClick={() => setAddingNewExercise(true)}
+                      onClick={() => { setAddingNewExercise(true); setShowPicker(false); }}
                       className="w-full text-left px-3 py-2 text-[13px] text-blue-600 hover:bg-blue-50 flex items-center gap-1 border-t border-slate-100"
                     >
                       <Plus className="w-3.5 h-3.5" /> Add "{exerciseQuery.trim()}" as new running exercise

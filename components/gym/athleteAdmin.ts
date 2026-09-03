@@ -111,11 +111,14 @@ export async function fetchAvailabilityRecordsForGym(): Promise<GymAvailabilityR
 /**
  * Mirrors TrainingPlanner.tsx's saveAthlete exactly — same tables, same
  * insert/update + delete-then-reinsert positions/injuries shape. club_id is
- * deliberately not set on insert, same as Training Planner's own insert —
- * the athletes table fills it in automatically (confirmed: neither app's
- * insert call sets it explicitly).
+ * now set explicitly on insert (2026-09-03 bug fix) — it used to be left
+ * unset, on the assumption the athletes table filled it in automatically,
+ * but there was never any actual evidence of that, and it's exactly what
+ * caused "Add Player doesn't allow player creation" once migration 0011's
+ * stricter RLS started rejecting a null-club_id insert. See TrainingPlanner
+ * .tsx's saveAthlete for the same fix, applied there for the same reason.
  */
-export async function saveGymAthlete(athlete: GymFullAthlete): Promise<string | undefined> {
+export async function saveGymAthlete(athlete: GymFullAthlete, clubId: string): Promise<string | undefined> {
   const isNew = !athlete.id;
   const athleteData = {
     name: athlete.name,
@@ -130,7 +133,7 @@ export async function saveGymAthlete(athlete: GymFullAthlete): Promise<string | 
   let athleteId = athlete.id;
 
   if (isNew) {
-    const { data, error } = await supabase.from('athletes').insert(athleteData).select().single();
+    const { data, error } = await supabase.from('athletes').insert({ ...athleteData, club_id: clubId }).select().single();
     if (error) throw error;
     athleteId = data.id;
   } else {

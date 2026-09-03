@@ -204,7 +204,11 @@ function TrainingPlannerInner({ role: propRole, clubId: propClubId, authUser, on
         { data: defaultTeamData },
       ] = await Promise.all([
         supabase.from('team_structure').select('*').order('number'),
-        supabase.from('athletes').select('*').order('name'),
+        // Club-scoped (2026-09-03 bug fix) — this was the one core athlete
+        // fetch in the app with no query-level club_id filter at all,
+        // relying entirely on RLS. Belt-and-braces alongside the insert fix
+        // above.
+        supabase.from('athletes').select('*').eq('club_id', clubId).order('name'),
         supabase.from('athlete_positions').select('*'),
         supabase.from('athlete_injuries').select('*'),
         supabase.from('availability_records').select('athlete_id, status, note').eq('date', todayStr),
@@ -389,9 +393,19 @@ function TrainingPlannerInner({ role: propRole, clubId: propClubId, authUser, on
       let athleteId = athlete.id;
 
       if (isNew) {
+        // 2026-09-03 bug fix: club_id was never set explicitly on insert
+        // anywhere in this codebase (this call included) — it was assumed
+        // some invisible DB-side default filled it in, but there's no
+        // actual evidence of that, and it explains exactly the symptoms
+        // Joanne reported after migration 0011 tightened athletes' RLS: new
+        // players failing to insert, and existing NULL-club_id players
+        // disappearing from every club-scoped view. Setting it explicitly
+        // here (and at every other athletes-insert call site) removes the
+        // guesswork — see 0011b_athletes_club_id_repair.sql for backfilling
+        // any athlete rows already created without it.
         const { data, error } = await supabase
           .from('athletes')
-          .insert(athleteData)
+          .insert({ ...athleteData, club_id: clubId })
           .select()
           .single();
         if (error) throw error;
@@ -453,8 +467,8 @@ function TrainingPlannerInner({ role: propRole, clubId: propClubId, authUser, on
           label: `Delete ${snapshot.name}`,
           run: async () => {
             // Same insert shape as saveAthlete's isNew branch — club_id is
-            // deliberately left unset, matching every other athlete insert
-            // in this codebase (it's filled in automatically).
+            // set explicitly (2026-09-03 fix, see saveAthlete's own comment
+            // above for why).
             const { data, error } = await supabase.from('athletes').insert({
               name: snapshot.name,
               status: snapshot.status,
@@ -463,6 +477,7 @@ function TrainingPlannerInner({ role: propRole, clubId: propClubId, authUser, on
               avatar: snapshot.avatar,
               photo_url: snapshot.photo,
               default_position: snapshot.defaultPosition ?? null,
+              club_id: clubId,
             }).select().single();
             if (error) throw error;
             const newId = data.id;
@@ -993,8 +1008,18 @@ function TrainingPlannerInner({ role: propRole, clubId: propClubId, authUser, on
               </select>
             </div>
           )}
-          <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] mb-2">Signed in</p>
-          <UserInfo dark={true} />
+          {/* Inlined instead of <UserInfo dark={true} /> (2026-09-03 fix, aligning
+              with Gym's sidebar footer structure) — UserInfo's dark branch also
+              renders its own avatar + a second "View as" selector, which duplicated
+              the block above for an Admin (two "View as" dropdowns stacked). The
+              mobile slide-out menu still uses <UserInfo dark={true} /> as-is, where
+              that avatar+own-selector shape is the only one and isn't duplicated. */}
+          <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] mb-1">Signed in</p>
+          <p className="text-[11px] text-white/50 truncate">{authUser?.email}</p>
+          <p className="text-[10px] text-white/30 mt-0.5">{effectiveRole}</p>
+          <button onClick={() => supabase.auth.signOut()} className="mt-2 w-full flex items-center gap-2 px-2.5 py-1.5 text-[12px] text-white/40 hover:text-white/70 hover:bg-white/[0.06] rounded transition-colors">
+            <X className="w-3 h-3" />Sign out
+          </button>
         </div>
       </aside>
 
@@ -1064,7 +1089,7 @@ function TrainingPlannerInner({ role: propRole, clubId: propClubId, authUser, on
         {/* Page content */}
         <div className="flex-1">
           {effectivePage === 'home' && <HomePage athletes={athletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} teamStructure={teamStructure} role={effectiveRole} />}
-          {effectivePage === 'availability' && <AvailabilityPage athletes={athletes} setAthletes={setAthletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} selectedDate={selectedDate} setSelectedDate={setSelectedDate} availabilityRecords={availabilityRecords} teamStructure={teamStructure} onSave={saveAvailability} onSaveEOD={saveEndOfDayReport} saving={saving} fetchAllData={fetchAllData} role={effectiveRole} />}
+          {effectivePage === 'availability' && <AvailabilityPage athletes={athletes} setAthletes={setAthletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} selectedDate={selectedDate} setSelectedDate={setSelectedDate} availabilityRecords={availabilityRecords} teamStructure={teamStructure} onSave={saveAvailability} onSaveEOD={saveEndOfDayReport} saving={saving} fetchAllData={fetchAllData} role={effectiveRole} clubId={clubId} />}
           {effectivePage === 'session-plan' && <SessionPlanPage drills={drills} setDrills={setDrills} weekDrills={weekDrills} setWeekDrills={setWeekDrills} navigateTo={navigateTo} athletes={athletes} drillTypes={drillTypes} teamStructure={teamStructure} defaultTeam={defaultTeam} onSaveDefaultTeam={saveDefaultTeam} selectedDate={selectedDate} onDateChange={handleDateChange} onSaveSessionPlan={saveSessionPlan} saving={saving} getWeekDates={getWeekDates} role={effectiveRole} onMarkDirty={setSessionPlanDirty} />}
           {effectivePage === 'add-drill' && <AddDrillPage drills={drills} setDrills={setDrills} weekDrills={weekDrills} setWeekDrills={setWeekDrills} selectedDate={selectedDate} navigateTo={navigateTo} drillTypes={drillTypes} defaultTeam={defaultTeam} athletes={athletes} teamStructure={teamStructure} />}
           {effectivePage === 'athlete-profile' && <AthleteProfilePage athletes={athletes} athleteId={selectedAthleteId} navigateTo={navigateTo} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} onSave={saveAthlete} onDelete={deleteAthlete} saving={saving} role={effectiveRole} />}
@@ -1715,7 +1740,7 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
   );
 };
 
-const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthleteId, selectedDate, setSelectedDate, availabilityRecords, teamStructure, onSave, onSaveEOD, saving, fetchAllData, role }: any) => {
+const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthleteId, selectedDate, setSelectedDate, availabilityRecords, teamStructure, onSave, onSaveEOD, saving, fetchAllData, role, clubId }: any) => {
   const typedAthletes: Athlete[] = athletes;
   const typedTeamStructure: TeamPosition[] = teamStructure;
   const [searchTerm, setSearchTerm] = useState('');
@@ -1848,7 +1873,7 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
             </button>
           )}
           {isAdmin(role) && (
-            <button onClick={async () => { const { data, error } = await supabase.from('athletes').insert({ name: 'New Athlete', status: 'Available', notes: '', is_public: false, avatar: 'NA', photo_url: '' }).select().single(); if (!error && data) { await fetchAllData(); setSelectedAthleteId(data.id); navigateTo('athlete-profile'); } }}
+            <button onClick={async () => { const { data, error } = await supabase.from('athletes').insert({ name: 'New Athlete', status: 'Available', notes: '', is_public: false, avatar: 'NA', photo_url: '', club_id: clubId }).select().single(); if (!error && data) { await fetchAllData(); setSelectedAthleteId(data.id); navigateTo('athlete-profile'); } }}
               className="h-8 px-3 bg-slate-900 text-white rounded text-[12px] font-medium flex items-center gap-1.5 hover:bg-slate-700 transition-colors">
               <Plus className="w-3.5 h-3.5" />Add
             </button>
@@ -1890,7 +1915,7 @@ const AvailabilityPage = ({ athletes, setAthletes, navigateTo, setSelectedAthlet
             for (const row of rows) {
               const { data, error } = await supabase
                 .from('athletes')
-                .insert({ name: row.name, status: row.status, notes: row.notes, is_public: row.isPublic, avatar: row.avatar, photo_url: '' })
+                .insert({ name: row.name, status: row.status, notes: row.notes, is_public: row.isPublic, avatar: row.avatar, photo_url: '', club_id: clubId })
                 .select()
                 .single();
               if (!error && data && row.positionNumbers.length > 0) {

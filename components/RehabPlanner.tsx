@@ -1142,7 +1142,7 @@ export function RehabPlanner({ role, clubId, authUser, onBack }: { role: Role; c
         </nav>
         <div className="p-3 border-t border-white/[0.06]">
           {role === 'Admin' && (
-            <div className="mb-2.5">
+            <div className="mb-3">
               <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] mb-1">View as</p>
               <select value={viewingAs} onChange={e => setViewingAs(e.target.value as Role)}
                 className="w-full h-7 px-2 text-[11px] rounded bg-white/[0.06] text-white/70 border border-white/10 focus:outline-none">
