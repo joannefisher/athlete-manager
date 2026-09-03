@@ -156,7 +156,7 @@ const StatusSelect = ({ value, onChange, className = '' }: { value: string; onCh
 // to live in a wrapper OUTSIDE this component, since a component can't
 // consume a context it renders itself — see the exported TrainingPlanner
 // wrapper below.
-function TrainingPlannerInner({ role: propRole, clubId: propClubId, authUser, onBack }: { role: Role; clubId: string; authUser: any; onBack: () => void }) {
+function TrainingPlannerInner({ role: propRole, clubId: propClubId, authUser, displayName, onBack }: { role: Role; clubId: string; authUser: any; displayName?: string | null; onBack: () => void }) {
   const [currentPage, setCurrentPage] = useState('home');
   const [showMenu, setShowMenu] = useState(false);
   const [selectedAthleteId, setSelectedAthleteId] = useState<string | null>(null);
@@ -917,7 +917,8 @@ function TrainingPlannerInner({ role: propRole, clubId: propClubId, authUser, on
 
   const UserInfo = ({ dark = false }: { dark?: boolean }) => {
     const email = authUser?.email || '';
-    const initials = email ? email[0].toUpperCase() : '?';
+    const shownName = displayName || email;
+    const initials = shownName ? shownName[0].toUpperCase() : '?';
     if (!dark) {
       return (
         <div className="flex items-center gap-2">
@@ -934,7 +935,7 @@ function TrainingPlannerInner({ role: propRole, clubId: propClubId, authUser, on
         <div className="flex items-center gap-2 px-2.5 py-1.5">
           <div className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-[11px] font-semibold text-white shrink-0">{initials}</div>
           <div className="min-w-0">
-            <p className="text-[11px] text-white/70 truncate">{email}</p>
+            <p className="text-[11px] text-white/70 truncate">{shownName}</p>
             <p className="text-[10px] text-white/40">{effectiveRole}</p>
           </div>
         </div>
@@ -1016,7 +1017,7 @@ function TrainingPlannerInner({ role: propRole, clubId: propClubId, authUser, on
               mobile slide-out menu still uses <UserInfo dark={true} /> as-is, where
               that avatar+own-selector shape is the only one and isn't duplicated. */}
           <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] mb-1">Signed in</p>
-          <p className="text-[11px] text-white/50 truncate">{authUser?.email}</p>
+          <p className="text-[11px] text-white/50 truncate">{displayName || authUser?.email}</p>
           <p className="text-[10px] text-white/30 mt-0.5">{effectiveRole}</p>
           <button onClick={() => supabase.auth.signOut()} className="mt-2 w-full flex items-center gap-2 px-2.5 py-1.5 text-[12px] text-white/40 hover:text-white/70 hover:bg-white/[0.06] rounded transition-colors">
             <X className="w-3 h-3" />Sign out
@@ -1138,7 +1139,7 @@ function TrainingPlannerInner({ role: propRole, clubId: propClubId, authUser, on
   );
 };
 
-export function TrainingPlanner(props: { role: Role; clubId: string; authUser: any; onBack: () => void }) {
+export function TrainingPlanner(props: { role: Role; clubId: string; authUser: any; displayName?: string | null; onBack: () => void }) {
   return (
     <GymUndoProvider>
       <TrainingPlannerInner {...props} />

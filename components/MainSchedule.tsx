@@ -434,8 +434,8 @@ const FixtureRow = ({ fixture, canEdit, isEditing, editForm, onEditStart, onEdit
 };
 
 // ── Main Schedule Shell ───────────────────────────────────────────────────────
-export function MainSchedule({ role, clubId, authUser, onBack }: {
-  role: Role; clubId: string; authUser: any; onBack: () => void;
+export function MainSchedule({ role, clubId, authUser, displayName, onBack }: {
+  role: Role; clubId: string; authUser: any; displayName?: string | null; onBack: () => void;
 }) {
   // Admin can impersonate other roles to preview their view — same pattern
   // as TrainingPlanner/RehabPlanner/Gym's "View as" (2026-09-03).
@@ -481,7 +481,7 @@ export function MainSchedule({ role, clubId, authUser, onBack }: {
           )}
           {/* Wording/classes aligned to match Gym's sidebar footer exactly (2026-09-03 fix — was "Signed in as" with different type-scale classes). */}
           <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] mb-1">Signed in</p>
-          <p className="text-[11px] text-white/50 truncate">{authUser?.email}</p>
+          <p className="text-[11px] text-white/50 truncate">{displayName || authUser?.email}</p>
           <p className="text-[10px] text-white/30 mt-0.5">{effectiveRole}</p>
           {/* Was missing entirely (2026-09-03 audit fix) — the only one of the
               four apps where a desktop user had no way to sign out without

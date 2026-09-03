@@ -662,6 +662,26 @@ const SESSION_BASE_SELECT =
   'id, club_id, athlete_id, date, source_group_id, created_by, created_at, updated_by, updated_at, ' +
   'status, current_item_id, current_set_number, started_at, paused_at, completed_at';
 
+// Fallback for a database migration 0015 hasn't been run against yet — the
+// columns above simply don't exist there. 2026-09-04: this bit ordinary,
+// pre-existing session creation/loading (used by every role, not just the
+// new Player runner) the moment 0015's columns were added to the select
+// above, for any club whose migration hadn't caught up yet — Postgres
+// rejects the whole query, not just the unknown columns, so "add a session"
+// silently threw and never saved. The four functions below now try the full
+// select first and, ONLY on an "unknown column" error, retry once with this
+// legacy 9-column select — mapSessionBase already defaults every 0015 field
+// via `??` for exactly this case. fetchSessionWithResults is NOT covered by
+// this fallback: it's new-only (the Player runner itself), so it's fine —
+// expected, even — for it to require the migration.
+const SESSION_BASE_SELECT_LEGACY =
+  'id, club_id, athlete_id, date, source_group_id, created_by, created_at, updated_by, updated_at';
+
+/** Postgres 42703 = undefined_column. Also matches on message text since some Supabase error shapes don't carry `code`. */
+function isMissingSessionColumnsError(error: any): boolean {
+  return error?.code === '42703' || /column .* does not exist/i.test(error?.message || '');
+}
+
 function mapSessionBase(r: any): Omit<GymSession, 'items' | 'results'> {
   return {
     id: r.id,
@@ -673,12 +693,15 @@ function mapSessionBase(r: any): Omit<GymSession, 'items' | 'results'> {
     createdAt: r.created_at,
     updatedBy: r.updated_by,
     updatedAt: r.updated_at,
-    status: r.status,
-    currentItemId: r.current_item_id,
-    currentSetNumber: r.current_set_number,
-    startedAt: r.started_at,
-    pausedAt: r.paused_at,
-    completedAt: r.completed_at,
+    // ?? (not a plain assignment) is what makes this safe against the
+    // SESSION_BASE_SELECT_LEGACY fallback above — those six keys are simply
+    // absent from `r` in that case, not null, but ?? treats both the same.
+    status: r.status ?? 'planned',
+    currentItemId: r.current_item_id ?? null,
+    currentSetNumber: r.current_set_number ?? null,
+    startedAt: r.started_at ?? null,
+    pausedAt: r.paused_at ?? null,
+    completedAt: r.completed_at ?? null,
   };
 }
 
@@ -690,15 +713,21 @@ const SESSION_ITEM_SELECT =
   'running_exercise:gym_running_exercises(name, distance_meters), ' +
   'creator:user_profiles!gym_session_items_created_by_fkey(full_name)';
 
+/** Shared by the three list-fetch functions below — runs `applyFilters` against the full (0015) select, falling back to the legacy select once on an unknown-column error. See SESSION_BASE_SELECT_LEGACY's comment above for why this exists. */
+async function fetchSessionRows(applyFilters: (select: string) => PromiseLike<{ data: any; error: any }>): Promise<any[]> {
+  let { data, error } = await applyFilters(`${SESSION_BASE_SELECT}, gym_session_items(${SESSION_ITEM_SELECT})`);
+  if (error && isMissingSessionColumnsError(error)) {
+    console.warn('[gymApi] gym_sessions is missing migration 0015\'s columns (status/current_item_id/...) — falling back to the pre-0015 select. Run supabase/migrations/0015_player_session_runner.sql to enable the Player session runner.');
+    ({ data, error } = await applyFilters(`${SESSION_BASE_SELECT_LEGACY}, gym_session_items(${SESSION_ITEM_SELECT})`));
+  }
+  if (error) throw error;
+  return data || [];
+}
+
 /** All sessions (+ items) for a club on a given date — used by the staff daily view. */
 export async function fetchSessionsForDate(clubId: string, date: string): Promise<GymSession[]> {
-  const { data, error } = await supabase
-    .from('gym_sessions')
-    .select(`${SESSION_BASE_SELECT}, gym_session_items(${SESSION_ITEM_SELECT})`)
-    .eq('club_id', clubId)
-    .eq('date', date);
-  if (error) throw error;
-  return (data || []).map((r: any) => ({
+  const rows = await fetchSessionRows(select => supabase.from('gym_sessions').select(select).eq('club_id', clubId).eq('date', date));
+  return rows.map((r: any) => ({
     ...mapSessionBase(r),
     items: (r.gym_session_items || []).sort((a: any, b: any) => a.sort_order - b.sort_order).map(mapSessionItem),
   }));
@@ -707,13 +736,8 @@ export async function fetchSessionsForDate(clubId: string, date: string): Promis
 /** All sessions (+ items) for a club across a set of dates — used by the weekly views. */
 export async function fetchSessionsForDateRange(clubId: string, dates: string[]): Promise<GymSession[]> {
   if (dates.length === 0) return [];
-  const { data, error } = await supabase
-    .from('gym_sessions')
-    .select(`${SESSION_BASE_SELECT}, gym_session_items(${SESSION_ITEM_SELECT})`)
-    .eq('club_id', clubId)
-    .in('date', dates);
-  if (error) throw error;
-  return (data || []).map((r: any) => ({
+  const rows = await fetchSessionRows(select => supabase.from('gym_sessions').select(select).eq('club_id', clubId).in('date', dates));
+  return rows.map((r: any) => ({
     ...mapSessionBase(r),
     items: (r.gym_session_items || []).sort((a: any, b: any) => a.sort_order - b.sort_order).map(mapSessionItem),
   }));
@@ -722,13 +746,8 @@ export async function fetchSessionsForDateRange(clubId: string, dates: string[])
 /** A single athlete's sessions across a set of dates — used by the Player view. */
 export async function fetchAthleteSessionsForDateRange(athleteId: string, dates: string[]): Promise<GymSession[]> {
   if (dates.length === 0) return [];
-  const { data, error } = await supabase
-    .from('gym_sessions')
-    .select(`${SESSION_BASE_SELECT}, gym_session_items(${SESSION_ITEM_SELECT})`)
-    .eq('athlete_id', athleteId)
-    .in('date', dates);
-  if (error) throw error;
-  return (data || []).map((r: any) => ({
+  const rows = await fetchSessionRows(select => supabase.from('gym_sessions').select(select).eq('athlete_id', athleteId).in('date', dates));
+  return rows.map((r: any) => ({
     ...mapSessionBase(r),
     items: (r.gym_session_items || []).sort((a: any, b: any) => a.sort_order - b.sort_order).map(mapSessionItem),
   }));
@@ -767,20 +786,39 @@ export async function getOrCreateSession(
   createdBy: string,
   sourceGroupId: string | null = null
 ): Promise<GymSession> {
-  const { data: existing, error: findErr } = await supabase
+  let usingLegacySelect = false;
+  let { data: existing, error: findErr } = await supabase
     .from('gym_sessions')
     .select(SESSION_BASE_SELECT)
     .eq('athlete_id', athleteId)
     .eq('date', date)
     .maybeSingle();
+  if (findErr && isMissingSessionColumnsError(findErr)) {
+    console.warn('[gymApi] gym_sessions is missing migration 0015\'s columns — falling back to the pre-0015 select. Run supabase/migrations/0015_player_session_runner.sql to enable the Player session runner.');
+    usingLegacySelect = true;
+    ({ data: existing, error: findErr } = await supabase
+      .from('gym_sessions')
+      .select(SESSION_BASE_SELECT_LEGACY)
+      .eq('athlete_id', athleteId)
+      .eq('date', date)
+      .maybeSingle());
+  }
   if (findErr) throw findErr;
   if (existing) return mapSessionBase(existing);
 
-  const { data, error } = await supabase
+  const insertSelect = usingLegacySelect ? SESSION_BASE_SELECT_LEGACY : SESSION_BASE_SELECT;
+  let { data, error } = await supabase
     .from('gym_sessions')
     .insert({ club_id: clubId, athlete_id: athleteId, date, created_by: createdBy, source_group_id: sourceGroupId })
-    .select(SESSION_BASE_SELECT)
+    .select(insertSelect)
     .single();
+  if (error && !usingLegacySelect && isMissingSessionColumnsError(error)) {
+    ({ data, error } = await supabase
+      .from('gym_sessions')
+      .insert({ club_id: clubId, athlete_id: athleteId, date, created_by: createdBy, source_group_id: sourceGroupId })
+      .select(SESSION_BASE_SELECT_LEGACY)
+      .single());
+  }
   if (error) throw error;
   return mapSessionBase(data);
 }

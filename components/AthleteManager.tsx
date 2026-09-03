@@ -537,7 +537,7 @@ const LandingPage = ({ role, onOpenApp }: {
 // one, always-active "Users" entry — there's only one page, but this keeps
 // the same visual grammar (a Menu label + highlighted current item) the
 // other sidebars use rather than omitting the nav section entirely.
-const UserManagementApp = ({ clubId, currentUserId, authUser, onBack }: { clubId: string; currentUserId: string; authUser: any; onBack: () => void }) => {
+const UserManagementApp = ({ clubId, currentUserId, authUser, displayName, onBack }: { clubId: string; currentUserId: string; authUser: any; displayName: string | null; onBack: () => void }) => {
   return (
     <div className="min-h-screen bg-slate-50 flex">
       <aside className="hidden md:flex flex-col w-52 shrink-0 bg-slate-900 sticky top-0 h-screen">
@@ -561,7 +561,7 @@ const UserManagementApp = ({ clubId, currentUserId, authUser, onBack }: { clubId
         </nav>
         <div className="p-3 border-t border-white/[0.06]">
           <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] mb-1">Signed in</p>
-          <p className="text-[11px] text-white/50 truncate">{authUser?.email}</p>
+          <p className="text-[11px] text-white/50 truncate">{displayName || authUser?.email}</p>
           <p className="text-[10px] text-white/30 mt-0.5">Admin</p>
           <button onClick={() => supabase.auth.signOut()} className="mt-2 w-full flex items-center gap-2 px-2.5 py-1.5 text-[12px] text-white/40 hover:text-white/70 hover:bg-white/[0.06] rounded transition-colors">
             <X className="w-3 h-3" />Sign out
@@ -607,12 +607,19 @@ export default function AthleteManager() {
   const [role, setRole] = useState<Role>('Player');
   const [clubId, setClubId] = useState<string | null>(null);
   const [activeApp, setActiveApp] = useState<string | null>(null);
+  // Fetched once here (not separately by each child app) and passed down —
+  // "Signed in" everywhere should show the person's name, not their email
+  // (2026-09-03). Prefers first_name+last_name (the columns User Management
+  // edits directly); falls back to full_name for any row those weren't set
+  // on for some reason; null if the profile has no name at all, in which
+  // case every "Signed in" display falls back to authUser.email itself.
+  const [displayName, setDisplayName] = useState<string | null>(null);
 
   const loadProfile = async (userId: string) => {
     for (let attempt = 0; attempt < 3; attempt++) {
       const { data, error } = await supabase
         .from('user_profiles')
-        .select('club_id, role, full_name, linked_athlete_id')
+        .select('club_id, role, full_name, first_name, last_name, linked_athlete_id')
         .eq('id', userId)
         .maybeSingle();
       if (data) {
@@ -623,6 +630,7 @@ export default function AthleteManager() {
           ? (data.role.trim() as Role) : 'Player';
         setRole(loadedRole);
         setClubId(data.club_id);
+        setDisplayName([data.first_name, data.last_name].filter(Boolean).join(' ').trim() || data.full_name || null);
         // If this role only has one app available, skip straight to it
         // instead of showing a landing page with a single tile. (Players
         // used to be hardcoded to Rehab Planner here — now that they can
@@ -665,16 +673,16 @@ export default function AthleteManager() {
 
   // Route to child apps
   if (activeApp === 'training-planner')
-    return <TrainingPlanner role={role} clubId={clubId} authUser={authUser} onBack={() => setActiveApp(null)} />;
+    return <TrainingPlanner role={role} clubId={clubId} authUser={authUser} displayName={displayName} onBack={() => setActiveApp(null)} />;
   if (activeApp === 'main-schedule')
-    return <MainSchedule role={role} clubId={clubId} authUser={authUser} onBack={() => setActiveApp(null)} />;
+    return <MainSchedule role={role} clubId={clubId} authUser={authUser} displayName={displayName} onBack={() => setActiveApp(null)} />;
   if (activeApp === 'rehab-planner')
-    return <RehabPlanner role={role} clubId={clubId} authUser={authUser} onBack={() => setActiveApp(null)} />;
+    return <RehabPlanner role={role} clubId={clubId} authUser={authUser} displayName={displayName} onBack={() => setActiveApp(null)} />;
   if (activeApp === 'gym')
-    return <Gym role={role} clubId={clubId} authUser={authUser} onBack={() => setActiveApp(null)} />;
+    return <Gym role={role} clubId={clubId} authUser={authUser} displayName={displayName} onBack={() => setActiveApp(null)} />;
   if (activeApp === 'user-management')
     return role === 'Admin'
-      ? <UserManagementApp clubId={clubId} currentUserId={authUser.id} authUser={authUser} onBack={() => setActiveApp(null)} />
+      ? <UserManagementApp clubId={clubId} currentUserId={authUser.id} authUser={authUser} displayName={displayName} onBack={() => setActiveApp(null)} />
       : <LandingPage role={role} onOpenApp={setActiveApp} />;
 
   return (

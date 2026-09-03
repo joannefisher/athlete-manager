@@ -419,6 +419,8 @@ export interface RunnerStep {
   /** Non-null iff item.supersetId is set — drives the "Superset A · 1 of 2" badge. */
   superset: {
     supersetId: string;
+    /** "A"/"B"/"C"… — this session's supersets in order of first appearance, from supersetDnd.ts's labelSupersetGroups(). The single source of truth for lettering; don't re-derive it from `position` (that's this item's position within its OWN group, unrelated to which letter the group itself gets). */
+    label: string;
     /** 1-based position of this item within its superset group (stable across rounds — not the round number). */
     position: number;
     size: number;

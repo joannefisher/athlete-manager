@@ -24,7 +24,7 @@ import type { GymAthlete, GymSessionGroup, GymTeamPosition } from './gym/types';
 
 type Page = 'sessions' | 'groups' | 'exercise-bank' | 'defaults' | 'setup';
 
-export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: string; authUser: any; onBack: () => void }) {
+export function Gym({ role, clubId, authUser, displayName, onBack }: { role: Role; clubId: string; authUser: any; displayName?: string | null; onBack: () => void }) {
   // Admin can impersonate other roles to preview their view — same pattern
   // as TrainingPlanner/RehabPlanner's "View as" (2026-09-03).
   const [viewingAs, setViewingAs] = useState<Role>(role);
@@ -39,22 +39,24 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
   const [teamStructure, setTeamStructure] = useState<GymTeamPosition[]>([]);
   const [sessionGroups, setSessionGroups] = useState<GymSessionGroup[]>([]);
   const [linkedAthleteId, setLinkedAthleteId] = useState<string | null>(null);
-  const [myName, setMyName] = useState<string | null>(null);
   const [page, setPage] = useState<Page>('sessions');
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       setLoading(true);
-      const { data: profile, error: profileErr } = await supabase
-        .from('user_profiles')
-        .select('full_name, linked_athlete_id')
-        .eq('id', authUser.id)
-        .maybeSingle();
-      if (profileErr) console.error('[Gym] failed to load profile', profileErr.message);
-      if (!cancelled) setMyName(profile?.full_name ?? null);
-
       if (isPlayer) {
+        // displayName (the person's name) comes down from AthleteManager.tsx's
+        // own profile fetch now — the only thing still needed here for a
+        // Player is their linked_athlete_id, which that root fetch doesn't
+        // carry (2026-09-03: this used to also re-fetch full_name here, just
+        // for this sidebar's "Signed in" line — dropped as a duplicate fetch).
+        const { data: profile, error: profileErr } = await supabase
+          .from('user_profiles')
+          .select('linked_athlete_id')
+          .eq('id', authUser.id)
+          .maybeSingle();
+        if (profileErr) console.error('[Gym] failed to load profile', profileErr.message);
         if (!cancelled) setLinkedAthleteId(profile?.linked_athlete_id ?? null);
       } else {
         // Position data (team_structure/athlete_positions) mirrors TrainingPlanner.tsx's own
@@ -167,7 +169,7 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
             </div>
           )}
           <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] mb-1">Signed in</p>
-          <p className="text-[11px] text-white/50 truncate">{myName || authUser?.email}</p>
+          <p className="text-[11px] text-white/50 truncate">{displayName || authUser?.email}</p>
           <p className="text-[10px] text-white/30 mt-0.5">{effectiveRole}</p>
           <button onClick={() => supabase.auth.signOut()} className="mt-2 w-full flex items-center gap-2 px-2.5 py-1.5 text-[12px] text-white/40 hover:text-white/70 hover:bg-white/[0.06] rounded transition-colors">
             <X className="w-3 h-3" />Sign out

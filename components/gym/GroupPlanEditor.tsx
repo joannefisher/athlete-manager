@@ -30,7 +30,7 @@ import {
   groupPlanItemToDraft,
   fetchFrequentSectionNames,
 } from './gymApi';
-import { applySupersetDrop, groupBySuperset, zoneForOffset, type DropZone } from './supersetDnd';
+import { applySupersetDrop, groupBySuperset, labelSupersetGroups, zoneForOffset, type DropZone } from './supersetDnd';
 import { itemDisplayName, itemMetaText } from './itemDisplay';
 import { useGymUndo } from './GymUndoContext';
 import { GroupTypePicker, emptyGroupTypeAttrs, isGroupTypeAttrsComplete, type GroupTypeAttrs } from './GroupTypePicker';
@@ -995,34 +995,40 @@ export const GroupPlanEditor = ({
 
       <div className="bg-white rounded-lg border border-slate-200 divide-y divide-slate-100 overflow-hidden">
         <div className="px-3.5 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Group plan ({items.length})</div>
-        {groupBySuperset(items).map(group => {
-          if (!group.supersetId) return renderPlanItemRow(group.members[0]);
-          return (
-            <div key={group.supersetId} className="bg-indigo-50/40">
-              <div
-                draggable={canEdit}
-                onDragStart={() => handleDragStartGroup(group.members.map(m => m.id))}
-                onDragEnd={handleDragEndAny}
-                className="flex items-center gap-1.5 px-3.5 pt-2 pb-1 cursor-grab select-none"
-              >
-                {canEdit && <GripVertical className="w-3.5 h-3.5 text-indigo-300 flex-shrink-0" />}
-                <Link2 className="w-3 h-3 text-indigo-400 flex-shrink-0" />
-                <span className="text-[10px] font-semibold text-indigo-500 uppercase tracking-wide">Superset</span>
-                {canEdit && (
-                  <button
-                    onClick={() => handleUngroup(group.members.map(m => m.id))}
-                    className="ml-auto text-[10px] text-indigo-400 hover:text-indigo-700 hover:underline"
-                  >
-                    Ungroup
-                  </button>
-                )}
+        {(() => {
+          // Computed once per render, off the full item list — same source of
+          // truth as SessionEditor.tsx/PlayerSessionRunner.tsx/the session
+          // summary, so a given superset shows the same letter everywhere.
+          const supersetLabels = labelSupersetGroups(items);
+          return groupBySuperset(items).map(group => {
+            if (!group.supersetId) return renderPlanItemRow(group.members[0]);
+            return (
+              <div key={group.supersetId} className="bg-indigo-50/40">
+                <div
+                  draggable={canEdit}
+                  onDragStart={() => handleDragStartGroup(group.members.map(m => m.id))}
+                  onDragEnd={handleDragEndAny}
+                  className="flex items-center gap-1.5 px-3.5 pt-2 pb-1 cursor-grab select-none"
+                >
+                  {canEdit && <GripVertical className="w-3.5 h-3.5 text-indigo-300 flex-shrink-0" />}
+                  <Link2 className="w-3 h-3 text-indigo-400 flex-shrink-0" />
+                  <span className="text-[10px] font-semibold text-indigo-500 uppercase tracking-wide">Superset {supersetLabels.get(group.supersetId)}</span>
+                  {canEdit && (
+                    <button
+                      onClick={() => handleUngroup(group.members.map(m => m.id))}
+                      className="ml-auto text-[10px] text-indigo-400 hover:text-indigo-700 hover:underline"
+                    >
+                      Ungroup
+                    </button>
+                  )}
+                </div>
+                <div className="divide-y divide-indigo-100/70 ml-3.5 border-l-2 border-indigo-300">
+                  {group.members.map(item => renderPlanItemRow(item))}
+                </div>
               </div>
-              <div className="divide-y divide-indigo-100/70 ml-3.5 border-l-2 border-indigo-300">
-                {group.members.map(item => renderPlanItemRow(item))}
-              </div>
-            </div>
-          );
-        })}
+            );
+          });
+        })()}
         {items.length === 0 && <div className="p-6 text-center text-[13px] text-slate-400">Nothing planned for this group yet.</div>}
       </div>
     </div>

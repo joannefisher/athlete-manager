@@ -50,6 +50,46 @@ export interface SupersetGroup<T extends SupersetDraggable> {
   members: T[];
 }
 
+/**
+ * "26" -> "AA" the same way a spreadsheet numbers its columns past Z — more
+ * than 26 supersets in one session is far beyond anything the UI actually
+ * needs, but this keeps labelSupersetGroups() total instead of running out
+ * of letters.
+ */
+function indexToLetters(i: number): string {
+  let n = i + 1; // 1-based, so index 0 -> "A" rather than "@"
+  let s = '';
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
+
+/**
+ * Assigns a stable "A"/"B"/"C"… label to each real superset group (2+
+ * members — matches groupBySuperset's own definition), in order of first
+ * appearance among `items`. `items` must already be sortOrder-ordered, same
+ * requirement as groupBySuperset. This is the single source of truth for
+ * superset lettering — used by the Player runner's step badge, the
+ * session-complete summary, and the staff editors' "Superset" block header
+ * — so the same session always shows the same letters everywhere it's
+ * viewed, in item order (not, say, insertion order or a random uuid sort).
+ */
+export function labelSupersetGroups<T extends SupersetDraggable>(items: T[]): Map<string, string> {
+  const labels = new Map<string, string>();
+  let next = 0;
+  for (const group of groupBySuperset(items)) {
+    if (!group.supersetId || group.members.length < 2) continue; // standalone — not a real superset, no letter
+    if (!labels.has(group.supersetId)) {
+      labels.set(group.supersetId, indexToLetters(next));
+      next++;
+    }
+  }
+  return labels;
+}
+
 /** Group a sortOrder-ordered item list into contiguous same-supersetId runs, for rendering. */
 export function groupBySuperset<T extends SupersetDraggable>(items: T[]): SupersetGroup<T>[] {
   const groups: SupersetGroup<T>[] = [];

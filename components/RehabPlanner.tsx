@@ -1107,7 +1107,7 @@ const RehabPlannerPage = ({ clubId, role }: { clubId: string; role: Role }) => {
 };
 
 // ── App Shell ─────────────────────────────────────────────────────────────────
-export function RehabPlanner({ role, clubId, authUser, onBack }: { role: Role; clubId: string; authUser: any; onBack: () => void }) {
+export function RehabPlanner({ role, clubId, authUser, displayName, onBack }: { role: Role; clubId: string; authUser: any; displayName?: string | null; onBack: () => void }) {
   const [page, setPage] = useState<'planner' | 'setup'>('planner');
 
   // Admin can preview other roles
@@ -1151,7 +1151,7 @@ export function RehabPlanner({ role, clubId, authUser, onBack }: { role: Role; c
             </div>
           )}
           <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] mb-1">Signed in</p>
-          <p className="text-[11px] text-white/50 truncate">{authUser?.email}</p>
+          <p className="text-[11px] text-white/50 truncate">{displayName || authUser?.email}</p>
           <p className="text-[10px] text-white/30 mt-0.5">{effectiveRole}</p>
           <button onClick={() => supabase.auth.signOut()} className="mt-2 w-full flex items-center gap-2 px-2.5 py-1.5 text-[12px] text-white/40 hover:text-white/70 hover:bg-white/[0.06] rounded transition-colors"><X className="w-3 h-3" />Sign out</button>
         </div>

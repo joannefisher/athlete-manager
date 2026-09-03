@@ -29,7 +29,7 @@ import {
   itemToDraft,
   fetchFrequentSectionNames,
 } from './gymApi';
-import { applySupersetDrop, groupBySuperset, zoneForOffset, type DropZone } from './supersetDnd';
+import { applySupersetDrop, groupBySuperset, labelSupersetGroups, zoneForOffset, type DropZone } from './supersetDnd';
 import { CopySessionModal } from './CopySessionModal';
 import { useGymUndo } from './GymUndoContext';
 import { itemDisplayName, itemMetaText } from './itemDisplay';
@@ -528,6 +528,11 @@ export const SessionEditor = ({
   const visibleItems = ownerFilter === 'all' ? items : items.filter(i => i.createdBy === ownerFilter);
   const canReorder = canEdit && ownerFilter === 'all';
   const visibleIndexById = new Map(visibleItems.map((it, idx) => [it.id, idx]));
+  // Labeled off the full (unfiltered) item list, not visibleItems — so a
+  // superset's letter stays the same session-wide regardless of which
+  // owner filter is active, matching what the Player runner and the
+  // session-complete summary show for the exact same session.
+  const supersetLabels = labelSupersetGroups(items);
 
   // The add/edit form body — used both for the bottom "add new item" panel
   // (when draft.id is unset) and inline in place of the row being edited
@@ -1212,7 +1217,7 @@ export const SessionEditor = ({
                 >
                   {canReorder && <GripVertical className="w-3.5 h-3.5 text-indigo-300 flex-shrink-0" />}
                   <Link2 className="w-3 h-3 text-indigo-400 flex-shrink-0" />
-                  <span className="text-[10px] font-semibold text-indigo-500 uppercase tracking-wide">Superset</span>
+                  <span className="text-[10px] font-semibold text-indigo-500 uppercase tracking-wide">Superset {supersetLabels.get(group.supersetId)}</span>
                   {canEdit && (
                     <button
                       onClick={() => handleUngroup(group.members.map(m => m.id))}

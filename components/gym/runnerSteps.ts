@@ -19,7 +19,7 @@
 // Joanne confirmed this explicitly).
 
 import type { GymSessionItem, RunnerStep } from './types';
-import { groupBySuperset } from './supersetDnd';
+import { groupBySuperset, labelSupersetGroups } from './supersetDnd';
 
 /** Item types that are prescribed a fixed number of sets and get one RunnerStep per set. */
 function isSetBearing(itemType: GymSessionItem['itemType']): boolean {
@@ -44,6 +44,11 @@ function stepKey(item: GymSessionItem, setNumber: number | null): string {
 export function buildStepSequence(items: GymSessionItem[]): RunnerStep[] {
   const steps: RunnerStep[] = [];
   const groups = groupBySuperset(items);
+  // Session-wide A/B/C… labels — order of first appearance among `items`,
+  // NOT a per-group position (that's a different, unrelated number — see
+  // RunnerStep.superset's own comment in types.ts). Single source of truth
+  // shared with the staff editors and the session-complete summary.
+  const labels = labelSupersetGroups(items);
 
   for (const group of groups) {
     if (!group.supersetId || group.members.length < 2) {
@@ -80,6 +85,7 @@ export function buildStepSequence(items: GymSessionItem[]): RunnerStep[] {
     // Real superset (2+ members): interleave round-by-round, dropping a
     // member out once its own set count is exhausted.
     const supersetId = group.supersetId;
+    const label = labels.get(supersetId)!; // always set — labelSupersetGroups uses the identical "2+ members" definition of a real superset
     const size = group.members.length;
     const counts = group.members.map(effectiveSetCount);
     const maxRounds = Math.max(...counts);
@@ -96,7 +102,7 @@ export function buildStepSequence(items: GymSessionItem[]): RunnerStep[] {
           setNumber,
           isFirstOfItem: round === 1,
           isLastOfItem: round === total,
-          superset: { supersetId, position: idx + 1, size },
+          superset: { supersetId, label, position: idx + 1, size },
         });
       });
     }

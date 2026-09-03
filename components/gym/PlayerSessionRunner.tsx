@@ -19,6 +19,7 @@ import { PlayerStepRunning } from './PlayerStepRunning';
 import { PlayerStepTimer } from './PlayerStepTimer';
 import { PlayerStepNote } from './PlayerStepNote';
 import { PlayerStepSection } from './PlayerStepSection';
+import { PlayerSessionSummary } from './PlayerSessionSummary';
 
 /** Local editable-field state for the step currently on screen. Reset whenever the step changes (see the effect below). */
 interface StepInput {
@@ -74,6 +75,10 @@ export function PlayerSessionRunner({
   const [input, setInput] = useState<StepInput>(emptyInput);
   const [busy, setBusy] = useState(false); // Next/Back/Skip/Pause in flight — blocks double-taps
   const [error, setError] = useState<string | null>(null);
+  // Set once the last step is committed and the session is marked complete
+  // server-side — swaps the whole screen for PlayerSessionSummary instead of
+  // calling onCompleted() immediately, so the player sees a recap first.
+  const [showSummary, setShowSummary] = useState(false);
 
   const steps = useMemo(() => (session?.items ? buildStepSequence(session.items) : []), [session?.items]);
   const step = steps[stepIndex] as RunnerStep | undefined;
@@ -149,7 +154,10 @@ export function PlayerSessionRunner({
       await commitCurrentStep();
       if (stepIndex >= steps.length - 1) {
         await completeSession(sessionId);
-        onCompleted();
+        // Refetch so the summary screen has completedAt/startedAt and every
+        // saved result, not just what happens to already be in local state.
+        await load();
+        setShowSummary(true);
       } else {
         setStepIndex(i => i + 1);
       }
@@ -179,7 +187,8 @@ export function PlayerSessionRunner({
     if (stepIndex >= steps.length - 1) {
       setBusy(true);
       completeSession(sessionId)
-        .then(onCompleted)
+        .then(() => load())
+        .then(() => setShowSummary(true))
         .catch(err => {
           console.error('[PlayerSessionRunner] failed to complete session', err);
           setError('Could not finish the session — check your connection and try again.');
@@ -212,6 +221,10 @@ export function PlayerSessionRunner({
         <Loader2 className="w-6 h-6 text-slate-300 animate-spin" />
       </div>
     );
+  }
+
+  if (showSummary && session) {
+    return <PlayerSessionSummary session={session} onDone={onCompleted} />;
   }
 
   if (!session || steps.length === 0) {
@@ -247,7 +260,7 @@ export function PlayerSessionRunner({
         </div>
         {step.superset && (
           <p className="text-[11px] font-semibold text-purple-600 mt-2">
-            Superset {String.fromCharCode(64 + step.superset.position)} · exercise {step.superset.position} of {step.superset.size}
+            Superset {step.superset.label} · exercise {step.superset.position} of {step.superset.size}
           </p>
         )}
         {step.setNumber != null && (
