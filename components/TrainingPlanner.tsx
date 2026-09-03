@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import type { Role } from './AthleteManager';
 // Round 18: shared CSV bulk-import, also used by Gym's new Setup page.
 import { CsvAthleteImportModal, type ParsedAthleteRow } from './CsvAthleteImportModal';
+import { GymUndoProvider, GymUndoButton, useGymUndo } from './gym/GymUndoContext';
 
 const BODY_PARTS = ['Head', 'Neck', 'Shoulder', 'Arm', 'Elbow', 'Wrist', 'Hand', 'Chest', 'Back', 'Hip', 'Groin', 'Thigh', 'Hamstring', 'Knee', 'Calf', 'Ankle', 'Foot', 'Other'];
 
@@ -149,7 +150,12 @@ const StatusSelect = ({ value, onChange, className = '' }: { value: string; onCh
 };
 
 
-export function TrainingPlanner({ role: propRole, clubId: propClubId, authUser, onBack }: { role: Role; clubId: string; authUser: any; onBack: () => void }) {
+// Undo (2026-09-03): reuses Gym's GymUndoContext rather than a bespoke
+// mechanism, per Joanne's answer ("Reuse the gym undo"). The provider has
+// to live in a wrapper OUTSIDE this component, since a component can't
+// consume a context it renders itself — see the exported TrainingPlanner
+// wrapper below.
+function TrainingPlannerInner({ role: propRole, clubId: propClubId, authUser, onBack }: { role: Role; clubId: string; authUser: any; onBack: () => void }) {
   const [currentPage, setCurrentPage] = useState('home');
   const [showMenu, setShowMenu] = useState(false);
   const [selectedAthleteId, setSelectedAthleteId] = useState<string | null>(null);
@@ -171,6 +177,8 @@ export function TrainingPlanner({ role: propRole, clubId: propClubId, authUser, 
   // Props mapped to stable names used throughout the component
   const role = propRole;
   const clubId = propClubId;
+
+  const { pushUndo } = useGymUndo();
 
   // ============================================
   // SUPABASE DATA FETCHING
@@ -432,9 +440,56 @@ export function TrainingPlanner({ role: propRole, clubId: propClubId, authUser, 
   };
 
   const deleteAthlete = async (athleteId: string) => {
+    // Snapshot before deleting so Undo can fully recreate the athlete —
+    // positions and injuries cascade-delete with the athletes row (they're
+    // never deleted explicitly here, unlike saveAthlete's own delete-then-
+    // reinsert), so the snapshot has to capture them too.
+    const snapshot = athletes.find(a => a.id === athleteId);
     try {
       await supabase.from('athletes').delete().eq('id', athleteId);
       await fetchAllData();
+      if (snapshot) {
+        pushUndo({
+          label: `Delete ${snapshot.name}`,
+          run: async () => {
+            // Same insert shape as saveAthlete's isNew branch — club_id is
+            // deliberately left unset, matching every other athlete insert
+            // in this codebase (it's filled in automatically).
+            const { data, error } = await supabase.from('athletes').insert({
+              name: snapshot.name,
+              status: snapshot.status,
+              notes: snapshot.notes,
+              is_public: snapshot.isPublic,
+              avatar: snapshot.avatar,
+              photo_url: snapshot.photo,
+              default_position: snapshot.defaultPosition ?? null,
+            }).select().single();
+            if (error) throw error;
+            const newId = data.id;
+            if (snapshot.positionNumbers?.length > 0) {
+              await supabase.from('athlete_positions').insert(
+                snapshot.positionNumbers.map((pn: number) => ({ athlete_id: newId, position_number: pn }))
+              );
+            }
+            if (snapshot.injuries?.length > 0) {
+              await supabase.from('athlete_injuries').insert(
+                snapshot.injuries.map((i: Injury) => ({
+                  athlete_id: newId,
+                  body_part: i.bodyPart,
+                  start_date: i.startDate,
+                  return_date: i.returnDate || null,
+                  surgery_date: (i as any).surgeryDate || null,
+                  notes: i.notes,
+                  event: (i as any).event || null,
+                  surface: (i as any).surface || null,
+                  contact: (i as any).contact || null,
+                }))
+              );
+            }
+            await fetchAllData();
+          },
+        });
+      }
     } catch (error) {
       console.error('Error deleting athlete:', error);
     }
@@ -852,7 +907,7 @@ export function TrainingPlanner({ role: propRole, clubId: propClubId, authUser, 
         <div className="flex items-center gap-2">
           <span className="text-[11px] text-slate-500">{effectiveRole}</span>
           <button onClick={() => supabase.auth.signOut()}
-            className="text-xs border border-slate-200 rounded px-2 py-1.5 bg-white text-slate-600 hover:bg-slate-50 transition-colors">
+            className="text-[12px] border border-slate-200 rounded px-2 py-1.5 bg-white text-slate-600 hover:bg-slate-50 transition-colors">
             Sign out
           </button>
         </div>
@@ -951,7 +1006,10 @@ export function TrainingPlanner({ role: propRole, clubId: propClubId, authUser, 
           <div className="flex items-center justify-between max-w-md mx-auto">
             <button onClick={() => setShowMenu(!showMenu)} className="p-1.5 hover:bg-slate-100 rounded-lg"><Menu className="w-5 h-5 text-slate-600" /></button>
             <h1 className="text-[15px] font-semibold text-slate-900">{getPageTitle()}</h1>
-            <UserInfo dark={false} />
+            <div className="flex items-center gap-1.5">
+              <GymUndoButton variant="mobile" />
+              <UserInfo dark={false} />
+            </div>
           </div>
         </header>
 
@@ -961,15 +1019,18 @@ export function TrainingPlanner({ role: propRole, clubId: propClubId, authUser, 
             <h2 className="text-[15px] font-semibold text-slate-900 leading-none">{getPageTitle()}</h2>
             <p className="text-[11px] text-slate-400 mt-1 font-light">{new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
           </div>
-          {role === 'Admin' && (
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] text-slate-400">Viewing as</span>
-              <select value={viewingAs} onChange={e => { setViewingAs(e.target.value as Role); navigateTo('home'); }}
-                className="h-7 px-2 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                {(['Admin', 'S&C', 'Physio', 'Coach'] as Role[]).map(r => <option key={r} value={r}>{r}</option>)}
-              </select>
-            </div>
-          )}
+          <div className="flex items-center gap-3">
+            <GymUndoButton variant="canvas" />
+            {role === 'Admin' && (
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-slate-400">Viewing as</span>
+                <select value={viewingAs} onChange={e => { setViewingAs(e.target.value as Role); navigateTo('home'); }}
+                  className="h-7 px-2 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                  {(['Admin', 'S&C', 'Physio', 'Coach'] as Role[]).map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Mobile slide-out menu */}
@@ -1051,6 +1112,14 @@ export function TrainingPlanner({ role: propRole, clubId: propClubId, authUser, 
   );
 };
 
+export function TrainingPlanner(props: { role: Role; clubId: string; authUser: any; onBack: () => void }) {
+  return (
+    <GymUndoProvider>
+      <TrainingPlannerInner {...props} />
+    </GymUndoProvider>
+  );
+}
+
 const getPositionDisplay = (positionNumbers: number[], teamStructure: TeamPosition[]): string => {
   if (!positionNumbers || positionNumbers.length === 0) return '-';
   return [...new Set(positionNumbers.map(num => teamStructure.find(p => p.number === num)?.name).filter(Boolean))].join(', ');
@@ -1075,7 +1144,7 @@ const InjuryDisplay = ({ athlete }: { athlete: Athlete }) => {
     <div className="mt-2 p-2 bg-red-50 rounded border border-red-100">
       <div className="flex items-start gap-1.5">
         <AlertCircle className="w-3 h-3 text-red-500 mt-0.5 flex-shrink-0" />
-        <div className="text-xs text-red-700 space-y-0.5">
+        <div className="text-[12px] text-red-700 space-y-0.5">
           {activeInjuries.map(inj => (
             <div key={inj.id}>{inj.bodyPart}{inj.notes ? ` — ${inj.notes}` : ''}{inj.returnDate ? <span className="text-slate-400 ml-1">ETR {new Date(inj.returnDate).toLocaleDateString('en-GB', { month: 'short', day: 'numeric' })}</span> : <span className="text-red-600 font-medium ml-1">Season</span>}</div>
           ))}
@@ -1595,44 +1664,44 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
             </div>
             <div className="p-4 space-y-3">
               <div><label className="block text-[11px] text-slate-500 mb-1">Body Part</label>
-                <select value={injuryData.bodyPart} onChange={e => setInjuryData({...injuryData, bodyPart: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg">
+                <select value={injuryData.bodyPart} onChange={e => setInjuryData({...injuryData, bodyPart: e.target.value})} className="w-full px-3 py-2 text-[13px] border rounded-lg">
                   {BODY_PARTS.map(bp => <option key={bp}>{bp}</option>)}
                 </select>
               </div>
               <div className="grid grid-cols-3 gap-2">
                 <div><label className="block text-[11px] text-slate-500 mb-1">Event</label>
-                  <select value={injuryData.event} onChange={e => setInjuryData({...injuryData, event: e.target.value})} className="w-full px-2 py-2 text-sm border rounded-lg">
+                  <select value={injuryData.event} onChange={e => setInjuryData({...injuryData, event: e.target.value})} className="w-full px-2 py-2 text-[13px] border rounded-lg">
                     <option>Training</option><option>Match</option><option>Other</option>
                   </select>
                 </div>
                 <div><label className="block text-[11px] text-slate-500 mb-1">Surface</label>
-                  <select value={injuryData.surface} onChange={e => setInjuryData({...injuryData, surface: e.target.value})} className="w-full px-2 py-2 text-sm border rounded-lg">
+                  <select value={injuryData.surface} onChange={e => setInjuryData({...injuryData, surface: e.target.value})} className="w-full px-2 py-2 text-[13px] border rounded-lg">
                     <option value="4G">4G</option><option>Grass</option><option>Other</option>
                   </select>
                 </div>
                 <div><label className="block text-[11px] text-slate-500 mb-1">Contact</label>
-                  <select value={injuryData.contact} onChange={e => setInjuryData({...injuryData, contact: e.target.value})} className="w-full px-2 py-2 text-sm border rounded-lg">
+                  <select value={injuryData.contact} onChange={e => setInjuryData({...injuryData, contact: e.target.value})} className="w-full px-2 py-2 text-[13px] border rounded-lg">
                     <option>Contact</option><option>Non-Contact</option>
                   </select>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div><label className="block text-[11px] text-slate-500 mb-1">Start Date</label>
-                  <input type="date" value={injuryData.startDate} onChange={e => setInjuryData({...injuryData, startDate: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" />
+                  <input type="date" value={injuryData.startDate} onChange={e => setInjuryData({...injuryData, startDate: e.target.value})} className="w-full px-3 py-2 text-[13px] border rounded-lg" />
                 </div>
                 <div><label className="block text-[11px] text-slate-500 mb-1">Est. Return</label>
-                  <input type="date" value={injuryData.returnDate} onChange={e => setInjuryData({...injuryData, returnDate: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" />
+                  <input type="date" value={injuryData.returnDate} onChange={e => setInjuryData({...injuryData, returnDate: e.target.value})} className="w-full px-3 py-2 text-[13px] border rounded-lg" />
                 </div>
               </div>
               <div><label className="block text-[11px] text-slate-500 mb-1">Date of Surgery <span className="text-slate-300">(if applicable)</span></label>
-                <input type="date" value={injuryData.surgeryDate || ''} onChange={e => setInjuryData({...injuryData, surgeryDate: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" />
+                <input type="date" value={injuryData.surgeryDate || ''} onChange={e => setInjuryData({...injuryData, surgeryDate: e.target.value})} className="w-full px-3 py-2 text-[13px] border rounded-lg" />
               </div>
               {injuryData.startDate && injuryData.returnDate && (() => {
                 const days = Math.round((new Date(injuryData.returnDate).getTime() - new Date(injuryData.startDate).getTime()) / 86400000);
                 return days >= 0 ? <div className="px-3 py-2 bg-blue-50 border border-blue-100 rounded text-[11px] text-blue-700 font-medium">⏱ Time Loss: {days} day{days !== 1 ? 's' : ''}</div> : null;
               })()}
               <div><label className="block text-[11px] text-slate-500 mb-1">Notes</label>
-                <textarea value={injuryData.notes} onChange={e => setInjuryData({...injuryData, notes: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" rows={2} />
+                <textarea value={injuryData.notes} onChange={e => setInjuryData({...injuryData, notes: e.target.value})} className="w-full px-3 py-2 text-[13px] border rounded-lg" rows={2} />
               </div>
             </div>
             <div className="flex gap-2 px-4 pb-4">
@@ -2811,10 +2880,10 @@ const TeamSelectionModal = ({ athletes, team1, setTeam1, team2, setTeam2, subs1,
     const otherGroup = sortedAthletes.filter(a => !a.positionNumbers?.includes(posNum) && !a.positionNumbers?.some(pn => teamStructure.find(p => p.number === pn)?.group === posGroup));
 
     const renderAthlete = (a) => (
-      <button key={a.id} onClick={() => selectAthlete(a.id)} className={`w-full p-2 text-left rounded-lg text-sm flex items-center gap-2 ${a.status === 'Available' ? 'bg-green-50 text-green-700' : a.status === 'Modified' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'}`}>
+      <button key={a.id} onClick={() => selectAthlete(a.id)} className={`w-full p-2 text-left rounded-lg text-[13px] flex items-center gap-2 ${a.status === 'Available' ? 'bg-green-50 text-green-700' : a.status === 'Modified' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'}`}>
         <span className={`w-2 h-2 rounded-full ${a.status === 'Available' ? 'bg-green-500' : a.status === 'Modified' ? 'bg-amber-500' : 'bg-red-500'}`}></span>
         <span className="flex-1">{a.name}</span>
-        <span className="text-xs opacity-70">{getPositionDisplay(a.positionNumbers, teamStructure)}</span>
+        <span className="text-[12px] opacity-70">{getPositionDisplay(a.positionNumbers, teamStructure)}</span>
       </button>
     );
 
@@ -2823,35 +2892,35 @@ const TeamSelectionModal = ({ athletes, team1, setTeam1, team2, setTeam2, subs1,
         <div className="bg-white rounded-lg border border-slate-200">
           <div className="p-4 border-b flex items-center gap-3">
             <button onClick={() => setSelectedCell(null)} className="p-1 hover:bg-slate-100 rounded-lg"><ArrowLeft className="w-5 h-5" /></button>
-            <h3 className="font-semibold text-sm">{selectedCell.isSub ? 'Sub for ' : ''}{posName}</h3>
+            <h3 className="font-semibold text-[13px]">{selectedCell.isSub ? 'Sub for ' : ''}{posName}</h3>
           </div>
           <div className="p-4">
-            <input type="text" placeholder="Search..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full px-3 py-2 text-sm border rounded-lg mb-3" />
+            <input type="text" placeholder="Search..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full px-3 py-2 text-[13px] border rounded-lg mb-3" />
             <div className="max-h-72 overflow-y-auto">
-              <button onClick={() => selectAthlete(null)} className="w-full p-2 text-left bg-slate-50 hover:bg-slate-100 rounded-lg text-sm text-slate-500 mb-2">Clear selection</button>
+              <button onClick={() => selectAthlete(null)} className="w-full p-2 text-left bg-slate-50 hover:bg-slate-100 rounded-lg text-[13px] text-slate-500 mb-2">Clear selection</button>
 
               {matchingPosition.length > 0 && (
                 <div className="mb-3">
-                  <div className="text-xs font-semibold text-blue-600 px-2 py-1 bg-blue-50 rounded mb-1">★ {posName}</div>
+                  <div className="text-[12px] font-semibold text-blue-600 px-2 py-1 bg-blue-50 rounded mb-1">★ {posName}</div>
                   <div className="space-y-1">{matchingPosition.map(renderAthlete)}</div>
                 </div>
               )}
 
               {sameGroupOther.length > 0 && (
                 <div className="mb-3">
-                  <div className="text-xs font-semibold text-slate-600 px-2 py-1 bg-slate-100 rounded mb-1">Other {posGroup}s</div>
+                  <div className="text-[12px] font-semibold text-slate-600 px-2 py-1 bg-slate-100 rounded mb-1">Other {posGroup}s</div>
                   <div className="space-y-1">{sameGroupOther.map(renderAthlete)}</div>
                 </div>
               )}
 
               {otherGroup.length > 0 && (
                 <div className="mb-3">
-                  <div className="text-xs font-semibold text-slate-400 px-2 py-1 bg-slate-50 rounded mb-1">{posGroup === 'Forward' ? 'Backs' : 'Forwards'}</div>
+                  <div className="text-[12px] font-semibold text-slate-400 px-2 py-1 bg-slate-50 rounded mb-1">{posGroup === 'Forward' ? 'Backs' : 'Forwards'}</div>
                   <div className="space-y-1">{otherGroup.map(renderAthlete)}</div>
                 </div>
               )}
 
-              {sortedAthletes.length === 0 && <p className="text-sm text-slate-400 text-center py-4">No athletes found</p>}
+              {sortedAthletes.length === 0 && <p className="text-[13px] text-slate-400 text-center py-4">No athletes found</p>}
             </div>
           </div>
         </div>
@@ -2864,35 +2933,35 @@ const TeamSelectionModal = ({ athletes, team1, setTeam1, team2, setTeam2, subs1,
       <div className="bg-white rounded-lg border border-slate-200">
         <div className="p-4 border-b flex items-center gap-3">
           <button onClick={onBack} className="p-1 hover:bg-slate-100 rounded-lg"><ArrowLeft className="w-5 h-5" /></button>
-          <h3 className="font-semibold text-sm">{title}</h3>
+          <h3 className="font-semibold text-[13px]">{title}</h3>
         </div>
         <div className="p-4 overflow-x-auto">
           <div className="grid grid-cols-5 gap-1 min-w-[400px]">
-            <div className="text-xs text-slate-500 text-center pb-2">Team 1</div>
-            <div className="text-xs text-slate-500 text-center pb-2">Sub</div>
-            <div className="text-xs text-slate-500 text-center pb-2"></div>
-            <div className="text-xs text-slate-500 text-center pb-2">Sub</div>
-            <div className="text-xs text-slate-500 text-center pb-2">Team 2</div>
+            <div className="text-[12px] text-slate-500 text-center pb-2">Team 1</div>
+            <div className="text-[12px] text-slate-500 text-center pb-2">Sub</div>
+            <div className="text-[12px] text-slate-500 text-center pb-2"></div>
+            <div className="text-[12px] text-slate-500 text-center pb-2">Sub</div>
+            <div className="text-[12px] text-slate-500 text-center pb-2">Team 2</div>
             {sorted.map(pos => (
               <React.Fragment key={pos}>
-                <button onClick={() => setSelectedCell({ row: pos, team: 1, isSub: false })} className={`p-1.5 text-left rounded text-xs truncate border ${getStatusStyle(team1[pos], false)}`}>{team1[pos] ? getAthName(team1[pos]) : getPosName(pos)}</button>
-                <button onClick={() => setSelectedCell({ row: pos, team: 1, isSub: true })} className={`p-1.5 text-left rounded text-xs truncate border ${getStatusStyle(subs1[pos], true)}`}>{subs1[pos] ? getAthName(subs1[pos]) : '-'}</button>
-                <div className="flex items-center justify-center text-xs text-slate-400">{pos}</div>
-                <button onClick={() => setSelectedCell({ row: pos, team: 2, isSub: true })} className={`p-1.5 text-left rounded text-xs truncate border ${getStatusStyle(subs2[pos], true)}`}>{subs2[pos] ? getAthName(subs2[pos]) : '-'}</button>
-                <button onClick={() => setSelectedCell({ row: pos, team: 2, isSub: false })} className={`p-1.5 text-left rounded text-xs truncate border ${getStatusStyle(team2[pos], false)}`}>{team2[pos] ? getAthName(team2[pos]) : getPosName(pos)}</button>
+                <button onClick={() => setSelectedCell({ row: pos, team: 1, isSub: false })} className={`p-1.5 text-left rounded text-[12px] truncate border ${getStatusStyle(team1[pos], false)}`}>{team1[pos] ? getAthName(team1[pos]) : getPosName(pos)}</button>
+                <button onClick={() => setSelectedCell({ row: pos, team: 1, isSub: true })} className={`p-1.5 text-left rounded text-[12px] truncate border ${getStatusStyle(subs1[pos], true)}`}>{subs1[pos] ? getAthName(subs1[pos]) : '-'}</button>
+                <div className="flex items-center justify-center text-[12px] text-slate-400">{pos}</div>
+                <button onClick={() => setSelectedCell({ row: pos, team: 2, isSub: true })} className={`p-1.5 text-left rounded text-[12px] truncate border ${getStatusStyle(subs2[pos], true)}`}>{subs2[pos] ? getAthName(subs2[pos]) : '-'}</button>
+                <button onClick={() => setSelectedCell({ row: pos, team: 2, isSub: false })} className={`p-1.5 text-left rounded text-[12px] truncate border ${getStatusStyle(team2[pos], false)}`}>{team2[pos] ? getAthName(team2[pos]) : getPosName(pos)}</button>
               </React.Fragment>
             ))}
           </div>
         </div>
         <div className="p-4 border-t">
-          <div className="flex gap-4 justify-center mb-3 text-xs">
+          <div className="flex gap-4 justify-center mb-3 text-[12px]">
             <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-green-500"></div>Available</div>
             <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-amber-500"></div>Modified</div>
             <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-red-500"></div>Unavailable</div>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => { setTeam1({}); setTeam2({}); setSubs1({}); setSubs2({}); onClearAll && onClearAll(); }} className="flex-1 px-4 py-2 bg-red-50 text-red-600 border border-red-100 rounded-lg text-sm font-medium hover:bg-red-100 transition-colors">Clear All</button>
-            <button onClick={onBack} className="flex-1 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium">Done</button>
+            <button onClick={() => { setTeam1({}); setTeam2({}); setSubs1({}); setSubs2({}); onClearAll && onClearAll(); }} className="flex-1 px-4 py-2 bg-red-50 text-red-600 border border-red-100 rounded-lg text-[13px] font-medium hover:bg-red-100 transition-colors">Clear All</button>
+            <button onClick={onBack} className="flex-1 px-4 py-2 bg-gray-900 text-white rounded-lg text-[13px] font-medium">Done</button>
           </div>
         </div>
       </div>
@@ -2917,24 +2986,24 @@ const AvailabilityChart = ({ athleteId, availabilityRecords, seasonDates }: any)
 
   return (
     <div className="bg-white rounded-lg border border-slate-200 p-4">
-      <h3 className="font-semibold text-sm mb-3">Availability Report</h3>
+      <h3 className="font-semibold text-[13px] mb-3">Availability Report</h3>
       <div className="flex flex-wrap gap-2 mb-4">
-        <button onClick={() => setSelectedPeriod('all')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedPeriod === 'all' ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>All Time</button>
-        {seasonDates.map(p => <button key={p.id} onClick={() => setSelectedPeriod(p.id.toString())} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedPeriod === p.id.toString() ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>{p.title}</button>)}
+        <button onClick={() => setSelectedPeriod('all')} className={`px-3 py-1.5 rounded-lg text-[12px] font-medium ${selectedPeriod === 'all' ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>All Time</button>
+        {seasonDates.map(p => <button key={p.id} onClick={() => setSelectedPeriod(p.id.toString())} className={`px-3 py-1.5 rounded-lg text-[12px] font-medium ${selectedPeriod === p.id.toString() ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>{p.title}</button>)}
       </div>
-      {stats.total === 0 ? <p className="text-center py-6 text-slate-500 text-sm">No data.</p> : (
+      {stats.total === 0 ? <p className="text-center py-6 text-slate-500 text-[13px]">No data.</p> : (
         <>
           <div className="h-8 rounded-lg overflow-hidden flex mb-3">
-            {stats.available > 0 && <div className="bg-green-500 flex items-center justify-center text-white text-xs" style={{width: stats.available+'%'}}>{stats.available > 10 && stats.available+'%'}</div>}
-            {stats.modified > 0 && <div className="bg-amber-500 flex items-center justify-center text-white text-xs" style={{width: stats.modified+'%'}}>{stats.modified > 10 && stats.modified+'%'}</div>}
-            {stats.unavailable > 0 && <div className="bg-red-500 flex items-center justify-center text-white text-xs" style={{width: stats.unavailable+'%'}}>{stats.unavailable > 10 && stats.unavailable+'%'}</div>}
+            {stats.available > 0 && <div className="bg-green-500 flex items-center justify-center text-white text-[12px]" style={{width: stats.available+'%'}}>{stats.available > 10 && stats.available+'%'}</div>}
+            {stats.modified > 0 && <div className="bg-amber-500 flex items-center justify-center text-white text-[12px]" style={{width: stats.modified+'%'}}>{stats.modified > 10 && stats.modified+'%'}</div>}
+            {stats.unavailable > 0 && <div className="bg-red-500 flex items-center justify-center text-white text-[12px]" style={{width: stats.unavailable+'%'}}>{stats.unavailable > 10 && stats.unavailable+'%'}</div>}
           </div>
-          <div className="flex gap-4 text-xs flex-wrap">
+          <div className="flex gap-4 text-[12px] flex-wrap">
             <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-green-500"></div>Available ({stats.available}%)</div>
             <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-amber-500"></div>Modified ({stats.modified}%)</div>
             <div className="flex items-center gap-1"><div className="w-3 h-3 rounded bg-red-500"></div>Unavailable ({stats.unavailable}%)</div>
           </div>
-          <p className="text-xs text-slate-400 mt-2">{stats.total} days</p>
+          <p className="text-[12px] text-slate-400 mt-2">{stats.total} days</p>
         </>
       )}
     </div>
@@ -3053,49 +3122,49 @@ const AvailabilityReportTab = ({ athletes, availabilityRecords, seasonDates, tea
   return (
     <>
       <div className="bg-white rounded-lg border border-slate-200 p-4">
-        <h3 className="font-semibold text-sm mb-3">Time Period</h3>
+        <h3 className="font-semibold text-[13px] mb-3">Time Period</h3>
         <div className="flex flex-wrap gap-2 mb-3">
-          <button onClick={() => setDateMode('all')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${dateMode === 'all' ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>All Time</button>
-          {seasonDates.map((p: any) => <button key={p.id} onClick={() => { setDateMode('period'); setSelectedPeriodId(p.id.toString()); }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${dateMode === 'period' && selectedPeriodId === p.id.toString() ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>{p.title}</button>)}
-          <button onClick={() => setDateMode('custom')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${dateMode === 'custom' ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>Custom</button>
+          <button onClick={() => setDateMode('all')} className={`px-3 py-1.5 rounded-lg text-[12px] font-medium ${dateMode === 'all' ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>All Time</button>
+          {seasonDates.map((p: any) => <button key={p.id} onClick={() => { setDateMode('period'); setSelectedPeriodId(p.id.toString()); }} className={`px-3 py-1.5 rounded-lg text-[12px] font-medium ${dateMode === 'period' && selectedPeriodId === p.id.toString() ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>{p.title}</button>)}
+          <button onClick={() => setDateMode('custom')} className={`px-3 py-1.5 rounded-lg text-[12px] font-medium ${dateMode === 'custom' ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>Custom</button>
         </div>
-        {dateMode === 'custom' && <div className="grid grid-cols-2 gap-2"><input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} className="px-3 py-2 text-sm border rounded-lg" /><input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} className="px-3 py-2 text-sm border rounded-lg" /></div>}
+        {dateMode === 'custom' && <div className="grid grid-cols-2 gap-2"><input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} className="px-3 py-2 text-[13px] border rounded-lg" /><input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} className="px-3 py-2 text-[13px] border rounded-lg" /></div>}
       </div>
       <div className="bg-white rounded-lg border border-slate-200 p-4">
-        <button onClick={() => setShowFilters(!showFilters)} className="w-full flex justify-between items-center"><h3 className="font-semibold text-sm">Filters</h3>{showFilters ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</button>
+        <button onClick={() => setShowFilters(!showFilters)} className="w-full flex justify-between items-center"><h3 className="font-semibold text-[13px]">Filters</h3>{showFilters ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</button>
         {showFilters && (
           <div className="mt-3 space-y-3">
-            <div><p className="text-xs text-slate-500 mb-2">Position Group</p><div className="flex gap-2">
-              <button onClick={() => toggleGroup('Forward')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedGroups.includes('Forward') ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>Forwards</button>
-              <button onClick={() => toggleGroup('Back')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${selectedGroups.includes('Back') ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>Backs</button>
+            <div><p className="text-[12px] text-slate-500 mb-2">Position Group</p><div className="flex gap-2">
+              <button onClick={() => toggleGroup('Forward')} className={`px-3 py-1.5 rounded-lg text-[12px] font-medium ${selectedGroups.includes('Forward') ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>Forwards</button>
+              <button onClick={() => toggleGroup('Back')} className={`px-3 py-1.5 rounded-lg text-[12px] font-medium ${selectedGroups.includes('Back') ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>Backs</button>
             </div></div>
-            <div><p className="text-xs text-slate-500 mb-2">Positions</p><div className="flex flex-wrap gap-1">
+            <div><p className="text-[12px] text-slate-500 mb-2">Positions</p><div className="flex flex-wrap gap-1">
               {(uniquePositionNames as any[]).map((pos: any) => {
                 const allSelected = pos.numbers.every((n: any) => selectedPositions.includes(n));
-                return <button key={pos.name} onClick={() => togglePositionName(pos.name)} className={`px-2 py-1 rounded text-xs ${allSelected ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>{pos.name}</button>;
+                return <button key={pos.name} onClick={() => togglePositionName(pos.name)} className={`px-2 py-1 rounded text-[12px] ${allSelected ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>{pos.name}</button>;
               })}
             </div></div>
             <div>
               <div className="flex items-center justify-between mb-2">
-                <p className="text-xs text-slate-500">Athletes ({selectedAthleteIds.length}/{athletes.length})</p>
+                <p className="text-[12px] text-slate-500">Athletes ({selectedAthleteIds.length}/{athletes.length})</p>
                 <div className="flex gap-2">
                   <button onClick={() => setSelectedAthleteIds(athletes.map((a: any) => a.id))} className="text-[11px] text-blue-600 hover:text-blue-800 font-medium">Select All</button>
                   <span className="text-[11px] text-slate-300">|</span>
                   <button onClick={() => setSelectedAthleteIds([])} className="text-[11px] text-slate-500 hover:text-slate-700 font-medium">Clear All</button>
                 </div>
               </div>
-              <div className="space-y-1 max-h-32 overflow-y-auto">{athletes.map((a: any) => <label key={a.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={selectedAthleteIds.includes(a.id)} onChange={() => setSelectedAthleteIds((p: any) => p.includes(a.id) ? p.filter((x: any) => x !== a.id) : [...p, a.id])} className="w-4 h-4" />{a.name}</label>)}</div>
+              <div className="space-y-1 max-h-32 overflow-y-auto">{athletes.map((a: any) => <label key={a.id} className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={selectedAthleteIds.includes(a.id)} onChange={() => setSelectedAthleteIds((p: any) => p.includes(a.id) ? p.filter((x: any) => x !== a.id) : [...p, a.id])} className="w-4 h-4" />{a.name}</label>)}</div>
             </div>
           </div>
         )}
       </div>
       <div className="bg-white rounded-lg border border-slate-200 p-4">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-sm">Availability Over Time</h3>
+          <h3 className="font-semibold text-[13px]">Availability Over Time</h3>
           <div className="flex gap-2">
-            <label className="flex items-center gap-1.5 text-xs cursor-pointer"><input type="checkbox" checked={showAvailable} onChange={e => setShowAvailable(e.target.checked)} className="w-3 h-3" /><div className="w-2 h-2 rounded-full bg-green-500"></div>Available</label>
-            <label className="flex items-center gap-1.5 text-xs cursor-pointer"><input type="checkbox" checked={showModified} onChange={e => setShowModified(e.target.checked)} className="w-3 h-3" /><div className="w-2 h-2 rounded-full bg-amber-500"></div>Modified</label>
-            <label className="flex items-center gap-1.5 text-xs cursor-pointer"><input type="checkbox" checked={showUnavailable} onChange={e => setShowUnavailable(e.target.checked)} className="w-3 h-3" /><div className="w-2 h-2 rounded-full bg-red-500"></div>Unavailable</label>
+            <label className="flex items-center gap-1.5 text-[12px] cursor-pointer"><input type="checkbox" checked={showAvailable} onChange={e => setShowAvailable(e.target.checked)} className="w-3 h-3" /><div className="w-2 h-2 rounded-full bg-green-500"></div>Available</label>
+            <label className="flex items-center gap-1.5 text-[12px] cursor-pointer"><input type="checkbox" checked={showModified} onChange={e => setShowModified(e.target.checked)} className="w-3 h-3" /><div className="w-2 h-2 rounded-full bg-amber-500"></div>Modified</label>
+            <label className="flex items-center gap-1.5 text-[12px] cursor-pointer"><input type="checkbox" checked={showUnavailable} onChange={e => setShowUnavailable(e.target.checked)} className="w-3 h-3" /><div className="w-2 h-2 rounded-full bg-red-500"></div>Unavailable</label>
           </div>
         </div>
 
@@ -3116,7 +3185,7 @@ const AvailabilityReportTab = ({ athletes, availabilityRecords, seasonDates, tea
           </div>
         )}
 
-        {chartData.length === 0 ? <p className="text-center py-8 text-slate-500 text-sm">No data.</p> : (
+        {chartData.length === 0 ? <p className="text-center py-8 text-slate-500 text-[13px]">No data.</p> : (
           <svg viewBox={`0 0 ${VW} ${VH}`} className="w-full h-auto" preserveAspectRatio="none">
             {/* Grid lines + y-axis labels */}
             {[0, 25, 50, 75, 100].map(v => (
@@ -3514,7 +3583,7 @@ const InjuryReportTab = ({ athletes, teamStructure, seasonDates, availabilityRec
   // Chip toggle button — consistent with Availability tab style
   const Chip = ({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) => (
     <button onClick={onClick}
-      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${active ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+      className={`px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors ${active ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
       {label}
     </button>
   );
@@ -3523,7 +3592,7 @@ const InjuryReportTab = ({ athletes, teamStructure, seasonDates, availabilityRec
     <>
       {/* Time Period — identical layout to Availability tab */}
       <div className="bg-white rounded-lg border border-slate-200 p-4">
-        <h3 className="font-semibold text-sm mb-3">Time Period</h3>
+        <h3 className="font-semibold text-[13px] mb-3">Time Period</h3>
         <div className="flex flex-wrap gap-2 mb-3">
           <Chip label="All Time" active={dateMode === 'all'} onClick={() => setDateMode('all')} />
           {seasonDates.map((p: any) => (
@@ -3533,8 +3602,8 @@ const InjuryReportTab = ({ athletes, teamStructure, seasonDates, availabilityRec
         </div>
         {dateMode === 'custom' && (
           <div className="grid grid-cols-2 gap-2">
-            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} className="px-3 py-2 text-sm border rounded-lg" />
-            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} className="px-3 py-2 text-sm border rounded-lg" />
+            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} className="px-3 py-2 text-[13px] border rounded-lg" />
+            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} className="px-3 py-2 text-[13px] border rounded-lg" />
           </div>
         )}
       </div>
@@ -3542,13 +3611,13 @@ const InjuryReportTab = ({ athletes, teamStructure, seasonDates, availabilityRec
       {/* Filters — accordion like Availability tab */}
       <div className="bg-white rounded-lg border border-slate-200 p-4">
         <button onClick={() => setShowFilters(!showFilters)} className="w-full flex justify-between items-center">
-          <h3 className="font-semibold text-sm">Filters</h3>
+          <h3 className="font-semibold text-[13px]">Filters</h3>
           {showFilters ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </button>
         {showFilters && (
           <div className="mt-3 space-y-3">
             <div>
-              <p className="text-xs text-slate-500 mb-2">Position Group</p>
+              <p className="text-[12px] text-slate-500 mb-2">Position Group</p>
               <div className="flex gap-2">
                 <Chip label="Forwards" active={selectedGroups.includes('Forward')} onClick={() => toggleGroup('Forward')} />
                 <Chip label="Backs" active={selectedGroups.includes('Back')} onClick={() => toggleGroup('Back')} />
@@ -3556,11 +3625,11 @@ const InjuryReportTab = ({ athletes, teamStructure, seasonDates, availabilityRec
             </div>
             {uniquePositionNames.length > 0 && (
               <div>
-                <p className="text-xs text-slate-500 mb-2">Positions</p>
+                <p className="text-[12px] text-slate-500 mb-2">Positions</p>
                 <div className="flex flex-wrap gap-1">
                   {uniquePositionNames.map((pos: any) => (
                     <button key={pos.name} onClick={() => togglePositionName(pos.name)}
-                      className={`px-2 py-1 rounded text-xs ${selectedPositionNames.includes(pos.name) ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>
+                      className={`px-2 py-1 rounded text-[12px] ${selectedPositionNames.includes(pos.name) ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>
                       {pos.name}
                     </button>
                   ))}
@@ -3568,30 +3637,30 @@ const InjuryReportTab = ({ athletes, teamStructure, seasonDates, availabilityRec
               </div>
             )}
             <div>
-              <p className="text-xs text-slate-500 mb-2">Status</p>
+              <p className="text-[12px] text-slate-500 mb-2">Status</p>
               <div className="flex gap-2">
                 {STATUS_OPTS.map(o => (
                   <button key={o} onClick={() => toggleFilter(filterStatus, o, setFilterStatus)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${filterStatus.includes(o) ? (o === 'Active' ? 'bg-red-600 text-white border-red-600' : 'bg-green-600 text-white border-green-600') : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>
+                    className={`px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-colors ${filterStatus.includes(o) ? (o === 'Active' ? 'bg-red-600 text-white border-red-600' : 'bg-green-600 text-white border-green-600') : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`}>
                     {o}
                   </button>
                 ))}
               </div>
             </div>
             <div>
-              <p className="text-xs text-slate-500 mb-2">Event</p>
+              <p className="text-[12px] text-slate-500 mb-2">Event</p>
               <div className="flex gap-2 flex-wrap">
                 {EVENT_OPTS.map(o => <Chip key={o} label={o} active={filterEvent.includes(o)} onClick={() => toggleFilter(filterEvent, o, setFilterEvent)} />)}
               </div>
             </div>
             <div>
-              <p className="text-xs text-slate-500 mb-2">Surface</p>
+              <p className="text-[12px] text-slate-500 mb-2">Surface</p>
               <div className="flex gap-2 flex-wrap">
                 {SURFACE_OPTS.map(o => <Chip key={o} label={o} active={filterSurface.includes(o)} onClick={() => toggleFilter(filterSurface, o, setFilterSurface)} />)}
               </div>
             </div>
             <div>
-              <p className="text-xs text-slate-500 mb-2">Contact</p>
+              <p className="text-[12px] text-slate-500 mb-2">Contact</p>
               <div className="flex gap-2 flex-wrap">
                 {CONTACT_OPTS.map(o => <Chip key={o} label={o} active={filterContact.includes(o)} onClick={() => toggleFilter(filterContact, o, setFilterContact)} />)}
               </div>
@@ -3717,25 +3786,25 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
     <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6 space-y-3">
       <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
         <button onClick={() => setExpanded(expanded === 'teamStructure' ? null : 'teamStructure')} className="w-full p-4 flex justify-between items-center hover:bg-slate-50">
-          <div><h3 className="font-semibold text-sm text-left">Team Structure</h3><p className="text-xs text-slate-500">{teamStructure.length} positions</p></div>
+          <div><h3 className="font-semibold text-[13px] text-left">Team Structure</h3><p className="text-[12px] text-slate-500">{teamStructure.length} positions</p></div>
           {expanded === 'teamStructure' ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
         </button>
         {expanded === 'teamStructure' && (
           <div className="border-t">
             {['Forward', 'Back'].map(group => (
               <div key={group}>
-                <div className="px-4 py-2 bg-slate-50 text-xs font-semibold text-slate-600">{group}s</div>
+                <div className="px-4 py-2 bg-slate-50 text-[12px] font-semibold text-slate-600">{group}s</div>
                 {teamStructure.filter(p => p.group === group).map(pos => (
                   <div key={pos.id} className="p-3 border-b last:border-b-0">
                     {editingId === pos.id ? (
                       <div className="space-y-2">
-                        <div className="flex gap-2"><input type="number" value={editData.number || ''} onChange={e => setEditData({...editData, number: e.target.value})} className="w-16 px-2 py-1 text-sm border rounded" placeholder="#" /><input type="text" value={editData.name || ''} onChange={e => setEditData({...editData, name: e.target.value})} className="flex-1 px-2 py-1 text-sm border rounded" placeholder="Name" /></div>
-                        <select value={editData.group || 'Forward'} onChange={e => setEditData({...editData, group: e.target.value})} className="w-full px-2 py-1 text-sm border rounded"><option>Forward</option><option>Back</option></select>
-                        <div className="flex gap-2"><button onClick={() => { const updated = {...pos, number: parseInt(editData.number), name: editData.name, group: editData.group}; onSaveTeamStructure(updated); setLocalTeamStructure(teamStructure.map(p => p.id === pos.id ? updated : p).sort((a,b) => a.number - b.number)); setEditingId(null); }} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Save</button><button onClick={() => setEditingId(null)} className="flex-1 px-2 py-1 bg-slate-100 rounded text-xs">Cancel</button></div>
+                        <div className="flex gap-2"><input type="number" value={editData.number || ''} onChange={e => setEditData({...editData, number: e.target.value})} className="w-16 px-2 py-1 text-[13px] border rounded" placeholder="#" /><input type="text" value={editData.name || ''} onChange={e => setEditData({...editData, name: e.target.value})} className="flex-1 px-2 py-1 text-[13px] border rounded" placeholder="Name" /></div>
+                        <select value={editData.group || 'Forward'} onChange={e => setEditData({...editData, group: e.target.value})} className="w-full px-2 py-1 text-[13px] border rounded"><option>Forward</option><option>Back</option></select>
+                        <div className="flex gap-2"><button onClick={() => { const updated = {...pos, number: parseInt(editData.number), name: editData.name, group: editData.group}; onSaveTeamStructure(updated); setLocalTeamStructure(teamStructure.map(p => p.id === pos.id ? updated : p).sort((a,b) => a.number - b.number)); setEditingId(null); }} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-[12px]">Save</button><button onClick={() => setEditingId(null)} className="flex-1 px-2 py-1 bg-slate-100 rounded text-[12px]">Cancel</button></div>
                       </div>
                     ) : (
                       <div className="flex justify-between items-center">
-                        <span className="text-sm">{pos.number}. {pos.name}</span>
+                        <span className="text-[13px]">{pos.number}. {pos.name}</span>
                         <div className="flex gap-1"><button onClick={() => { setEditingId(pos.id); setEditData({number: pos.number, name: pos.name, group: pos.group}); }} className="p-1 hover:bg-slate-100 rounded"><Edit2 className="w-4 h-4 text-slate-500" /></button><button onClick={() => { onDeleteTeamStructure(pos.id); setLocalTeamStructure(teamStructure.filter(p => p.id !== pos.id)); }} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button></div>
                       </div>
                     )}
@@ -3745,17 +3814,17 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
             ))}
             {showAdd === 'position' ? (
               <div className="p-3 border-t space-y-2">
-                <div className="flex gap-2"><input type="number" value={newData.number || ''} onChange={e => setNewData({...newData, number: e.target.value})} className="w-16 px-2 py-1 text-sm border rounded" placeholder="#" /><input type="text" value={newData.name || ''} onChange={e => setNewData({...newData, name: e.target.value})} className="flex-1 px-2 py-1 text-sm border rounded" placeholder="Name" /></div>
-                <select value={newData.group || 'Forward'} onChange={e => setNewData({...newData, group: e.target.value})} className="w-full px-2 py-1 text-sm border rounded"><option>Forward</option><option>Back</option></select>
-                <div className="flex gap-2"><button onClick={() => { if (newData.name && newData.number) { const newPos = {id: String(Date.now()), number: parseInt(newData.number), name: newData.name, group: newData.group || 'Forward'}; onSaveTeamStructure(newPos); setLocalTeamStructure([...teamStructure, newPos].sort((a,b) => a.number - b.number)); setNewData({}); setShowAdd(null); }}} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Add</button><button onClick={() => { setShowAdd(null); setNewData({}); }} className="flex-1 px-2 py-1 bg-slate-100 rounded text-xs">Cancel</button></div>
+                <div className="flex gap-2"><input type="number" value={newData.number || ''} onChange={e => setNewData({...newData, number: e.target.value})} className="w-16 px-2 py-1 text-[13px] border rounded" placeholder="#" /><input type="text" value={newData.name || ''} onChange={e => setNewData({...newData, name: e.target.value})} className="flex-1 px-2 py-1 text-[13px] border rounded" placeholder="Name" /></div>
+                <select value={newData.group || 'Forward'} onChange={e => setNewData({...newData, group: e.target.value})} className="w-full px-2 py-1 text-[13px] border rounded"><option>Forward</option><option>Back</option></select>
+                <div className="flex gap-2"><button onClick={() => { if (newData.name && newData.number) { const newPos = {id: String(Date.now()), number: parseInt(newData.number), name: newData.name, group: newData.group || 'Forward'}; onSaveTeamStructure(newPos); setLocalTeamStructure([...teamStructure, newPos].sort((a,b) => a.number - b.number)); setNewData({}); setShowAdd(null); }}} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-[12px]">Add</button><button onClick={() => { setShowAdd(null); setNewData({}); }} className="flex-1 px-2 py-1 bg-slate-100 rounded text-[12px]">Cancel</button></div>
               </div>
-            ) : <div className="p-3 border-t"><button onClick={() => setShowAdd('position')} className="w-full px-4 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium"><Plus className="w-4 h-4 inline mr-1" />Add Position</button></div>}
+            ) : <div className="p-3 border-t"><button onClick={() => setShowAdd('position')} className="w-full px-4 py-2 bg-slate-800 text-white rounded-lg text-[13px] font-medium"><Plus className="w-4 h-4 inline mr-1" />Add Position</button></div>}
           </div>
         )}
       </div>
       <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
         <button onClick={() => setExpanded(expanded === 'drillTypes' ? null : 'drillTypes')} className="w-full p-4 flex justify-between items-center hover:bg-slate-50">
-          <div><h3 className="font-semibold text-sm text-left">Drill Types</h3><p className="text-xs text-slate-500">{drillTypes.length} types</p></div>
+          <div><h3 className="font-semibold text-[13px] text-left">Drill Types</h3><p className="text-[12px] text-slate-500">{drillTypes.length} types</p></div>
           {expanded === 'drillTypes' ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
         </button>
         {expanded === 'drillTypes' && (
@@ -3765,14 +3834,14 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                 {editingId === 'dt-' + dt.id ? (
                   <div className="space-y-3">
                     <div className="flex gap-2 items-center">
-                      <input type="text" value={editData.name || ''} onChange={e => setEditData({...editData, name: e.target.value})} className="flex-1 px-2 py-1 text-sm border rounded" />
-                      <input type="number" min="0" max="300" step="5" value={editData.defaultDuration || ''} onChange={e => setEditData({...editData, defaultDuration: parseInt(e.target.value) || 0})} className="w-14 px-2 py-1 text-sm border rounded text-center" placeholder="min" />
-                      <span className="text-xs text-slate-400">min</span>
+                      <input type="text" value={editData.name || ''} onChange={e => setEditData({...editData, name: e.target.value})} className="flex-1 px-2 py-1 text-[13px] border rounded" />
+                      <input type="number" min="0" max="300" step="5" value={editData.defaultDuration || ''} onChange={e => setEditData({...editData, defaultDuration: parseInt(e.target.value) || 0})} className="w-14 px-2 py-1 text-[13px] border rounded text-center" placeholder="min" />
+                      <span className="text-[12px] text-slate-400">min</span>
                       <button onClick={() => { const updated = {...dt, name: editData.name, defaultDuration: editData.defaultDuration || 0, positions: editData.positions || dt.positions}; onSaveDrillType(updated); setLocalDrillTypes(localDrillTypes.map(d => d.id === dt.id ? updated : d)); setEditingId(null); }} className="p-1 bg-green-100 text-green-700 rounded"><Check className="w-4 h-4" /></button>
                       <button onClick={() => setEditingId(null)} className="p-1 bg-slate-100 rounded"><X className="w-4 h-4" /></button>
                     </div>
                     <div>
-                      <p className="text-xs text-slate-500 mb-2">Position Group:</p>
+                      <p className="text-[12px] text-slate-500 mb-2">Position Group:</p>
                       <div className="flex gap-2 mb-3">
                         {['Forward', 'Back'].map(group => {
                           const groupPositions = teamStructure.filter(p => p.group === group).map(p => p.number);
@@ -3785,13 +3854,13 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                               } else {
                                 setEditData({...editData, positions: [...new Set([...currentPositions, ...groupPositions])].sort((a,b) => a - b)});
                               }
-                            }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${allSelected ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>
+                            }} className={`px-3 py-1.5 rounded-lg text-[12px] font-medium ${allSelected ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>
                               {group}s
                             </button>
                           );
                         })}
                       </div>
-                      <p className="text-xs text-slate-500 mb-2">Positions:</p>
+                      <p className="text-[12px] text-slate-500 mb-2">Positions:</p>
                       <div className="flex flex-wrap gap-1">
                         {['Forward', 'Back'].map(group => (
                           <React.Fragment key={group}>
@@ -3802,7 +3871,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                                   ? currentPositions.filter(p => p !== pos.number)
                                   : [...currentPositions, pos.number].sort((a,b) => a - b);
                                 setEditData({...editData, positions: newPositions});
-                              }} className={`px-2 py-1 rounded text-xs ${(editData.positions || dt.positions || []).includes(pos.number) ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>
+                              }} className={`px-2 py-1 rounded text-[12px] ${(editData.positions || dt.positions || []).includes(pos.number) ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>
                                 {pos.number}. {pos.name}
                               </button>
                             ))}
@@ -3810,18 +3879,18 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                         ))}
                       </div>
                       <div className="flex gap-2 mt-2">
-                        <button onClick={() => setEditData({...editData, positions: teamStructure.map(p => p.number)})} className="text-xs text-blue-600">Select All</button>
-                        <button onClick={() => setEditData({...editData, positions: []})} className="text-xs text-slate-500">Clear All</button>
+                        <button onClick={() => setEditData({...editData, positions: teamStructure.map(p => p.number)})} className="text-[12px] text-blue-600">Select All</button>
+                        <button onClick={() => setEditData({...editData, positions: []})} className="text-[12px] text-slate-500">Clear All</button>
                       </div>
                     </div>
                   </div>
                 ) : (
                   <div className="flex justify-between items-center">
                     <div>
-                      <p className="text-sm font-medium flex items-center gap-1.5">
+                      <p className="text-[13px] font-medium flex items-center gap-1.5">
                         {dt.name}
                       </p>
-                      <p className="text-xs text-slate-500">
+                      <p className="text-[12px] text-slate-500">
                         {dt.positions.length} positions{dt.defaultDuration ? ` · ${dt.defaultDuration}min` : ''}
                       </p>
                     </div>
@@ -3836,12 +3905,12 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
             {showAdd === 'drillType' ? (
               <div className="p-3 space-y-3">
                 <div className="flex gap-2 items-center">
-                  <input type="text" value={newData.name || ''} onChange={e => setNewData({...newData, name: e.target.value})} placeholder="Type name" className="flex-1 px-2 py-1 text-sm border rounded" />
-                  <input type="number" min="0" max="300" step="5" value={newData.defaultDuration || ''} onChange={e => setNewData({...newData, defaultDuration: parseInt(e.target.value) || 0})} className="w-14 px-2 py-1 text-sm border rounded text-center" placeholder="min" />
-                  <span className="text-xs text-slate-400 whitespace-nowrap">def. min</span>
+                  <input type="text" value={newData.name || ''} onChange={e => setNewData({...newData, name: e.target.value})} placeholder="Type name" className="flex-1 px-2 py-1 text-[13px] border rounded" />
+                  <input type="number" min="0" max="300" step="5" value={newData.defaultDuration || ''} onChange={e => setNewData({...newData, defaultDuration: parseInt(e.target.value) || 0})} className="w-14 px-2 py-1 text-[13px] border rounded text-center" placeholder="min" />
+                  <span className="text-[12px] text-slate-400 whitespace-nowrap">def. min</span>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 mb-2">Position Group:</p>
+                  <p className="text-[12px] text-slate-500 mb-2">Position Group:</p>
                   <div className="flex gap-2 mb-3">
                     {['Forward', 'Back'].map(group => {
                       const groupPositions = teamStructure.filter(p => p.group === group).map(p => p.number);
@@ -3854,13 +3923,13 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                           } else {
                             setNewData({...newData, positions: [...new Set([...currentPositions, ...groupPositions])].sort((a,b) => a - b)});
                           }
-                        }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${allSelected ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>
+                        }} className={`px-3 py-1.5 rounded-lg text-[12px] font-medium ${allSelected ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>
                           {group}s
                         </button>
                       );
                     })}
                   </div>
-                  <p className="text-xs text-slate-500 mb-2">Positions:</p>
+                  <p className="text-[12px] text-slate-500 mb-2">Positions:</p>
                   <div className="flex flex-wrap gap-1">
                     {['Forward', 'Back'].map(group => (
                       <React.Fragment key={group}>
@@ -3871,7 +3940,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                               ? currentPositions.filter(p => p !== pos.number)
                               : [...currentPositions, pos.number].sort((a,b) => a - b);
                             setNewData({...newData, positions: newPositions});
-                          }} className={`px-2 py-1 rounded text-xs ${(newData.positions || teamStructure.map(p => p.number)).includes(pos.number) ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>
+                          }} className={`px-2 py-1 rounded text-[12px] ${(newData.positions || teamStructure.map(p => p.number)).includes(pos.number) ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>
                             {pos.number}. {pos.name}
                           </button>
                         ))}
@@ -3880,17 +3949,17 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => { if (newData.name) { const newDt = {id: String(Date.now()), name: newData.name, defaultDuration: newData.defaultDuration || 0, positions: newData.positions || teamStructure.map(p => p.number)}; onSaveDrillType(newDt); setLocalDrillTypes([...drillTypes, newDt]); setNewData({}); setShowAdd(null); }}} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Add</button>
-                  <button onClick={() => { setShowAdd(null); setNewData({}); }} className="flex-1 px-2 py-1 bg-slate-100 rounded text-xs">Cancel</button>
+                  <button onClick={() => { if (newData.name) { const newDt = {id: String(Date.now()), name: newData.name, defaultDuration: newData.defaultDuration || 0, positions: newData.positions || teamStructure.map(p => p.number)}; onSaveDrillType(newDt); setLocalDrillTypes([...drillTypes, newDt]); setNewData({}); setShowAdd(null); }}} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-[12px]">Add</button>
+                  <button onClick={() => { setShowAdd(null); setNewData({}); }} className="flex-1 px-2 py-1 bg-slate-100 rounded text-[12px]">Cancel</button>
                 </div>
               </div>
-            ) : <div className="p-3"><button onClick={() => setShowAdd('drillType')} className="w-full px-4 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium"><Plus className="w-4 h-4 inline mr-1" />Add Drill Type</button></div>}
+            ) : <div className="p-3"><button onClick={() => setShowAdd('drillType')} className="w-full px-4 py-2 bg-slate-800 text-white rounded-lg text-[13px] font-medium"><Plus className="w-4 h-4 inline mr-1" />Add Drill Type</button></div>}
           </div>
         )}
       </div>
       <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
         <button onClick={() => setExpanded(expanded === 'seasonDates' ? null : 'seasonDates')} className="w-full p-4 flex justify-between items-center hover:bg-slate-50">
-          <div><h3 className="font-semibold text-sm text-left">Season Dates</h3><p className="text-xs text-slate-500">{seasonDates.length} periods</p></div>
+          <div><h3 className="font-semibold text-[13px] text-left">Season Dates</h3><p className="text-[12px] text-slate-500">{seasonDates.length} periods</p></div>
           {expanded === 'seasonDates' ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
         </button>
         {expanded === 'seasonDates' && (
@@ -3899,14 +3968,14 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
               <div key={sd.id} className="p-3">
                 {editingId === 'sd-' + sd.id ? (
                   <div className="space-y-2">
-                    <input type="text" value={editData.title || ''} onChange={e => setEditData({...editData, title: e.target.value})} className="w-full px-2 py-1 text-sm border rounded" placeholder="Title" />
-                    <div className="grid grid-cols-2 gap-2"><input type="date" value={editData.fromDate || ''} onChange={e => setEditData({...editData, fromDate: e.target.value})} className="px-2 py-1 text-sm border rounded" /><input type="date" value={editData.toDate || ''} onChange={e => setEditData({...editData, toDate: e.target.value})} className="px-2 py-1 text-sm border rounded" /></div>
-                    <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={editData.isDefault || false} onChange={e => setEditData({...editData, isDefault: e.target.checked})} />Default</label>
-                    <div className="flex gap-2"><button onClick={() => { let upd = seasonDates; if (editData.isDefault) upd = seasonDates.map(s => ({...s, isDefault: false})); const updated = {...sd, ...editData}; onSaveSeasonDate(updated); setLocalSeasonDates(upd.map(s => s.id === sd.id ? updated : s)); setEditingId(null); }} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Save</button><button onClick={() => setEditingId(null)} className="flex-1 px-2 py-1 bg-slate-100 rounded text-xs">Cancel</button></div>
+                    <input type="text" value={editData.title || ''} onChange={e => setEditData({...editData, title: e.target.value})} className="w-full px-2 py-1 text-[13px] border rounded" placeholder="Title" />
+                    <div className="grid grid-cols-2 gap-2"><input type="date" value={editData.fromDate || ''} onChange={e => setEditData({...editData, fromDate: e.target.value})} className="px-2 py-1 text-[13px] border rounded" /><input type="date" value={editData.toDate || ''} onChange={e => setEditData({...editData, toDate: e.target.value})} className="px-2 py-1 text-[13px] border rounded" /></div>
+                    <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={editData.isDefault || false} onChange={e => setEditData({...editData, isDefault: e.target.checked})} />Default</label>
+                    <div className="flex gap-2"><button onClick={() => { let upd = seasonDates; if (editData.isDefault) upd = seasonDates.map(s => ({...s, isDefault: false})); const updated = {...sd, ...editData}; onSaveSeasonDate(updated); setLocalSeasonDates(upd.map(s => s.id === sd.id ? updated : s)); setEditingId(null); }} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-[12px]">Save</button><button onClick={() => setEditingId(null)} className="flex-1 px-2 py-1 bg-slate-100 rounded text-[12px]">Cancel</button></div>
                   </div>
                 ) : (
                   <div className="flex justify-between items-center">
-                    <div><div className="flex items-center gap-2"><p className="text-sm font-medium">{sd.title}</p>{sd.isDefault && <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full">Default</span>}</div><p className="text-xs text-slate-500">{fmtDate(sd.fromDate)} - {fmtDate(sd.toDate)}</p></div>
+                    <div><div className="flex items-center gap-2"><p className="text-[13px] font-medium">{sd.title}</p>{sd.isDefault && <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-[12px] rounded-full">Default</span>}</div><p className="text-[12px] text-slate-500">{fmtDate(sd.fromDate)} - {fmtDate(sd.toDate)}</p></div>
                     <div className="flex gap-1"><button onClick={() => setLocalSeasonDates(seasonDates.map(s => ({...s, isDefault: s.id === sd.id ? !s.isDefault : false})))} className={`p-1 rounded ${sd.isDefault ? 'bg-blue-50 text-blue-600' : 'hover:bg-slate-100 text-slate-500'}`}><Target className="w-4 h-4" /></button><button onClick={() => { setEditingId('sd-' + sd.id); setEditData({title: sd.title, fromDate: sd.fromDate, toDate: sd.toDate, isDefault: sd.isDefault}); }} className="p-1 hover:bg-slate-100 rounded"><Edit2 className="w-4 h-4 text-slate-500" /></button><button onClick={() => setLocalSeasonDates(seasonDates.filter(s => s.id !== sd.id))} className="p-1 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4 text-red-500" /></button></div>
                   </div>
                 )}
@@ -3914,12 +3983,12 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
             ))}
             {showAdd === 'seasonDate' ? (
               <div className="p-3 space-y-2">
-                <input type="text" value={newData.title || ''} onChange={e => setNewData({...newData, title: e.target.value})} className="w-full px-2 py-1 text-sm border rounded" placeholder="Title" />
-                <div className="grid grid-cols-2 gap-2"><input type="date" value={newData.fromDate || ''} onChange={e => setNewData({...newData, fromDate: e.target.value})} className="px-2 py-1 text-sm border rounded" /><input type="date" value={newData.toDate || ''} onChange={e => setNewData({...newData, toDate: e.target.value})} className="px-2 py-1 text-sm border rounded" /></div>
-                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={newData.isDefault || false} onChange={e => setNewData({...newData, isDefault: e.target.checked})} />Default</label>
-                <div className="flex gap-2"><button onClick={() => { if (newData.title && newData.fromDate && newData.toDate) { let upd = seasonDates; if (newData.isDefault) upd = seasonDates.map(s => ({...s, isDefault: false})); const newSd = {id: String(Date.now()), ...newData}; onSaveSeasonDate(newSd); setLocalSeasonDates([...upd, newSd]); setNewData({}); setShowAdd(null); }}} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Add</button><button onClick={() => { setShowAdd(null); setNewData({}); }} className="flex-1 px-2 py-1 bg-slate-100 rounded text-xs">Cancel</button></div>
+                <input type="text" value={newData.title || ''} onChange={e => setNewData({...newData, title: e.target.value})} className="w-full px-2 py-1 text-[13px] border rounded" placeholder="Title" />
+                <div className="grid grid-cols-2 gap-2"><input type="date" value={newData.fromDate || ''} onChange={e => setNewData({...newData, fromDate: e.target.value})} className="px-2 py-1 text-[13px] border rounded" /><input type="date" value={newData.toDate || ''} onChange={e => setNewData({...newData, toDate: e.target.value})} className="px-2 py-1 text-[13px] border rounded" /></div>
+                <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={newData.isDefault || false} onChange={e => setNewData({...newData, isDefault: e.target.checked})} />Default</label>
+                <div className="flex gap-2"><button onClick={() => { if (newData.title && newData.fromDate && newData.toDate) { let upd = seasonDates; if (newData.isDefault) upd = seasonDates.map(s => ({...s, isDefault: false})); const newSd = {id: String(Date.now()), ...newData}; onSaveSeasonDate(newSd); setLocalSeasonDates([...upd, newSd]); setNewData({}); setShowAdd(null); }}} className="flex-1 px-2 py-1 bg-green-100 text-green-700 rounded text-[12px]">Add</button><button onClick={() => { setShowAdd(null); setNewData({}); }} className="flex-1 px-2 py-1 bg-slate-100 rounded text-[12px]">Cancel</button></div>
               </div>
-            ) : <div className="p-3"><button onClick={() => setShowAdd('seasonDate')} className="w-full px-4 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium"><Plus className="w-4 h-4 inline mr-1" />Add Time Period</button></div>}
+            ) : <div className="p-3"><button onClick={() => setShowAdd('seasonDate')} className="w-full px-4 py-2 bg-slate-800 text-white rounded-lg text-[13px] font-medium"><Plus className="w-4 h-4 inline mr-1" />Add Time Period</button></div>}
           </div>
         )}
       </div>
@@ -3944,7 +4013,7 @@ const [photo, setPhoto] = useState(athlete?.photo || '');
   const [showAddInjury, setShowAddInjury] = useState(false);
   const [injuryData, setInjuryData] = useState({ bodyPart: 'Head', startDate: '', returnDate: '', surgeryDate: '', notes: '', event: 'Training', surface: '4G', contact: 'Contact' });
 
-  if (!athlete) return <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6"><div className="bg-white rounded-lg border border-slate-200 p-6 text-center"><p>Athlete not found</p><button onClick={() => navigateTo('availability')} className="mt-4 px-4 py-2 bg-slate-800 text-white rounded-lg text-sm">Back</button></div></div>;
+  if (!athlete) return <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6"><div className="bg-white rounded-lg border border-slate-200 p-6 text-center"><p>Athlete not found</p><button onClick={() => navigateTo('availability')} className="mt-4 px-4 py-2 bg-slate-800 text-white rounded-lg text-[13px]">Back</button></div></div>;
 
   const genAvatar = (n: string) => { if (!n) return ''; const p = n.trim().split(' '); return p.length >= 2 ? p[0][0].toUpperCase() + p[p.length-1][0].toUpperCase() : n.substring(0,2).toUpperCase(); };
   const isNew = athlete?.name === 'New Athlete' && !athlete?.positionNumbers?.length;
@@ -3973,7 +4042,8 @@ const [photo, setPhoto] = useState(athlete?.photo || '');
 
   return (
     <div className="max-w-md md:max-w-3xl mx-auto p-4 md:p-6">
-      {showSaveSuccess && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-sm">✓ Saved!</div>}
+      {/* Unified with the Availability page's "Saved" toast (2026-09-03 audit fix) — these were two different implementations of the same idea in the same file. */}
+      {showSaveSuccess && <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-[13px] font-medium">✓ Saved</div>}
       <div className="space-y-4 mb-20">
         <div className="bg-white rounded-lg border border-slate-200 p-4 space-y-4">
           <div className="flex justify-center">
@@ -3985,10 +4055,10 @@ const [photo, setPhoto] = useState(athlete?.photo || '');
               </label>
             </div>
           </div>
-          <div><label className="block text-xs font-medium mb-1">Name</label><input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Name" className="w-full px-3 py-2 text-sm border rounded-lg" /></div>
+          <div><label className="block text-[12px] font-medium mb-1">Name</label><input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Name" className="w-full px-3 py-2 text-[13px] border rounded-lg" /></div>
           <div>
-            <label className="block text-xs font-medium mb-1">Positions</label>
-            <button onClick={() => setShowPositionPicker(!showPositionPicker)} className="w-full px-3 py-2 text-sm border rounded-lg text-left flex justify-between items-center">
+            <label className="block text-[12px] font-medium mb-1">Positions</label>
+            <button onClick={() => setShowPositionPicker(!showPositionPicker)} className="w-full px-3 py-2 text-[13px] border rounded-lg text-left flex justify-between items-center">
               <span className={selectedNames.length > 0 ? '' : 'text-slate-400'}>{selectedNames.length > 0 ? selectedNames.join(', ') : 'Select positions...'}</span>
               {showPositionPicker ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
             </button>
@@ -3996,7 +4066,7 @@ const [photo, setPhoto] = useState(athlete?.photo || '');
               <div className="mt-2 p-3 bg-slate-50 rounded-lg border">
                 {['Forward', 'Back'].map(group => (
                   <div key={group} className="mb-3 last:mb-0">
-                    <p className="text-xs font-semibold text-slate-500 mb-2">{group}s</p>
+                    <p className="text-[12px] font-semibold text-slate-500 mb-2">{group}s</p>
                     <div className="flex flex-wrap gap-2">
                       {uniqueNames.filter((pn: string) => teamStructure.find((p: any) => p.name === pn && p.group === group)).map((pn: string) => {
                         const nums = teamStructure.filter((p: any) => p.name === pn).map((p: any) => p.number);
@@ -4020,7 +4090,7 @@ const [photo, setPhoto] = useState(athlete?.photo || '');
                             const allNames = [...new Set(newNums.map((n: number) => teamStructure.find((p: any) => p.number === n)?.name).filter(Boolean))];
                             if (allNames.length === 1) setDefaultPosition(newNums[0]);
                           }
-                        }} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${sel ? 'bg-slate-800 text-white' : 'bg-white border hover:bg-slate-100'}`}>{pn}</button>;
+                        }} className={`px-3 py-1.5 rounded-lg text-[12px] font-medium ${sel ? 'bg-slate-800 text-white' : 'bg-white border hover:bg-slate-100'}`}>{pn}</button>;
                       })}
                     </div>
                   </div>
@@ -4041,14 +4111,14 @@ const [photo, setPhoto] = useState(athlete?.photo || '');
   });
   return (
     <div>
-      <label className="block text-xs font-medium mb-1.5">Default Position</label>
+      <label className="block text-[12px] font-medium mb-1.5">Default Position</label>
       <div className="flex flex-wrap gap-2">
         {assignedPosNames.map(pos => (
           <button
             key={pos.number}
             type="button"
             onClick={() => setDefaultPosition(defaultPosition === pos.number ? null : pos.number)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+            className={`px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-colors ${
               defaultPosition === pos.number
                 ? 'bg-blue-600 text-white border-blue-600'
                 : 'bg-white border-slate-200 text-slate-600 hover:border-slate-400'
@@ -4061,45 +4131,45 @@ const [photo, setPhoto] = useState(athlete?.photo || '');
     </div>
   );
 })()}
-{positionNumbers.length > 0 && <p className="text-xs text-slate-500">Group: {getPositionGroup(positionNumbers, teamStructure)}</p>} </div>
+{positionNumbers.length > 0 && <p className="text-[12px] text-slate-500">Group: {getPositionGroup(positionNumbers, teamStructure)}</p>} </div>
 
         <div className="bg-white rounded-lg border border-slate-200 p-4">
           <div className="flex justify-between items-center mb-3">
-            <h3 className="font-semibold text-sm">Injuries</h3>
-            {!showAddInjury && canAddInjury(role) && <button onClick={() => { setShowAddInjury(true); setEditingInjuryId(null); setInjuryData({ bodyPart: 'Head', startDate: today, returnDate: '', surgeryDate: '', notes: '', event: 'Training', surface: '4G', contact: 'Contact' }); }} className="text-xs text-blue-600 font-medium">+ Add</button>}
+            <h3 className="font-semibold text-[13px]">Injuries</h3>
+            {!showAddInjury && canAddInjury(role) && <button onClick={() => { setShowAddInjury(true); setEditingInjuryId(null); setInjuryData({ bodyPart: 'Head', startDate: today, returnDate: '', surgeryDate: '', notes: '', event: 'Training', surface: '4G', contact: 'Contact' }); }} className="text-[12px] text-blue-600 font-medium">+ Add</button>}
           </div>
           {showAddInjury && canAddInjury(role) && (
             <div className="mb-4 p-3 bg-slate-50 rounded-lg space-y-3">
-              <div><label className="block text-xs text-slate-500 mb-1">Body Part</label><select value={injuryData.bodyPart} onChange={e => setInjuryData({...injuryData, bodyPart: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg">{BODY_PARTS.map(bp => <option key={bp}>{bp}</option>)}</select></div>
+              <div><label className="block text-[12px] text-slate-500 mb-1">Body Part</label><select value={injuryData.bodyPart} onChange={e => setInjuryData({...injuryData, bodyPart: e.target.value})} className="w-full px-3 py-2 text-[13px] border rounded-lg">{BODY_PARTS.map(bp => <option key={bp}>{bp}</option>)}</select></div>
               <div className="grid grid-cols-3 gap-2">
-                <div><label className="block text-xs text-slate-500 mb-1">Event</label><select value={injuryData.event || 'Training'} onChange={e => setInjuryData({...injuryData, event: e.target.value})} className="w-full px-2 py-2 text-sm border rounded-lg"><option>Training</option><option>Match</option><option>Other</option></select></div>
-                <div><label className="block text-xs text-slate-500 mb-1">Surface</label><select value={injuryData.surface || '4G'} onChange={e => setInjuryData({...injuryData, surface: e.target.value})} className="w-full px-2 py-2 text-sm border rounded-lg"><option value="4G">4G</option><option>Grass</option><option>Other</option></select></div>
-                <div><label className="block text-xs text-slate-500 mb-1">Contact</label><select value={injuryData.contact || 'Contact'} onChange={e => setInjuryData({...injuryData, contact: e.target.value})} className="w-full px-2 py-2 text-sm border rounded-lg"><option>Contact</option><option>Non-Contact</option></select></div>
+                <div><label className="block text-[12px] text-slate-500 mb-1">Event</label><select value={injuryData.event || 'Training'} onChange={e => setInjuryData({...injuryData, event: e.target.value})} className="w-full px-2 py-2 text-[13px] border rounded-lg"><option>Training</option><option>Match</option><option>Other</option></select></div>
+                <div><label className="block text-[12px] text-slate-500 mb-1">Surface</label><select value={injuryData.surface || '4G'} onChange={e => setInjuryData({...injuryData, surface: e.target.value})} className="w-full px-2 py-2 text-[13px] border rounded-lg"><option value="4G">4G</option><option>Grass</option><option>Other</option></select></div>
+                <div><label className="block text-[12px] text-slate-500 mb-1">Contact</label><select value={injuryData.contact || 'Contact'} onChange={e => setInjuryData({...injuryData, contact: e.target.value})} className="w-full px-2 py-2 text-[13px] border rounded-lg"><option>Contact</option><option>Non-Contact</option></select></div>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <div><label className="block text-xs text-slate-500 mb-1">Start Date</label><input type="date" value={injuryData.startDate} onChange={e => setInjuryData({...injuryData, startDate: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" /></div>
-                <div><label className="block text-xs text-slate-500 mb-1">Est. Return (ETR)</label><input type="date" value={injuryData.returnDate} onChange={e => setInjuryData({...injuryData, returnDate: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" /></div>
+                <div><label className="block text-[12px] text-slate-500 mb-1">Start Date</label><input type="date" value={injuryData.startDate} onChange={e => setInjuryData({...injuryData, startDate: e.target.value})} className="w-full px-3 py-2 text-[13px] border rounded-lg" /></div>
+                <div><label className="block text-[12px] text-slate-500 mb-1">Est. Return (ETR)</label><input type="date" value={injuryData.returnDate} onChange={e => setInjuryData({...injuryData, returnDate: e.target.value})} className="w-full px-3 py-2 text-[13px] border rounded-lg" /></div>
               </div>
               <div><label className="block text-[11px] text-slate-500 mb-1">Date of Surgery <span className="text-slate-300">(if applicable)</span></label>
-                <input type="date" value={injuryData.surgeryDate || ''} onChange={e => setInjuryData({...injuryData, surgeryDate: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" />
+                <input type="date" value={injuryData.surgeryDate || ''} onChange={e => setInjuryData({...injuryData, surgeryDate: e.target.value})} className="w-full px-3 py-2 text-[13px] border rounded-lg" />
               </div>
               {injuryData.startDate && injuryData.returnDate && (() => {
                 const days = Math.round((new Date(injuryData.returnDate).getTime() - new Date(injuryData.startDate).getTime()) / 86400000);
-                return days >= 0 ? <div className="px-3 py-2 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-700 font-medium">⏱ Time Loss: {days} day{days !== 1 ? 's' : ''}</div> : null;
+                return days >= 0 ? <div className="px-3 py-2 bg-blue-50 border border-blue-100 rounded-lg text-[12px] text-blue-700 font-medium">⏱ Time Loss: {days} day{days !== 1 ? 's' : ''}</div> : null;
               })()}
-              <div><label className="block text-xs text-slate-500 mb-1">Notes</label><textarea value={injuryData.notes} onChange={e => setInjuryData({...injuryData, notes: e.target.value})} className="w-full px-3 py-2 text-sm border rounded-lg" rows={2} /></div>
-              <div className="flex gap-2"><button onClick={saveInjury} className="flex-1 px-3 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium">{editingInjuryId ? 'Update' : 'Add'}</button><button onClick={() => { setShowAddInjury(false); setEditingInjuryId(null); }} className="flex-1 px-3 py-2 bg-slate-100 rounded-lg text-sm">Cancel</button></div>
+              <div><label className="block text-[12px] text-slate-500 mb-1">Notes</label><textarea value={injuryData.notes} onChange={e => setInjuryData({...injuryData, notes: e.target.value})} className="w-full px-3 py-2 text-[13px] border rounded-lg" rows={2} /></div>
+              <div className="flex gap-2"><button onClick={saveInjury} className="flex-1 px-3 py-2 bg-slate-800 text-white rounded-lg text-[13px] font-medium">{editingInjuryId ? 'Update' : 'Add'}</button><button onClick={() => { setShowAddInjury(false); setEditingInjuryId(null); }} className="flex-1 px-3 py-2 bg-slate-100 rounded-lg text-[13px]">Cancel</button></div>
             </div>
           )}
           {activeInjuries.length > 0 && (
             <div className="mb-3">
-              <p className="text-xs text-slate-500 mb-2">Active</p>
+              <p className="text-[12px] text-slate-500 mb-2">Active</p>
               {activeInjuries.map(inj => (
                 <div key={inj.id} className="flex items-start justify-between p-2 bg-red-50 rounded-lg mb-2 border border-red-100">
                   <div>
-                    <p className="text-sm font-medium text-red-800">{inj.bodyPart}</p>
-                    <p className="text-xs text-red-600">Since {new Date(inj.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}{inj.returnDate ? ` • ETR: ${new Date(inj.returnDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}</p>
-                    {inj.notes && <p className="text-xs text-red-700 mt-1">{inj.notes}</p>}
+                    <p className="text-[13px] font-medium text-red-800">{inj.bodyPart}</p>
+                    <p className="text-[12px] text-red-600">Since {new Date(inj.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}{inj.returnDate ? ` • ETR: ${new Date(inj.returnDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}</p>
+                    {inj.notes && <p className="text-[12px] text-red-700 mt-1">{inj.notes}</p>}
                   </div>
                   {canAddInjury(role) && (
                     <div className="flex gap-1">
@@ -4113,13 +4183,13 @@ const [photo, setPhoto] = useState(athlete?.photo || '');
           )}
           {pastInjuries.length > 0 && (
             <div>
-              <p className="text-xs text-slate-500 mb-2">History</p>
+              <p className="text-[12px] text-slate-500 mb-2">History</p>
               {pastInjuries.map(inj => (
                 <div key={inj.id} className="flex items-start justify-between p-2 bg-slate-50 rounded-lg mb-2">
                   <div>
-                    <p className="text-sm font-medium text-slate-700">{inj.bodyPart}</p>
-                    <p className="text-xs text-slate-500">{new Date(inj.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {new Date(inj.returnDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
-                    {inj.notes && <p className="text-xs text-slate-600 mt-1">{inj.notes}</p>}
+                    <p className="text-[13px] font-medium text-slate-700">{inj.bodyPart}</p>
+                    <p className="text-[12px] text-slate-500">{new Date(inj.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {new Date(inj.returnDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
+                    {inj.notes && <p className="text-[12px] text-slate-600 mt-1">{inj.notes}</p>}
                   </div>
                   {canAddInjury(role) && (
                     <div className="flex gap-1">
@@ -4131,7 +4201,7 @@ const [photo, setPhoto] = useState(athlete?.photo || '');
               ))}
             </div>
           )}
-          {injuries.length === 0 && !showAddInjury && <p className="text-sm text-slate-400 text-center py-4">No injuries recorded</p>}
+          {injuries.length === 0 && !showAddInjury && <p className="text-[13px] text-slate-400 text-center py-4">No injuries recorded</p>}
         </div>
         <AvailabilityChart athleteId={athleteId} availabilityRecords={availabilityRecords} seasonDates={seasonDates} />
       </div>

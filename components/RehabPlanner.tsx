@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Plus, X, ChevronDown, ChevronUp, ArrowLeft, Loader2, Settings, Check, Trash2, Edit2, ChevronLeft, ChevronRight, Copy, Target, LayoutGrid, List } from 'lucide-react';
+import { Plus, X, ChevronDown, ChevronUp, ArrowLeft, Loader2, Settings, Check, Trash2, Edit2, ChevronLeft, ChevronRight, Copy, Target, LayoutGrid, List, AlertCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import type { Role } from './AthleteManager';
 
@@ -68,7 +68,7 @@ const SECTION_LABELS: Record<string, string> = { LTI: 'Long Term Injured', STI: 
 const SECTION_ORDER = ['LTI', 'STI', 'RTT', 'Other'] as const;
 const SECTION_BG: Record<string, string> = { LTI: 'bg-red-700', STI: 'bg-orange-600', RTT: 'bg-amber-500', Other: 'bg-slate-500' };
 const SECTION_BORDER: Record<string, string> = { LTI: 'border-red-200', STI: 'border-orange-200', RTT: 'border-amber-200', Other: 'border-slate-200' };
-const canEditRole = (r: Role) => r === 'Admin' || r === 'S&C' || r === 'Physio';
+const rehabCanEdit = (r: Role) => r === 'Admin' || r === 'S&C' || r === 'Physio';
 
 // Non-RAG staff colour palette — cycles by index
 const STAFF_COLOURS = [
@@ -272,7 +272,7 @@ const SetupSection = ({ id, expanded, setExpanded, title, count, children }: any
 
 // ── Setup Page ────────────────────────────────────────────────────────────────
 const RehabSetupPage = ({ clubId, role }: { clubId: string; role: Role }) => {
-  const canEdit = canEditRole(role);
+  const canEdit = rehabCanEdit(role);
   const [expanded, setExpanded] = useState<string>('components');
 
   const [components, setComponents] = useState<RehabComponent[]>([]);
@@ -322,7 +322,7 @@ const RehabSetupPage = ({ clubId, role }: { clubId: string; role: Role }) => {
     setCompForm({ name: '', options: '' }); setEditingComp(null); setShowAddComp(false);
     await load(); setSaving(false);
   };
-  const deleteComponent = async (id: string) => { if (!confirm('Delete?')) return; await supabase.from('rehab_components').delete().eq('id', id); await load(); };
+  const deleteComponent = async (id: string) => { if (!window.confirm('Delete?')) return; await supabase.from('rehab_components').delete().eq('id', id); await load(); };
 
   const saveStatusDef = async () => {
     setSavingStatus(true);
@@ -334,7 +334,7 @@ const RehabSetupPage = ({ clubId, role }: { clubId: string; role: Role }) => {
 
   const addRtp = async () => { if (!newRtp.trim()) return; await supabase.from('rtp_phases').insert({ club_id: clubId, name: newRtp.trim(), sort_order: rtpPhases.length }); setNewRtp(''); await load(); };
   const updateRtp = async (id: string) => { await supabase.from('rtp_phases').update({ name: editRtpVal.trim() }).eq('id', id); setEditingRtp(null); await load(); };
-  const deleteRtp = async (id: string) => { if (!confirm('Delete this RTP phase?')) return; await supabase.from('rtp_phases').delete().eq('id', id); await load(); };
+  const deleteRtp = async (id: string) => { if (!window.confirm('Delete this RTP phase?')) return; await supabase.from('rtp_phases').delete().eq('id', id); await load(); };
 
   const addStaff = async () => {
     if (!newStaffName.trim()) return;
@@ -345,7 +345,7 @@ const RehabSetupPage = ({ clubId, role }: { clubId: string; role: Role }) => {
     await supabase.from('staff_leads').update({ name: editStaffName.trim(), role: editStaffRole.trim() }).eq('id', id);
     setEditingStaff(null); await load();
   };
-  const deleteStaff = async (id: string) => { if (!confirm('Delete this staff lead?')) return; await supabase.from('staff_leads').delete().eq('id', id); await load(); };
+  const deleteStaff = async (id: string) => { if (!window.confirm('Delete this staff lead?')) return; await supabase.from('staff_leads').delete().eq('id', id); await load(); };
 
   return (
     <div className="max-w-2xl mx-auto p-4 md:p-6 space-y-3">
@@ -597,8 +597,6 @@ const MetaStrip = ({ row, athlete, weekCommencing, rtpPhases, staffLeads, fixtur
   );
 };
 
-// Helper — read-only check (canEdit is passed from parent, not the role string)
-const isPlayerRole = (canEdit: boolean) => !canEdit;
 
 // ── Athlete Row (weekly view) ─────────────────────────────────────────────────
 const AthleteRow = ({ row, athlete, components, weekDates, rtpPhases, staffLeads, fixtures, canEdit, isPlayer, weekCommencing, onUpdateEntry, onUpdateField, onRemove, onCopyPrev, hasPrevWeek }: any) => {
@@ -797,7 +795,7 @@ const AddAthleteModal = ({ athletes, existingIds, onAdd, onClose }: any) => {
 
 // ── Main Planner Page ─────────────────────────────────────────────────────────
 const RehabPlannerPage = ({ clubId, role }: { clubId: string; role: Role }) => {
-  const canEdit = canEditRole(role);
+  const canEdit = rehabCanEdit(role);
   const isPlayer = role === 'Player';
   const today = new Date().toISOString().split('T')[0];
   const currentMonday = getMondayOf(today);
@@ -819,6 +817,20 @@ const RehabPlannerPage = ({ clubId, role }: { clubId: string; role: Role }) => {
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [showAddAthlete, setShowAddAthlete] = useState(false);
   const [prevWeekAthleteIds, setPrevWeekAthleteIds] = useState<Set<string>>(new Set());
+  // "Jump to an arbitrary week" (2026-09-03 audit fix) — this was the only
+  // one of the four apps with prev/next arrows and no way to jump directly.
+  const [showWeekJump, setShowWeekJump] = useState(false);
+  // Save indicator + basic error handling (2026-09-03 audit fix) — every
+  // field on this page autosaved on change with no visible confirmation and
+  // no error handling at all; a failed save looked identical to a
+  // successful one. saveRowField/saveEntry below now report into this.
+  const [saveState, setSaveState] = useState<{ status: 'idle' | 'saving' | 'saved' | 'error'; message?: string }>({ status: 'idle' });
+  const saveIdleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const flashSaved = () => {
+    setSaveState({ status: 'saved' });
+    clearTimeout(saveIdleTimer.current);
+    saveIdleTimer.current = setTimeout(() => setSaveState(s => (s.status === 'saved' ? { status: 'idle' } : s)), 2000);
+  };
 
   const loadSetup = useCallback(async () => {
     const [{ data: compData }, { data: statusData }, { data: rtpData }, { data: staffData }, { data: fixtureData }, { data: athleteData }, { data: injData }] = await Promise.all([
@@ -827,8 +839,12 @@ const RehabPlannerPage = ({ clubId, role }: { clubId: string; role: Role }) => {
       supabase.from('rtp_phases').select('*').eq('club_id', clubId).order('sort_order'),
       supabase.from('staff_leads').select('*').eq('club_id', clubId).order('sort_order'),
       supabase.from('fixtures').select('*').eq('club_id', clubId).order('date'),
-      supabase.from('athletes').select('*').order('name'),
-      supabase.from('athlete_injuries').select('*'),
+      // Club-scoped (2026-08-26 fix) — these two were the only unscoped
+      // queries in this function; every other query above already filters
+      // by club_id. athlete_injuries has no club_id column of its own, so
+      // it's scoped via an inner join to its parent athlete's club_id.
+      supabase.from('athletes').select('*').eq('club_id', clubId).order('name'),
+      supabase.from('athlete_injuries').select('*, athletes!inner(club_id)').eq('athletes.club_id', clubId),
     ]);
     setComponents((compData || []).map((c: any) => ({ id: c.id, name: c.name, options: Array.isArray(c.options) ? c.options : JSON.parse(c.options || '[]'), sortOrder: c.sort_order })));
     if (statusData) setStatusDef({ id: statusData.id, ltiWeeksMin: statusData.lti_weeks_min, stiWeeksMin: statusData.sti_weeks_min, rttWeeksMin: statusData.rtt_weeks_min });
@@ -897,7 +913,10 @@ const RehabPlannerPage = ({ clubId, role }: { clubId: string; role: Role }) => {
 
   const saveRowField = async (rowId: string, field: string, value: any) => {
     const map: Record<string, string> = { rtpPhaseId: 'rtp_phase_id', staffLeadIds: 'staff_lead_ids', targetFixtureId: 'target_fixture_id', weekOverview: 'week_overview' };
-    await supabase.from('rehab_plan_rows').update({ [map[field]]: value }).eq('id', rowId);
+    setSaveState({ status: 'saving' });
+    const { error } = await supabase.from('rehab_plan_rows').update({ [map[field]]: value }).eq('id', rowId);
+    if (error) { console.error('[RehabPlanner] saveRowField failed', error.message); setSaveState({ status: 'error', message: "Couldn't save — check your connection and try again" }); return; }
+    flashSaved();
   };
   const updateRowField = (rowId: string, field: string, value: any) => {
     setRows(prev => prev.map(r => r.id === rowId ? { ...r, [field]: value } : r));
@@ -905,8 +924,12 @@ const RehabPlannerPage = ({ clubId, role }: { clubId: string; role: Role }) => {
   };
 
   const saveEntry = async (rowId: string, componentId: string, date: string, value: string) => {
-    if (value) await supabase.from('rehab_component_entries').upsert({ plan_row_id: rowId, component_id: componentId, day_date: date, value }, { onConflict: 'plan_row_id,component_id,day_date' });
-    else await supabase.from('rehab_component_entries').delete().eq('plan_row_id', rowId).eq('component_id', componentId).eq('day_date', date);
+    setSaveState({ status: 'saving' });
+    const { error } = value
+      ? await supabase.from('rehab_component_entries').upsert({ plan_row_id: rowId, component_id: componentId, day_date: date, value }, { onConflict: 'plan_row_id,component_id,day_date' })
+      : await supabase.from('rehab_component_entries').delete().eq('plan_row_id', rowId).eq('component_id', componentId).eq('day_date', date);
+    if (error) { console.error('[RehabPlanner] saveEntry failed', error.message); setSaveState({ status: 'error', message: "Couldn't save — check your connection and try again" }); return; }
+    flashSaved();
   };
   const updateEntry = (rowId: string, componentId: string, date: string, value: string) => {
     setRows(prev => prev.map(r => {
@@ -927,7 +950,13 @@ const RehabPlannerPage = ({ clubId, role }: { clubId: string; role: Role }) => {
     setShowAddAthlete(false);
   };
 
-  const removeRow = async (rowId: string) => { await supabase.from('rehab_plan_rows').delete().eq('id', rowId); setRows(prev => prev.filter(r => r.id !== rowId)); };
+  // 2026-08-26: was a single click with no confirmation — every other
+  // destructive action in this file (and every other app) confirms first.
+  const removeRow = async (rowId: string, athleteName?: string) => {
+    if (!window.confirm(`Remove ${athleteName || 'this player'} from this week's rehab plan?`)) return;
+    await supabase.from('rehab_plan_rows').delete().eq('id', rowId);
+    setRows(prev => prev.filter(r => r.id !== rowId));
+  };
 
   const copyFromPrevWeek = async (row: PlanRow) => {
     const d = new Date(weekCommencing + 'T00:00:00'); d.setDate(d.getDate() - 7);
@@ -972,11 +1001,29 @@ const RehabPlannerPage = ({ clubId, role }: { clubId: string; role: Role }) => {
       {/* Week nav + view toggle */}
       <div className="bg-white border-b border-slate-200 px-4 py-2 flex items-center gap-3 sticky top-0 z-20">
         <button onClick={prevWeek} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"><ChevronLeft className="w-4 h-4 text-slate-600" /></button>
-        <div className="flex-1 text-center">
-          <p className="text-[14px] font-semibold text-slate-900">w/c {fmtWC(weekCommencing)}</p>
-          {weekCommencing === currentMonday && <span className="text-[10px] text-blue-500 font-medium">Current week</span>}
+        <div className="flex-1 text-center relative">
+          <button onClick={() => setShowWeekJump(v => !v)} className="text-[14px] font-semibold text-slate-900 hover:text-blue-600 transition-colors">
+            w/c {fmtWC(weekCommencing)}
+          </button>
+          {weekCommencing === currentMonday && <span className="text-[10px] text-blue-500 font-medium ml-1.5">Current week</span>}
+          {showWeekJump && (
+            <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 z-30 bg-white border border-slate-200 rounded-lg shadow-lg p-2" onClick={e => e.stopPropagation()}>
+              <input type="date" defaultValue={weekCommencing}
+                onChange={e => { if (e.target.value) { setWeekCommencing(getMondayOf(e.target.value)); setShowWeekJump(false); } }}
+                className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              <p className="text-[10px] text-slate-400 mt-1">Jumps to that date's week (Mon–Sun)</p>
+            </div>
+          )}
         </div>
         <button onClick={nextWeek} className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"><ChevronRight className="w-4 h-4 text-slate-600" /></button>
+
+        {saveState.status !== 'idle' && (
+          <span className={`flex items-center gap-1 text-[11px] font-medium shrink-0 ${saveState.status === 'error' ? 'text-red-600' : 'text-slate-400'}`} title={saveState.message}>
+            {saveState.status === 'saving' && <><Loader2 className="w-3 h-3 animate-spin" />Saving…</>}
+            {saveState.status === 'saved' && <><Check className="w-3 h-3" />Saved</>}
+            {saveState.status === 'error' && <><AlertCircle className="w-3 h-3" />Couldn't save</>}
+          </span>
+        )}
 
         {/* View toggle */}
         <div className="flex items-center bg-slate-100 rounded-lg p-0.5 ml-1">
@@ -1042,7 +1089,7 @@ const RehabPlannerPage = ({ clubId, role }: { clubId: string; role: Role }) => {
                           hasPrevWeek={prevWeekAthleteIds.has(row.athleteId)}
                           onUpdateEntry={(compId: string, date: string, v: string) => updateEntry(row.id, compId, date, v)}
                           onUpdateField={(field: string, v: any) => updateRowField(row.id, field, v)}
-                          onRemove={() => removeRow(row.id)}
+                          onRemove={() => removeRow(row.id, athlete.name)}
                           onCopyPrev={() => copyFromPrevWeek(row)} />
                       );
                     })}
@@ -1068,7 +1115,7 @@ export function RehabPlanner({ role, clubId, authUser, onBack }: { role: Role; c
   React.useEffect(() => { setViewingAs(role); }, [role]);
   const effectiveRole: Role = role === 'Admin' ? viewingAs : role;
 
-  const showSetup = canEditRole(effectiveRole);
+  const showSetup = rehabCanEdit(effectiveRole);
   const navItems = [
     { id: 'planner', label: 'Rehab Planner', Icon: Target },
     ...(showSetup ? [{ id: 'setup', label: 'Setup', Icon: Settings }] : []),

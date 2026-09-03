@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Target, Zap, Calendar, Loader2, X, AlertCircle, Check, Plus, Trash2, Users, Link, Dumbbell } from 'lucide-react';
+import { Target, Zap, Calendar, Loader2, X, AlertCircle, Check, Plus, Trash2, Link, Dumbbell, Edit2, UserCog } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { TrainingPlanner } from './TrainingPlanner';
 import { MainSchedule } from './MainSchedule';
@@ -10,6 +10,12 @@ import { Gym } from './Gym';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 export type Role = 'Admin' | 'S&C' | 'Physio' | 'Coach' | 'Player';
+
+// Single source of truth for "every role, in order" — this file used to list
+// the five roles in two different orders in two different places
+// (UserManagementPanel's ALL_ROLES and loadProfile's validRoles); consolidated
+// per the consistency audit (2026-09-03).
+const ALL_ROLES: Role[] = ['Admin', 'Coach', 'Physio', 'S&C', 'Player'];
 
 // ── App definitions ──────────────────────────────────────────────────────────
 interface AppDef {
@@ -53,6 +59,14 @@ const APPS: AppDef[] = [
     Icon: Dumbbell,
     color: 'bg-orange-600',
     allowedRoles: ['Admin', 'S&C', 'Physio', 'Coach', 'Player'],
+  },
+  {
+    id: 'user-management',
+    label: 'User Management',
+    description: 'Manage this club\'s users, roles & access',
+    Icon: UserCog,
+    color: 'bg-slate-700',
+    allowedRoles: ['Admin'],
   },
 ];
 
@@ -134,25 +148,41 @@ const LoginScreen = () => {
 };
 
 // ── User Management Panel ─────────────────────────────────────────────────────
+// 2026-09-03 upgrade: within their own club, Admins can now set/manage roles
+// (existing), create new users with required name/email/role (below),
+// update an existing user's name, deactivate/reactivate a user instead of
+// only hard-deleting them, and send a password reset email without ever
+// seeing the password itself. Every write here was already club-scoped
+// (2026-08-26 fix); this round adds is_active/first_name/last_name from
+// migration 0011 on top of that.
 const UserManagementPanel = ({ clubId, currentUserId }: { clubId: string; currentUserId: string }) => {
-  const ALL_ROLES: Role[] = ['Admin', 'Coach', 'Physio', 'S&C', 'Player'];
   const [users, setUsers] = useState<any[]>([]);
   const [athletes, setAthletes] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<Role>('Coach');
-  const [inviteName, setInviteName] = useState('');
+  const [inviteFirstName, setInviteFirstName] = useState('');
+  const [inviteLastName, setInviteLastName] = useState('');
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState('');
   const [inviteSuccess, setInviteSuccess] = useState('');
   const [linkingUserId, setLinkingUserId] = useState<string | null>(null);
+  const [editingDetailsUserId, setEditingDetailsUserId] = useState<string | null>(null);
+  const [editFirstName, setEditFirstName] = useState('');
+  const [editLastName, setEditLastName] = useState('');
+  const [savingDetails, setSavingDetails] = useState(false);
+  const [resettingPasswordId, setResettingPasswordId] = useState<string | null>(null);
+  const [rowMessage, setRowMessage] = useState<{ id: string; text: string; error?: boolean } | null>(null);
 
   const load = async () => {
     setLoading(true);
     const [{ data }, { data: emailData }, { data: athleteData }] = await Promise.all([
-      supabase.from('user_profiles').select('id, role, full_name, linked_athlete_id, created_at').eq('club_id', clubId).order('full_name'),
+      supabase.from('user_profiles').select('id, role, full_name, first_name, last_name, is_active, linked_athlete_id, created_at').eq('club_id', clubId).order('full_name'),
       supabase.rpc('get_user_emails', { club_uuid: clubId }),
-      supabase.from('athletes').select('id, name').order('name'),
+      // Club-scoped (2026-08-26 fix) — this was the one query in the whole
+      // panel with no club_id filter, which let an Admin link a login to
+      // another club's athlete record. See also linkAthlete() below.
+      supabase.from('athletes').select('id, name').eq('club_id', clubId).order('name'),
     ]);
     const emailMap: Record<string, string> = {};
     (emailData || []).forEach((r: any) => { emailMap[r.id] = r.email; });
@@ -163,42 +193,126 @@ const UserManagementPanel = ({ clubId, currentUserId }: { clubId: string; curren
 
   useEffect(() => { load(); }, [clubId]);
 
+  const flash = (id: string, text: string, error = false) => {
+    setRowMessage({ id, text, error });
+    setTimeout(() => setRowMessage(cur => (cur?.id === id && cur.text === text ? null : cur)), 4000);
+  };
+
   const updateUserRole = async (userId: string, newRole: Role) => {
     await supabase.from('user_profiles').update({ role: newRole }).eq('id', userId).eq('club_id', clubId);
     setUsers(prev => prev.map(u => u.id === userId ? { ...u, role: newRole } : u));
   };
 
   const linkAthlete = async (userId: string, athleteId: string | null) => {
-    await supabase.from('user_profiles').update({ linked_athlete_id: athleteId || null }).eq('id', userId);
+    // Club-scoped (2026-08-26 fix), matching updateUserRole/removeUser below
+    // — defense in depth now that the athletes query above is scoped too.
+    await supabase.from('user_profiles').update({ linked_athlete_id: athleteId || null }).eq('id', userId).eq('club_id', clubId);
     setUsers(prev => prev.map(u => u.id === userId ? { ...u, linked_athlete_id: athleteId } : u));
     setLinkingUserId(null);
   };
 
   const removeUser = async (userId: string) => {
-    if (!confirm('Remove this user from the club?')) return;
+    if (!confirm('Permanently remove this user from the club? This deletes their account — consider "Deactivate" instead if you just want to lock them out.')) return;
     await supabase.from('user_profiles').delete().eq('id', userId).eq('club_id', clubId);
     setUsers(prev => prev.filter(u => u.id !== userId));
   };
 
+  // "Make users inactive" — a deactivated user's own session is locked out
+  // everywhere by migration 0011's RLS policies (every ringfencing policy
+  // requires the ACTING user to be is_active). Nothing is deleted, so
+  // reactivating restores exactly what they had before.
+  const toggleActive = async (userId: string, currentlyActive: boolean) => {
+    const nextActive = !currentlyActive;
+    if (nextActive === false && !confirm('Make this user inactive? They will be locked out of every app until reactivated.')) return;
+    const { error } = await supabase.from('user_profiles').update({ is_active: nextActive }).eq('id', userId).eq('club_id', clubId);
+    if (error) { flash(userId, error.message, true); return; }
+    setUsers(prev => prev.map(u => u.id === userId ? { ...u, is_active: nextActive } : u));
+    flash(userId, nextActive ? 'Reactivated' : 'Deactivated');
+  };
+
+  const startEditDetails = (user: any) => {
+    setEditingDetailsUserId(user.id);
+    setEditFirstName(user.first_name || '');
+    setEditLastName(user.last_name || '');
+  };
+
+  const saveUserDetails = async (userId: string) => {
+    if (!editFirstName.trim() || !editLastName.trim()) { flash(userId, 'First and last name are both required', true); return; }
+    setSavingDetails(true);
+    const fullName = `${editFirstName.trim()} ${editLastName.trim()}`.trim();
+    const { error } = await supabase.from('user_profiles')
+      .update({ first_name: editFirstName.trim(), last_name: editLastName.trim(), full_name: fullName })
+      .eq('id', userId).eq('club_id', clubId);
+    setSavingDetails(false);
+    if (error) { flash(userId, error.message, true); return; }
+    setUsers(prev => prev.map(u => u.id === userId ? { ...u, first_name: editFirstName.trim(), last_name: editLastName.trim(), full_name: fullName } : u));
+    setEditingDetailsUserId(null);
+    flash(userId, 'Details updated');
+  };
+
+  // "Issue password reset emails but should not be able to access or view
+  // these passwords" — resetPasswordForEmail sends a reset link and never
+  // returns or exposes a password to the caller; there is no admin-visible
+  // password anywhere in this flow.
+  const sendPasswordReset = async (userId: string, email: string) => {
+    if (!email || email === '—') { flash(userId, 'No email on file for this user', true); return; }
+    setResettingPasswordId(userId);
+    const { error } = await supabase.auth.resetPasswordForEmail(email);
+    setResettingPasswordId(null);
+    flash(userId, error ? error.message : `Reset email sent to ${email}`, !!error);
+  };
+
   const inviteUser = async () => {
-    if (!inviteEmail.trim()) { setInviteError('Email is required'); return; }
+    const firstName = inviteFirstName.trim();
+    const lastName = inviteLastName.trim();
+    const email = inviteEmail.trim();
+    if (!firstName || !lastName) { setInviteError('First and last name are required'); return; }
+    if (!email) { setInviteError('Email is required'); return; }
+    if (!inviteRole) { setInviteError('Role is required'); return; }
     setInviting(true); setInviteError(''); setInviteSuccess('');
+    const fullName = `${firstName} ${lastName}`;
+    // invite_user_to_club is an existing RPC whose internals we can't see
+    // from this repo (created directly in the dashboard) — its signature is
+    // unchanged. It's still given the combined name so full_name (which
+    // every existing display across all 4 apps reads) comes out right; the
+    // new first_name/last_name columns are then set with a follow-up update
+    // below, since the RPC predates them and can't be safely assumed to
+    // set them itself. Users are created within THIS club only — club_uuid
+    // is fixed to the current club_id and the new user's club_id can never
+    // be changed afterwards (migration 0011's trigger blocks it at the DB
+    // level), matching "users are created within that club and cannot move
+    // clubs."
     const { error } = await supabase.rpc('invite_user_to_club', {
-      invite_email: inviteEmail.trim(), invite_role: inviteRole,
-      invite_name: inviteName.trim(), club_uuid: clubId,
+      invite_email: email, invite_role: inviteRole,
+      invite_name: fullName, club_uuid: clubId,
     });
-    if (error) { setInviteError(error.message); } else {
-      setInviteSuccess(`Invite sent to ${inviteEmail}`);
-      setInviteEmail(''); setInviteName(''); setInviteRole('Coach');
-      load();
+    if (error) {
+      setInviteError(error.message);
+      setInviting(false);
+      return;
     }
+    // Follow up: find the row the RPC just created (by email, within this
+    // club) and set first_name/last_name on it — the RPC's own return value
+    // isn't something this repo can rely on the shape of.
+    const { data: emailRows } = await supabase.rpc('get_user_emails', { club_uuid: clubId });
+    const createdId = (emailRows || []).find((r: any) => (r.email || '').toLowerCase() === email.toLowerCase())?.id;
+    if (createdId) {
+      await supabase.from('user_profiles').update({ first_name: firstName, last_name: lastName }).eq('id', createdId).eq('club_id', clubId);
+    }
+    setInviteSuccess(`Invite sent to ${email}`);
+    setInviteEmail(''); setInviteFirstName(''); setInviteLastName(''); setInviteRole('Coach');
+    await load();
     setInviting(false);
   };
 
+  // Deliberately avoids blue/emerald/violet/orange — those are already each
+  // app's own sidebar-identity color (Training Planner/Rehab/Main Schedule/
+  // Gym), and this badge meant something different (a role, not an app) in
+  // the same hue — a consistency-audit fix (2026-09-03).
   const roleColor: Record<string, string> = {
-    Admin: 'bg-red-100 text-red-700', Coach: 'bg-blue-100 text-blue-700',
-    Physio: 'bg-green-100 text-green-700', 'S&C': 'bg-orange-100 text-orange-700',
-    Player: 'bg-violet-100 text-violet-700',
+    Admin: 'bg-red-100 text-red-700', Coach: 'bg-cyan-100 text-cyan-700',
+    Physio: 'bg-teal-100 text-teal-700', 'S&C': 'bg-amber-100 text-amber-700',
+    Player: 'bg-pink-100 text-pink-700',
   };
 
   if (loading) return <div className="flex justify-center py-12"><Loader2 className="w-5 h-5 animate-spin text-slate-400" /></div>;
@@ -207,20 +321,42 @@ const UserManagementPanel = ({ clubId, currentUserId }: { clubId: string; curren
     <div className="max-w-2xl mx-auto space-y-3">
       {users.map(user => {
         const linkedAthlete = athletes.find((a: any) => a.id === user.linked_athlete_id);
+        const isActive = user.is_active !== false;
+        const isEditingDetails = editingDetailsUserId === user.id;
+        const msg = rowMessage?.id === user.id ? rowMessage : null;
         return (
-          <div key={user.id} className="bg-white rounded-xl border border-slate-200 p-4">
+          <div key={user.id} className={`bg-white rounded-xl border p-4 ${isActive ? 'border-slate-200' : 'border-slate-200 bg-slate-50/60'}`}>
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-[12px] font-bold text-slate-600 shrink-0">
+              <div className={`w-9 h-9 rounded-full flex items-center justify-center text-[12px] font-bold shrink-0 ${isActive ? 'bg-slate-100 text-slate-600' : 'bg-slate-200 text-slate-400'}`}>
                 {(user.full_name || user.email || '?')[0].toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-[13px] font-semibold text-slate-900">{user.full_name || '—'}</p>
+                {isEditingDetails ? (
+                  <div className="flex items-center gap-1.5">
+                    <input type="text" placeholder="First name" value={editFirstName} onChange={e => setEditFirstName(e.target.value)}
+                      className="w-24 h-7 px-2 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                    <input type="text" placeholder="Last name" value={editLastName} onChange={e => setEditLastName(e.target.value)}
+                      className="w-24 h-7 px-2 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                    <button onClick={() => saveUserDetails(user.id)} disabled={savingDetails} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded disabled:opacity-40">
+                      {savingDetails ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                    </button>
+                    <button onClick={() => setEditingDetailsUserId(null)} className="p-1 text-slate-400 hover:bg-slate-100 rounded"><X className="w-3.5 h-3.5" /></button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-[13px] font-semibold text-slate-900 truncate">{user.full_name || '—'}</p>
+                    {!isActive && <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-slate-200 text-slate-500 shrink-0">Inactive</span>}
+                    <button onClick={() => startEditDetails(user)} className="p-0.5 text-slate-300 hover:text-slate-600 transition-colors shrink-0" title="Edit name">
+                      <Edit2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
                 <p className="text-[11px] text-slate-400 truncate">{user.email}</p>
               </div>
               <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${roleColor[user.role] || 'bg-slate-100 text-slate-500'}`}>{user.role}</span>
               {user.id === currentUserId
                 ? <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded shrink-0">You</span>
-                : <button onClick={() => removeUser(user.id)} className="p-1 text-slate-300 hover:text-red-500 transition-colors shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
+                : <button onClick={() => removeUser(user.id)} className="p-1 text-slate-300 hover:text-red-500 transition-colors shrink-0" title="Remove permanently"><Trash2 className="w-3.5 h-3.5" /></button>
               }
             </div>
 
@@ -253,16 +389,34 @@ const UserManagementPanel = ({ clubId, currentUserId }: { clubId: string; curren
                   </button>
                 )}
               </div>
+              {user.id !== currentUserId && (
+                <button onClick={() => toggleActive(user.id, isActive)}
+                  className={`h-7 px-2.5 text-[11px] rounded-lg border transition-colors ${isActive ? 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100' : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}>
+                  {isActive ? 'Deactivate' : 'Reactivate'}
+                </button>
+              )}
+              <button onClick={() => sendPasswordReset(user.id, user.email)} disabled={resettingPasswordId === user.id}
+                className="h-7 px-2.5 text-[11px] rounded-lg border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 disabled:opacity-40 flex items-center gap-1">
+                {resettingPasswordId === user.id ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                Send password reset
+              </button>
             </div>
+            {msg && <p className={`mt-2 text-[11px] flex items-center gap-1 ${msg.error ? 'text-red-600' : 'text-emerald-600'}`}>
+              {msg.error ? <AlertCircle className="w-3 h-3" /> : <Check className="w-3 h-3" />}{msg.text}
+            </p>}
           </div>
         );
       })}
 
       <div className="bg-white rounded-xl border border-slate-200 p-4">
-        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-3">Invite new member</p>
+        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-3">Create new user</p>
         <div className="space-y-2">
-          <input type="text" placeholder="Full name" value={inviteName} onChange={e => setInviteName(e.target.value)}
-            className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          <div className="flex gap-2">
+            <input type="text" placeholder="First name" value={inviteFirstName} onChange={e => { setInviteFirstName(e.target.value); setInviteError(''); }}
+              className="flex-1 h-9 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+            <input type="text" placeholder="Last name" value={inviteLastName} onChange={e => { setInviteLastName(e.target.value); setInviteError(''); }}
+              className="flex-1 h-9 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          </div>
           <input type="email" placeholder="Email address" value={inviteEmail} onChange={e => { setInviteEmail(e.target.value); setInviteError(''); }}
             className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
           <div className="flex gap-2">
@@ -276,6 +430,7 @@ const UserManagementPanel = ({ clubId, currentUserId }: { clubId: string; curren
               {inviting ? 'Sending…' : 'Invite'}
             </button>
           </div>
+          <p className="text-[11px] text-slate-400">First name, last name, email and role are all required. New users are created in this club only and can't be moved to another club.</p>
           {inviteError && <p className="text-[11px] text-red-600 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{inviteError}</p>}
           {inviteSuccess && <p className="text-[11px] text-green-600 flex items-center gap-1"><Check className="w-3 h-3" />{inviteSuccess}</p>}
         </div>
@@ -285,10 +440,9 @@ const UserManagementPanel = ({ clubId, currentUserId }: { clubId: string; curren
 };
 
 // ── Landing Page ─────────────────────────────────────────────────────────────
-const LandingPage = ({ role, clubId, currentUserId, onOpenApp }: {
-  role: Role; clubId: string; currentUserId: string; onOpenApp: (id: string) => void;
+const LandingPage = ({ role, onOpenApp }: {
+  role: Role; onOpenApp: (id: string) => void;
 }) => {
-  const [showUsers, setShowUsers] = useState(false);
   const visibleApps = APPS.filter(a => a.allowedRoles.includes(role));
 
   return (
@@ -302,12 +456,6 @@ const LandingPage = ({ role, clubId, currentUserId, onOpenApp }: {
             <span className="text-[15px] font-bold text-white tracking-tight">Athlete Manager</span>
           </div>
           <div className="flex items-center gap-2">
-            {role === 'Admin' && (
-              <button onClick={() => setShowUsers(!showUsers)}
-                className={`flex items-center gap-1.5 h-8 px-3 rounded-lg text-[12px] font-medium transition-colors ${showUsers ? 'bg-white/10 text-white' : 'text-white/50 hover:text-white hover:bg-white/[0.06]'}`}>
-                <Users className="w-3.5 h-3.5" />Users
-              </button>
-            )}
             <span className="text-[11px] text-white/30 px-1">{role}</span>
             <button onClick={() => supabase.auth.signOut()}
               className="h-8 px-3 text-[12px] text-white/50 hover:text-white border border-white/10 rounded-lg hover:bg-white/[0.06] transition-colors">
@@ -318,34 +466,57 @@ const LandingPage = ({ role, clubId, currentUserId, onOpenApp }: {
       </header>
 
       <main className="max-w-4xl mx-auto px-6 py-10">
-        {showUsers && role === 'Admin' ? (
-          <div>
-            <div className="flex items-center gap-3 mb-6">
-              <button onClick={() => setShowUsers(false)} className="text-[13px] text-slate-500 hover:text-slate-700 transition-colors">← Back</button>
-              <h2 className="text-[18px] font-bold text-slate-900">User Management</h2>
+        <div className="mb-8">
+          <h2 className="text-[22px] font-bold text-slate-900 mb-1">Your Apps</h2>
+          <p className="text-[13px] text-slate-400">Select an app to get started</p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {visibleApps.map(app => (
+            <button key={app.id} onClick={() => onOpenApp(app.id)}
+              className="bg-white rounded-xl border border-slate-200 p-6 text-left hover:shadow-md hover:border-slate-300 transition-all group">
+              <div className={`w-11 h-11 rounded-xl ${app.color} flex items-center justify-center mb-4 group-hover:scale-105 transition-transform`}>
+                <app.Icon className="w-5 h-5 text-white" strokeWidth={2} />
+              </div>
+              <h3 className="text-[15px] font-semibold text-slate-900 mb-1">{app.label}</h3>
+              <p className="text-[12px] text-slate-400 leading-relaxed">{app.description}</p>
+            </button>
+          ))}
+        </div>
+      </main>
+    </div>
+  );
+};
+
+// ── User Management App shell ────────────────────────────────────────────────
+// Promoted from a header pill on the landing page to its own app tile
+// (2026-09-03), per Joanne's answer ("User Management will become a 5th
+// App"). Same minimal single-page shell pattern as Main Schedule — no
+// sub-navigation needed since the panel is the whole app.
+const UserManagementApp = ({ clubId, currentUserId, onBack }: { clubId: string; currentUserId: string; onBack: () => void }) => {
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <header className="bg-slate-900 px-6 py-4 sticky top-0 z-10">
+        <div className="max-w-4xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button onClick={onBack} className="flex items-center gap-1.5 text-white/40 hover:text-white/70 text-[12px] transition-colors">
+              <Target className="w-3 h-3" />All Apps
+            </button>
+            <div className="w-px h-4 bg-white/10" />
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded bg-slate-700 flex items-center justify-center">
+                <UserCog className="w-3.5 h-3.5 text-white" strokeWidth={2.5} />
+              </div>
+              <span className="text-[14px] font-semibold text-white tracking-tight">User Management</span>
             </div>
-            <UserManagementPanel clubId={clubId} currentUserId={currentUserId} />
           </div>
-        ) : (
-          <>
-            <div className="mb-8">
-              <h2 className="text-[22px] font-bold text-slate-900 mb-1">Your Apps</h2>
-              <p className="text-[13px] text-slate-400">Select an app to get started</p>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {visibleApps.map(app => (
-                <button key={app.id} onClick={() => onOpenApp(app.id)}
-                  className="bg-white rounded-xl border border-slate-200 p-6 text-left hover:shadow-md hover:border-slate-300 transition-all group">
-                  <div className={`w-11 h-11 rounded-xl ${app.color} flex items-center justify-center mb-4 group-hover:scale-105 transition-transform`}>
-                    <app.Icon className="w-5 h-5 text-white" strokeWidth={2} />
-                  </div>
-                  <h3 className="text-[15px] font-semibold text-slate-900 mb-1">{app.label}</h3>
-                  <p className="text-[12px] text-slate-400 leading-relaxed">{app.description}</p>
-                </button>
-              ))}
-            </div>
-          </>
-        )}
+          <button onClick={() => supabase.auth.signOut()}
+            className="h-8 px-3 text-[12px] text-white/50 hover:text-white border border-white/10 rounded-lg hover:bg-white/[0.06] transition-colors">
+            Sign out
+          </button>
+        </div>
+      </header>
+      <main className="max-w-4xl mx-auto px-6 py-10">
+        <UserManagementPanel clubId={clubId} currentUserId={currentUserId} />
       </main>
     </div>
   );
@@ -355,12 +526,12 @@ const LandingPage = ({ role, clubId, currentUserId, onOpenApp }: {
 export default function AthleteManager() {
   const [authUser, setAuthUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [role, setRole] = useState<Role>('Coach');
+  // Fails closed to the least-privileged role — see loadProfile's fallback below.
+  const [role, setRole] = useState<Role>('Player');
   const [clubId, setClubId] = useState<string | null>(null);
   const [activeApp, setActiveApp] = useState<string | null>(null);
 
   const loadProfile = async (userId: string) => {
-    const validRoles: Role[] = ['Admin', 'S&C', 'Physio', 'Coach', 'Player'];
     for (let attempt = 0; attempt < 3; attempt++) {
       const { data, error } = await supabase
         .from('user_profiles')
@@ -368,8 +539,11 @@ export default function AthleteManager() {
         .eq('id', userId)
         .maybeSingle();
       if (data) {
-        const loadedRole = validRoles.includes((data.role || '').trim() as Role)
-          ? (data.role.trim() as Role) : 'Coach';
+        // 2026-08-26: an invalid/blank role used to silently grant
+        // Coach-level access. Fails closed to Player (the least-privileged
+        // role) instead, per Joanne's decision.
+        const loadedRole = ALL_ROLES.includes((data.role || '').trim() as Role)
+          ? (data.role.trim() as Role) : 'Player';
         setRole(loadedRole);
         setClubId(data.club_id);
         // If this role only has one app available, skip straight to it
@@ -421,8 +595,12 @@ export default function AthleteManager() {
     return <RehabPlanner role={role} clubId={clubId} authUser={authUser} onBack={() => setActiveApp(null)} />;
   if (activeApp === 'gym')
     return <Gym role={role} clubId={clubId} authUser={authUser} onBack={() => setActiveApp(null)} />;
+  if (activeApp === 'user-management')
+    return role === 'Admin'
+      ? <UserManagementApp clubId={clubId} currentUserId={authUser.id} onBack={() => setActiveApp(null)} />
+      : <LandingPage role={role} onOpenApp={setActiveApp} />;
 
   return (
-    <LandingPage role={role} clubId={clubId} currentUserId={authUser.id} onOpenApp={setActiveApp} />
+    <LandingPage role={role} onOpenApp={setActiveApp} />
   );
 }

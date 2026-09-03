@@ -25,8 +25,14 @@ import type { GymAthlete, GymSessionGroup, GymTeamPosition } from './gym/types';
 type Page = 'sessions' | 'groups' | 'exercise-bank' | 'defaults' | 'setup';
 
 export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: string; authUser: any; onBack: () => void }) {
-  const isPlayer = role === 'Player';
-  const canEdit = gymCanEdit(role);
+  // Admin can impersonate other roles to preview their view — same pattern
+  // as TrainingPlanner/RehabPlanner's "View as" (2026-09-03).
+  const [viewingAs, setViewingAs] = useState<Role>(role);
+  useEffect(() => { setViewingAs(role); }, [role]);
+  const effectiveRole: Role = role === 'Admin' ? viewingAs : role;
+
+  const isPlayer = effectiveRole === 'Player';
+  const canEdit = gymCanEdit(effectiveRole);
 
   const [loading, setLoading] = useState(true);
   const [athletes, setAthletes] = useState<GymAthlete[]>([]);
@@ -141,9 +147,18 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
           ))}
         </nav>
         <div className="p-3 border-t border-white/[0.06]">
+          {role === 'Admin' && (
+            <div className="mb-3">
+              <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] mb-1">View as</p>
+              <select value={viewingAs} onChange={e => { setViewingAs(e.target.value as Role); setPage('sessions'); }}
+                className="w-full h-7 px-2 text-[11px] rounded bg-white/[0.06] text-white/70 border border-white/10 focus:outline-none">
+                {(['Admin', 'S&C', 'Physio', 'Coach', 'Player'] as Role[]).map(r => <option key={r} value={r} className="bg-slate-900">{r}</option>)}
+              </select>
+            </div>
+          )}
           <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] mb-1">Signed in</p>
           <p className="text-[11px] text-white/50 truncate">{myName || authUser?.email}</p>
-          <p className="text-[10px] text-white/30 mt-0.5">{role}</p>
+          <p className="text-[10px] text-white/30 mt-0.5">{effectiveRole}</p>
           <button onClick={() => supabase.auth.signOut()} className="mt-2 w-full flex items-center gap-2 px-2.5 py-1.5 text-[12px] text-white/40 hover:text-white/70 hover:bg-white/[0.06] rounded transition-colors">
             <X className="w-3 h-3" />Sign out
           </button>
@@ -212,12 +227,12 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
           />
         ) : page === 'exercise-bank' ? (
           <div className="max-w-2xl mx-auto p-4 md:p-6 space-y-3 w-full">
-            <ExerciseBankAdmin clubId={clubId} currentUserId={authUser.id} canEdit={canEdit} role={role} />
+            <ExerciseBankAdmin clubId={clubId} currentUserId={authUser.id} canEdit={canEdit} role={effectiveRole} />
           </div>
         ) : page === 'setup' ? (
-          <GymSetup clubId={clubId} userId={authUser.id} role={role} teamStructure={teamStructure} />
+          <GymSetup clubId={clubId} userId={authUser.id} role={effectiveRole} teamStructure={teamStructure} />
         ) : (
-          <GymUI2Root athletes={athletes} teamStructure={teamStructure} role={role} userId={authUser.id} clubId={clubId} />
+          <GymUI2Root athletes={athletes} teamStructure={teamStructure} role={effectiveRole} userId={authUser.id} clubId={clubId} />
         )}
       </div>
     </div>

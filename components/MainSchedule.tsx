@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Calendar, Plus, Trash2, Edit2, Check, X, ChevronLeft, Loader2, ArrowLeft } from 'lucide-react';
+import { Calendar, Plus, Trash2, Edit2, Check, X, ChevronLeft, Loader2, ArrowLeft, Upload } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import type { Role } from './AthleteManager';
 
@@ -23,11 +23,198 @@ const HA_COLOURS: Record<string, string> = {
   Neutral: 'bg-slate-100 text-slate-600',
 };
 
+// ── CSV import (2026-09-03) ──────────────────────────────────────────────────
+// Main Schedule manages fixtures, not athletes, so this is its own small
+// parser rather than a reuse of CsvAthleteImportModal (Training Planner/Gym's
+// shared component) — different columns, different destination table. Kept
+// deliberately simple per Joanne's answer ("needs CSV import but today not
+// needing filters"): no column-matching UI, just a header row and a preview.
+interface ParsedFixtureRow {
+  date: string;
+  opposition: string;
+  homeAway: 'Home' | 'Away' | 'Neutral';
+}
+
+/** Same minimal quoted-CSV parser as CsvAthleteImportModal — handles quoted fields and CRLF/LF, not a general-purpose CSV library. */
+function parseCsvText(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let inQuotes = false;
+  const pushField = () => { row.push(field); field = ''; };
+  const pushRow = () => { pushField(); rows.push(row); row = []; };
+
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; } else { inQuotes = false; }
+      } else {
+        field += c;
+      }
+    } else if (c === '"') {
+      inQuotes = true;
+    } else if (c === ',') {
+      pushField();
+    } else if (c === '\n') {
+      pushRow();
+    } else if (c === '\r') {
+      // skip — the following \n (if any) triggers pushRow
+    } else {
+      field += c;
+    }
+  }
+  if (field.length > 0 || row.length > 0) pushRow();
+  return rows.filter(r => r.some(cell => cell.trim() !== ''));
+}
+
+function normalizeHeader(h: string): string {
+  return h.trim().toLowerCase().replace(/[\s_-]+/g, '');
+}
+
+/** Accepts ISO (2026-09-03) or UK-style (03/09/2026 or 3/9/26) dates and normalises to ISO for storage — fixtures.date is a plain date column, same format the Add Fixture form's <input type="date"> already writes. */
+function normaliseDate(raw: string): string | null {
+  const s = raw.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (m) {
+    let [, d, mo, y] = m;
+    if (y.length === 2) y = (Number(y) < 70 ? '20' : '19') + y;
+    const dd = d.padStart(2, '0'), mm = mo.padStart(2, '0');
+    const candidate = `${y}-${mm}-${dd}`;
+    return /^\d{4}-\d{2}-\d{2}$/.test(candidate) ? candidate : null;
+  }
+  return null;
+}
+
+function parseFixtureCsv(text: string): { rows: ParsedFixtureRow[]; headerWarning: string | null } {
+  const table = parseCsvText(text);
+  if (table.length === 0) return { rows: [], headerWarning: null };
+
+  const headerRow = table[0].map(normalizeHeader);
+  const dateIdx = headerRow.findIndex(h => h === 'date');
+  const oppositionIdx = headerRow.findIndex(h => h === 'opposition' || h === 'opponent');
+  if (dateIdx === -1 || oppositionIdx === -1) {
+    return { rows: [], headerWarning: 'Needs a "Date" and an "Opposition" column in the header row.' };
+  }
+  const homeAwayIdx = headerRow.findIndex(h => h === 'homeaway' || h === 'home/away' || h === 'venue');
+
+  const rows: ParsedFixtureRow[] = [];
+  for (const cells of table.slice(1)) {
+    const opposition = (cells[oppositionIdx] || '').trim();
+    const date = normaliseDate(cells[dateIdx] || '');
+    if (!opposition || !date) continue;
+
+    const rawHA = homeAwayIdx >= 0 ? (cells[homeAwayIdx] || '').trim().toLowerCase() : '';
+    const homeAway: ParsedFixtureRow['homeAway'] =
+      rawHA.startsWith('a') ? 'Away' : rawHA.startsWith('n') ? 'Neutral' : 'Home';
+
+    rows.push({ date, opposition, homeAway });
+  }
+
+  return { rows, headerWarning: null };
+}
+
+const FixtureCsvImportModal = ({ clubId, onImported, onClose }: { clubId: string; onImported: () => void; onClose: () => void }) => {
+  const [rows, setRows] = useState<ParsedFixtureRow[] | null>(null);
+  const [fileName, setFileName] = useState('');
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const handleFile = async (file: File) => {
+    setParseError(null);
+    setFileName(file.name);
+    const text = await file.text();
+    const { rows: parsed, headerWarning } = parseFixtureCsv(text);
+    if (headerWarning) { setParseError(headerWarning); setRows(null); return; }
+    if (parsed.length === 0) { setParseError('No rows with both a Date and an Opposition found in this file.'); setRows(null); return; }
+    setRows(parsed);
+  };
+
+  const handleImport = async () => {
+    if (!rows || rows.length === 0) return;
+    setImporting(true);
+    try {
+      const { error } = await supabase.from('fixtures').insert(
+        rows.map(r => ({ club_id: clubId, date: r.date, opposition: r.opposition, home_away: r.homeAway }))
+      );
+      if (error) throw error;
+      setDone(true);
+      onImported();
+    } catch (err: any) {
+      console.error('[FixtureCsvImportModal] import failed', err);
+      setParseError(err?.message || 'Import failed partway through — some fixtures may already have been added.');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 bg-black/30 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl w-full max-w-lg max-h-[85vh] overflow-y-auto shadow-xl" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 sticky top-0 bg-white z-10">
+          <h3 className="text-[14px] font-bold text-slate-900">Import fixtures from CSV</h3>
+          <button onClick={onClose} className="p-1 rounded hover:bg-slate-100 text-slate-400"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="p-4 space-y-3">
+          {done ? (
+            <div className="text-center py-6">
+              <p className="text-[14px] font-semibold text-emerald-700 mb-1">Imported {rows?.length} fixture{rows?.length !== 1 ? 's' : ''}</p>
+              <button onClick={onClose} className="h-9 px-4 rounded-lg bg-slate-900 text-white text-[13px] font-medium">Done</button>
+            </div>
+          ) : (
+            <>
+              <p className="text-[12px] text-slate-500">
+                Upload a CSV with a header row. Recognised columns: <span className="font-medium text-slate-700">Date</span> (required, e.g. 2026-09-03
+                or 03/09/2026), <span className="font-medium text-slate-700">Opposition</span> (required), and Home/Away (Home, Away, or Neutral — defaults
+                to Home). Every row is added as a new fixture.
+              </p>
+
+              <label className="flex items-center justify-center gap-2 h-11 border-2 border-dashed border-slate-200 rounded-lg text-[13px] text-slate-500 hover:border-slate-300 hover:bg-slate-50 cursor-pointer">
+                <Upload className="w-4 h-4" />
+                {fileName || 'Choose a CSV file…'}
+                <input type="file" accept=".csv,text/csv" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+              </label>
+
+              {parseError && <p className="text-[12px] text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{parseError}</p>}
+
+              {rows && rows.length > 0 && (
+                <div>
+                  <p className="text-[12px] font-medium text-slate-700 mb-1.5">{rows.length} fixture{rows.length !== 1 ? 's' : ''} ready to import</p>
+                  <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-56 overflow-y-auto">
+                    {rows.map((r, i) => (
+                      <div key={i} className="px-3 py-1.5 text-[12px] flex items-center justify-between gap-2">
+                        <span className="font-medium text-slate-800 truncate">{r.opposition}</span>
+                        <span className="text-slate-400 truncate">{fmtDate(r.date)} · {r.homeAway}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-1">
+                <button onClick={handleImport} disabled={!rows || rows.length === 0 || importing}
+                  className="flex-1 h-9 flex items-center justify-center gap-1.5 rounded-lg bg-slate-900 text-white text-[13px] font-medium disabled:opacity-40">
+                  {importing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                  {importing ? 'Importing…' : `Import ${rows?.length || ''} fixture${(rows?.length || 0) !== 1 ? 's' : ''}`}
+                </button>
+                <button onClick={onClose} disabled={importing} className="h-9 px-4 rounded-lg bg-slate-100 text-slate-600 text-[13px] disabled:opacity-40">Cancel</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ── Fixtures Setup Section ────────────────────────────────────────────────────
 const FixturesSetup = ({ clubId, canEdit }: { clubId: string; canEdit: boolean }) => {
   const [fixtures, setFixtures] = useState<Fixture[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const blank: { date: string; opposition: string; homeAway: 'Home' | 'Away' | 'Neutral' } = { date: '', opposition: '', homeAway: 'Home' };
@@ -92,17 +279,27 @@ const FixturesSetup = ({ clubId, canEdit }: { clubId: string; canEdit: boolean }
 
   return (
     <div className="space-y-4">
-      {/* Add fixture button */}
+      {/* Add fixture / import buttons */}
       {canEdit && !showAdd && (
-        <button onClick={() => setShowAdd(true)}
-          className="flex items-center gap-1.5 h-9 px-4 bg-slate-900 text-white rounded-lg text-[12px] font-medium hover:bg-slate-700 transition-colors">
-          <Plus className="w-3.5 h-3.5" />Add Fixture
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => setShowAdd(true)}
+            className="flex items-center gap-1.5 h-9 px-4 bg-slate-900 text-white rounded-lg text-[12px] font-medium hover:bg-slate-700 transition-colors">
+            <Plus className="w-3.5 h-3.5" />Add Fixture
+          </button>
+          <button onClick={() => setShowImport(true)}
+            className="flex items-center gap-1.5 h-9 px-4 bg-white border border-slate-200 text-slate-600 rounded-lg text-[12px] font-medium hover:bg-slate-50 transition-colors">
+            <Upload className="w-3.5 h-3.5" />Import CSV
+          </button>
+        </div>
+      )}
+
+      {showImport && (
+        <FixtureCsvImportModal clubId={clubId} onImported={load} onClose={() => setShowImport(false)} />
       )}
 
       {/* Add form */}
       {showAdd && (
-        <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+        <div className="bg-white rounded-lg border border-slate-200 p-4 space-y-3">
           <p className="text-[12px] font-semibold text-slate-600 uppercase tracking-wider">New Fixture</p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
@@ -135,7 +332,7 @@ const FixturesSetup = ({ clubId, canEdit }: { clubId: string; canEdit: boolean }
       )}
 
       {/* Upcoming fixtures */}
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
           <p className="text-[12px] font-semibold text-slate-700">Upcoming Fixtures</p>
           <p className="text-[11px] text-slate-400">{upcoming.length} fixture{upcoming.length !== 1 ? 's' : ''}</p>
@@ -162,7 +359,7 @@ const FixturesSetup = ({ clubId, canEdit }: { clubId: string; canEdit: boolean }
 
       {/* Past fixtures */}
       {past.length > 0 && (
-        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
             <p className="text-[12px] font-semibold text-slate-500">Past Fixtures</p>
             <p className="text-[11px] text-slate-400">{past.length} fixture{past.length !== 1 ? 's' : ''}</p>
@@ -207,7 +404,8 @@ const FixtureRow = ({ fixture, canEdit, isEditing, editForm, onEditStart, onEdit
             className="h-7 px-3 bg-slate-900 text-white rounded text-[11px] flex items-center gap-1 disabled:opacity-40">
             {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}Save
           </button>
-          <button onClick={onEditCancel} className="h-7 px-3 bg-white border border-slate-200 text-slate-600 rounded text-[11px]">Cancel</button>
+          {/* Unified with the Add-form's Cancel style below (2026-09-03 audit fix) — was a separate white-bordered treatment for the same action. */}
+          <button onClick={onEditCancel} className="h-7 px-3 bg-slate-100 text-slate-600 rounded text-[11px] hover:bg-slate-200 transition-colors">Cancel</button>
         </div>
       </div>
     );
@@ -239,7 +437,13 @@ const FixtureRow = ({ fixture, canEdit, isEditing, editForm, onEditStart, onEdit
 export function MainSchedule({ role, clubId, authUser, onBack }: {
   role: Role; clubId: string; authUser: any; onBack: () => void;
 }) {
-  const canEdit = role === 'Admin' || role === 'Coach';
+  // Admin can impersonate other roles to preview their view — same pattern
+  // as TrainingPlanner/RehabPlanner/Gym's "View as" (2026-09-03).
+  const [viewingAs, setViewingAs] = useState<Role>(role);
+  useEffect(() => { setViewingAs(role); }, [role]);
+  const effectiveRole: Role = role === 'Admin' ? viewingAs : role;
+
+  const canEdit = effectiveRole === 'Admin' || effectiveRole === 'Coach';
   const [page, setPage] = useState<'setup'>('setup');
 
   return (
@@ -266,9 +470,24 @@ export function MainSchedule({ role, clubId, authUser, onBack }: {
           </button>
         </nav>
         <div className="p-3 border-t border-white/[0.06]">
+          {role === 'Admin' && (
+            <div className="mb-3">
+              <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] mb-1">View as</p>
+              <select value={viewingAs} onChange={e => setViewingAs(e.target.value as Role)}
+                className="w-full h-7 px-2 text-[11px] rounded bg-white/[0.06] text-white/70 border border-white/10 focus:outline-none">
+                {(['Admin', 'S&C', 'Physio', 'Coach', 'Player'] as Role[]).map(r => <option key={r} value={r} className="bg-slate-900">{r}</option>)}
+              </select>
+            </div>
+          )}
           <p className="text-[10px] text-white/25 uppercase tracking-wider mb-1">Signed in as</p>
           <p className="text-[11px] text-white/50 truncate">{authUser?.email}</p>
-          <p className="text-[10px] text-white/30 mt-0.5">{role}</p>
+          <p className="text-[10px] text-white/30 mt-0.5">{effectiveRole}</p>
+          {/* Was missing entirely (2026-09-03 audit fix) — the only one of the
+              four apps where a desktop user had no way to sign out without
+              first going back to the app selector. */}
+          <button onClick={() => supabase.auth.signOut()} className="mt-2 w-full flex items-center gap-2 px-2.5 py-1.5 text-[12px] text-white/40 hover:text-white/70 hover:bg-white/[0.06] rounded transition-colors">
+            <X className="w-3 h-3" />Sign out
+          </button>
         </div>
       </aside>
 
