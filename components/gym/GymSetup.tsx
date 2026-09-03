@@ -175,6 +175,8 @@ export const GymSetup = ({
         }}
         saving={saving}
         role={role}
+        clubId={clubId}
+        currentUserId={userId}
       />
     );
   }

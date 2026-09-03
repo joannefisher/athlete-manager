@@ -69,36 +69,39 @@ select
   );
 
 -- ───────────────────────────────────────────────────────────────────────
--- 2. Aiden-specific check — fill in his email below, then run this block.
---    Compares his real auth account id against whatever id(s) exist in
---    user_profiles for that email. If auth_id and profile_id don't match
---    on a row, that row's id doesn't correspond to his real login — the
---    self-select policy (id = auth.uid()) can never match it, no matter
---    what club_id the row has. If more than one row comes back, that's a
---    duplicate — maybeSingle() errors on >1 row, which the app's retry
---    loop silently swallows into the same "not found" message.
+-- 2. Aiden-specific check — two steps, run in order (user_profiles has no
+--    email column at all — confirmed by the error this originally hit —
+--    so this can't be done as a single join on email; it goes through
+--    auth.users first, then user_profiles by id, separately).
 -- ───────────────────────────────────────────────────────────────────────
-select
-  au.id as auth_id,
-  au.email as auth_email,
-  up.id as profile_id,
-  up.club_id,
-  up.role,
-  up.is_active,
-  up.full_name,
-  (au.id = up.id) as ids_match
-from auth.users au
-full outer join user_profiles up on up.id = au.id or up.email = au.email  -- change to your actual email-matching column if user_profiles has no email column; see note below
-where au.email = 'REPLACE_WITH_AIDEN_OAKLEYS_EMAIL@example.com'
-   or up.full_name ilike '%Aiden Oakley%';
 
--- Note: if user_profiles has no `email` column at all, drop the
--- `or up.email = au.email` clause above and re-run — you'll then only see a
--- match if the ids already agree, or a lone row from whichever side of the
--- join actually has one. In that case, also just run:
---   select * from user_profiles where full_name ilike '%Aiden Oakley%';
--- directly, and compare its `id` column by eye against the id shown for
--- that email in Supabase's Authentication > Users screen.
+-- 2a. Find his real login account and copy its id.
+select id as auth_id, email
+from auth.users
+where email = 'REPLACE_WITH_AIDEN_OAKLEYS_EMAIL@example.com';
+
+-- 2b. Paste that id into both places below (replacing
+--     PASTE_AUTH_ID_FROM_2a_HERE, in the quotes) and run this. Matches by
+--     id (the row the self-select policy would actually find for him) OR
+--     by name (so a mismatched-id row still turns up instead of being
+--     invisible). Read id_matches_auth on every row that comes back:
+--       - one row, id_matches_auth = true  → his profile is fine; the
+--         cause is elsewhere (most likely: migrations not yet run, see
+--         section 1 above).
+--       - one row, id_matches_auth = false → found by name only, not by
+--         id — his profile's id doesn't match his real login. That row
+--         needs its id corrected (or the row recreated with the right id)
+--         before he can ever pass the self-select policy.
+--       - more than one row → duplicate profiles for him; maybeSingle()
+--         errors on this, and the app's retry loop silently turns that
+--         into the same "not found" message.
+--       - zero rows → no profile exists for him at all, under either id
+--         or name — he needs one created.
+select id as profile_id, club_id, role, is_active, full_name,
+       (id = 'PASTE_AUTH_ID_FROM_2a_HERE') as id_matches_auth
+from user_profiles
+where id = 'PASTE_AUTH_ID_FROM_2a_HERE'
+   or full_name ilike '%Aiden Oakley%';
 
 -- ───────────────────────────────────────────────────────────────────────
 -- 3. Every policy currently active on user_profiles, whatever ran or

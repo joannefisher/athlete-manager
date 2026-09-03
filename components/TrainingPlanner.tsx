@@ -7,6 +7,7 @@ import type { Role } from './AthleteManager';
 // Round 18: shared CSV bulk-import, also used by Gym's new Setup page.
 import { CsvAthleteImportModal, type ParsedAthleteRow } from './CsvAthleteImportModal';
 import { GymUndoProvider, GymUndoButton, useGymUndo } from './gym/GymUndoContext';
+import { PlayerDefaultExercisesPicker } from './gym/PlayerDefaultExercisesPicker';
 
 const BODY_PARTS = ['Head', 'Neck', 'Shoulder', 'Arm', 'Elbow', 'Wrist', 'Hand', 'Chest', 'Back', 'Hip', 'Groin', 'Thigh', 'Hamstring', 'Knee', 'Calf', 'Ankle', 'Foot', 'Other'];
 
@@ -1092,7 +1093,7 @@ function TrainingPlannerInner({ role: propRole, clubId: propClubId, authUser, on
           {effectivePage === 'availability' && <AvailabilityPage athletes={athletes} setAthletes={setAthletes} navigateTo={navigateTo} setSelectedAthleteId={setSelectedAthleteId} selectedDate={selectedDate} setSelectedDate={setSelectedDate} availabilityRecords={availabilityRecords} teamStructure={teamStructure} onSave={saveAvailability} onSaveEOD={saveEndOfDayReport} saving={saving} fetchAllData={fetchAllData} role={effectiveRole} clubId={clubId} />}
           {effectivePage === 'session-plan' && <SessionPlanPage drills={drills} setDrills={setDrills} weekDrills={weekDrills} setWeekDrills={setWeekDrills} navigateTo={navigateTo} athletes={athletes} drillTypes={drillTypes} teamStructure={teamStructure} defaultTeam={defaultTeam} onSaveDefaultTeam={saveDefaultTeam} selectedDate={selectedDate} onDateChange={handleDateChange} onSaveSessionPlan={saveSessionPlan} saving={saving} getWeekDates={getWeekDates} role={effectiveRole} onMarkDirty={setSessionPlanDirty} />}
           {effectivePage === 'add-drill' && <AddDrillPage drills={drills} setDrills={setDrills} weekDrills={weekDrills} setWeekDrills={setWeekDrills} selectedDate={selectedDate} navigateTo={navigateTo} drillTypes={drillTypes} defaultTeam={defaultTeam} athletes={athletes} teamStructure={teamStructure} />}
-          {effectivePage === 'athlete-profile' && <AthleteProfilePage athletes={athletes} athleteId={selectedAthleteId} navigateTo={navigateTo} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} onSave={saveAthlete} onDelete={deleteAthlete} saving={saving} role={effectiveRole} />}
+          {effectivePage === 'athlete-profile' && <AthleteProfilePage athletes={athletes} athleteId={selectedAthleteId} navigateTo={navigateTo} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} onSave={saveAthlete} onDelete={deleteAthlete} saving={saving} role={effectiveRole} clubId={clubId} currentUserId={authUser?.id} />}
           {effectivePage === 'reporting' && <ReportingPage athletes={athletes} availabilityRecords={availabilityRecords} seasonDates={seasonDates} teamStructure={teamStructure} />}
           {effectivePage === 'setup' && <SetupPage drillTypes={drillTypes} seasonDates={seasonDates} teamStructure={teamStructure} onSaveDrillType={saveDrillType} onDeleteDrillType={deleteDrillType} onSaveSeasonDate={saveSeasonDate} onDeleteSeasonDate={deleteSeasonDate} onSaveTeamStructure={saveTeamStructure} onDeleteTeamStructure={deleteTeamStructurePosition} saving={saving} />}
         </div>
@@ -4025,7 +4026,7 @@ const SetupPage = ({ drillTypes, seasonDates, teamStructure, onSaveDrillType, on
 // Exported (round 18) so Gym's new Setup page can reuse this exact
 // component/UI for its own "Add Player" flow — see
 // components/gym/athleteAdmin.ts and components/gym/GymSetup.tsx.
-export const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecords, seasonDates, teamStructure, onSave, onDelete, saving, role }: any) => {
+export const AthleteProfilePage = ({ athletes, athleteId, navigateTo, availabilityRecords, seasonDates, teamStructure, onSave, onDelete, saving, role, clubId, currentUserId }: any) => {
   const athlete = athletes.find(a => a.id === athleteId);
   const [name, setName] = useState(athlete?.name || '');
 const [positionNumbers, setPositionNumbers] = useState(athlete?.positionNumbers || []);
@@ -4157,6 +4158,17 @@ const [photo, setPhoto] = useState(athlete?.photo || '');
   );
 })()}
 {positionNumbers.length > 0 && <p className="text-[12px] text-slate-500">Group: {getPositionGroup(positionNumbers, teamStructure)}</p>} </div>
+
+        {/* Set-once-at-creation, optional (2026-09-03) — only shown while adding
+            a brand-new player, not on every later edit of an existing one, per
+            the "single setup" framing of the request. Self-contained: renders
+            nothing if this club has no exercise group types set up, or if
+            clubId/currentUserId weren't passed in (older/other call sites). */}
+        {isNew && clubId && currentUserId && (
+          <div className="bg-white rounded-lg border border-slate-200 p-4">
+            <PlayerDefaultExercisesPicker clubId={clubId} athleteId={athleteId} updatedBy={currentUserId} />
+          </div>
+        )}
 
         <div className="bg-white rounded-lg border border-slate-200 p-4">
           <div className="flex justify-between items-center mb-3">
