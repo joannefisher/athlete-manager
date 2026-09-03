@@ -713,12 +713,27 @@ const SESSION_ITEM_SELECT =
   'running_exercise:gym_running_exercises(name, distance_meters), ' +
   'creator:user_profiles!gym_session_items_created_by_fkey(full_name)';
 
+// 2026-09-04: migration 0015 added gym_sessions.current_item_id, a FK
+// *pointing into* gym_session_items (the resume pointer) — alongside the
+// pre-existing gym_session_items.session_id FK pointing the other way. That
+// gives PostgREST two distinct relationships between gym_sessions and
+// gym_session_items, so the bare `gym_session_items(...)` embed used
+// everywhere below became ambiguous the moment 0015 was actually run
+// (PGRST201 "more than one relationship was found") — a second live
+// regression, on top of (not the same as) the pre-0015-columns one above:
+// this one only appears once 0015 HAS run. Every embed of gym_session_items
+// off gym_sessions must disambiguate via the real (unnamed-in-migration,
+// so Postgres's own default table_column_fkey) constraint name, exactly as
+// SESSION_ITEM_SELECT already does for its own nested exercise/creator
+// embeds just above.
+const SESSION_ITEMS_EMBED = 'gym_session_items!gym_session_items_session_id_fkey';
+
 /** Shared by the three list-fetch functions below — runs `applyFilters` against the full (0015) select, falling back to the legacy select once on an unknown-column error. See SESSION_BASE_SELECT_LEGACY's comment above for why this exists. */
 async function fetchSessionRows(applyFilters: (select: string) => PromiseLike<{ data: any; error: any }>): Promise<any[]> {
-  let { data, error } = await applyFilters(`${SESSION_BASE_SELECT}, gym_session_items(${SESSION_ITEM_SELECT})`);
+  let { data, error } = await applyFilters(`${SESSION_BASE_SELECT}, ${SESSION_ITEMS_EMBED}(${SESSION_ITEM_SELECT})`);
   if (error && isMissingSessionColumnsError(error)) {
     console.warn('[gymApi] gym_sessions is missing migration 0015\'s columns (status/current_item_id/...) — falling back to the pre-0015 select. Run supabase/migrations/0015_player_session_runner.sql to enable the Player session runner.');
-    ({ data, error } = await applyFilters(`${SESSION_BASE_SELECT_LEGACY}, gym_session_items(${SESSION_ITEM_SELECT})`));
+    ({ data, error } = await applyFilters(`${SESSION_BASE_SELECT_LEGACY}, ${SESSION_ITEMS_EMBED}(${SESSION_ITEM_SELECT})`));
   }
   if (error) throw error;
   return data || [];
@@ -763,7 +778,7 @@ export async function fetchSessionWithResults(sessionId: string): Promise<GymSes
   const { data, error } = await supabase
     .from('gym_sessions')
     .select(
-      `${SESSION_BASE_SELECT}, gym_session_items(${SESSION_ITEM_SELECT}), ` +
+      `${SESSION_BASE_SELECT}, ${SESSION_ITEMS_EMBED}(${SESSION_ITEM_SELECT}), ` +
         'gym_session_item_results(id, session_id, session_item_id, set_number, actual_reps, actual_load_kg, actual_duration_seconds, actual_distance_meters, updated_by, updated_at)'
     )
     .eq('id', sessionId)
