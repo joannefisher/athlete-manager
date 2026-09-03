@@ -42,16 +42,29 @@ export const DatePickerPopover = ({
   const today = todayIso();
 
   useEffect(() => {
+    // 2026-09-04: this was previously a 'mousedown' listener, which fires
+    // and closes the popover (via onClose -> setShowDatePicker(false))
+    // *before* a same-gesture click on a sibling element — e.g. the day
+    // stepper's own forward/back chevrons in GymUI2Root.tsx, which sit
+    // right next to this popover's anchor button and are outside `ref` —
+    // gets its own 'click' handled. That's a real race: whether the
+    // chevron's click still lands after this popover unmounts partway
+    // through the same click gesture is timing-dependent, so with the
+    // popover open, a chevron tap could silently do nothing. Using 'click'
+    // instead closes the popover only *after* React has already run the
+    // chevron's own onClick (document is above React's root-container
+    // listener in the bubble path, so document-level 'click' always fires
+    // last), removing the race entirely.
     const onDocClick = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
-    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('click', onDocClick);
     document.addEventListener('keydown', onKey);
     return () => {
-      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('click', onDocClick);
       document.removeEventListener('keydown', onKey);
     };
   }, [onClose]);
