@@ -7,7 +7,7 @@
 // added without ever leaving Calendar mode.
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Clipboard, ClipboardCheck, Copy, Loader2, Plus, StickyNote, X } from 'lucide-react';
+import { Clipboard, ClipboardCheck, Copy, Edit2, Loader2, Plus, StickyNote, X } from 'lucide-react';
 import type { GymAthlete as Athlete, GymConditioningExercise, GymExercise, GymExerciseGroupType, GymRunningExercise, GymSession, GymSessionGroup, GymSessionItem } from './types';
 import { fetchAthleteSessionsForDateRange, copySessionItems, deleteSessionItem } from './gymApi';
 import { todayIso } from './WeekStrip';
@@ -204,10 +204,10 @@ export const GymUI2Calendar = ({
                         e.stopPropagation();
                         setAddModalDate(iso);
                       }}
-                      title="Add exercise"
+                      title={items.length > 0 ? 'Edit session' : 'Add exercise'}
                       className="p-0.5 rounded hover:bg-slate-200 text-slate-400 hover:text-slate-700"
                     >
-                      <Plus className="w-3.5 h-3.5" />
+                      {items.length > 0 ? <Edit2 className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
                     </button>
                   </div>
                 )}

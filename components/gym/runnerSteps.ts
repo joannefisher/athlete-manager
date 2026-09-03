@@ -4,36 +4,43 @@
 // groupBySuperset (supersetDnd.ts) so this uses exactly the same notion of
 // "which items are in a superset together" as the staff editors do.
 //
-// Step-per-set: 'exercise'/'conditioning' items are prescribed a fixed
-// number of sets (item.sets) and get one RunnerStep per set — the player
-// records a result (see GymSessionItemResult) each time they land on one.
-// Everything else (running/timer/note/section) has no real "set" concept
-// and is a single step, setNumber null.
-//
-// Supersets: confirmed with Joanne as INTERLEAVED rounds, not
-// sequential-then-next-exercise — A1 set 1, A2 set 1, A1 set 2, A2 set 2,
-// ... rather than all of A1's sets before starting A2. Members can have
-// different prescribed set counts; a member simply drops out of the
-// rotation once its own sets are exhausted while the others continue (no
-// padding/repeating a finished member's last set to keep the rounds even —
-// Joanne confirmed this explicitly).
+// 2026-09-04: one screen per ITEM (or per superset GROUP), not one screen
+// per SET — Joanne asked for all of an exercise's/conditioning item's sets
+// to be visible and editable on a single page instead of paging through
+// them set-by-set. A superset's members are shown together on their one
+// shared screen too (they're already performed as one physical block), each
+// listing its own full set range — a member simply lists fewer/more set
+// rows than the others when prescribed counts differ; there's no
+// interleaving/round-robin left to compute now that stepping is no longer
+// set-by-set. 'running' gets a single set-row (set 1 — no real per-set
+// concept in the data model). 'timer'/'note'/'section' get no set rows at
+// all (RunnerStepMember.setNumbers === []) — nothing to record, rendered as
+// a single display-only control instead of a per-set table.
 
-import type { GymSessionItem, RunnerStep } from './types';
+import type { GymSessionItem, RunnerStep, RunnerStepMember } from './types';
 import { groupBySuperset, labelSupersetGroups } from './supersetDnd';
 
-/** Item types that are prescribed a fixed number of sets and get one RunnerStep per set. */
+/** Item types that are prescribed a fixed number of sets and get one editable row per set. */
 function isSetBearing(itemType: GymSessionItem['itemType']): boolean {
   return itemType === 'exercise' || itemType === 'conditioning';
 }
 
-/** item.sets is nullable in the data model — defensively treat missing/invalid as a single set rather than producing zero steps for an item. */
+/** item.sets is nullable in the data model — defensively treat missing/invalid as a single set rather than producing zero rows for an item. */
 function effectiveSetCount(item: GymSessionItem): number {
-  if (!isSetBearing(item.itemType)) return 1;
   return item.sets && item.sets > 0 ? item.sets : 1;
 }
 
-function stepKey(item: GymSessionItem, setNumber: number | null): string {
-  return `${item.id}:${setNumber ?? ''}`;
+/** [1..N] for a set-bearing item; [1] for running (one editable cell, no real per-set concept); [] for timer/note/section (nothing to record). */
+function setNumbersFor(item: GymSessionItem): number[] {
+  if (isSetBearing(item.itemType)) {
+    return Array.from({ length: effectiveSetCount(item) }, (_, i) => i + 1);
+  }
+  if (item.itemType === 'running') return [1];
+  return [];
+}
+
+function toMember(item: GymSessionItem): RunnerStepMember {
+  return { item, setNumbers: setNumbersFor(item) };
 }
 
 /**
@@ -45,9 +52,8 @@ export function buildStepSequence(items: GymSessionItem[]): RunnerStep[] {
   const steps: RunnerStep[] = [];
   const groups = groupBySuperset(items);
   // Session-wide A/B/C… labels — order of first appearance among `items`,
-  // NOT a per-group position (that's a different, unrelated number — see
-  // RunnerStep.superset's own comment in types.ts). Single source of truth
-  // shared with the staff editors and the session-complete summary.
+  // shared with the staff editors and the session-complete summary (see
+  // supersetDnd.ts's labelSupersetGroups).
   const labels = labelSupersetGroups(items);
 
   for (const group of groups) {
@@ -56,70 +62,29 @@ export function buildStepSequence(items: GymSessionItem[]): RunnerStep[] {
       // shouldn't happen post-dissolveSingleMemberGroups, but treat it the
       // same as standalone rather than rendering a pointless 1-member badge).
       for (const item of group.members) {
-        const total = effectiveSetCount(item);
-        if (isSetBearing(item.itemType)) {
-          for (let setNumber = 1; setNumber <= total; setNumber++) {
-            steps.push({
-              key: stepKey(item, setNumber),
-              item,
-              setNumber,
-              isFirstOfItem: setNumber === 1,
-              isLastOfItem: setNumber === total,
-              superset: null,
-            });
-          }
-        } else {
-          steps.push({
-            key: stepKey(item, null),
-            item,
-            setNumber: null,
-            isFirstOfItem: true,
-            isLastOfItem: true,
-            superset: null,
-          });
-        }
+        steps.push({ key: item.id, members: [toMember(item)], superset: null });
       }
       continue;
     }
 
-    // Real superset (2+ members): interleave round-by-round, dropping a
-    // member out once its own set count is exhausted.
+    // Real superset (2+ members): one shared screen, every member's full
+    // set range shown together — no interleaving to compute any more, each
+    // member just lists its own prescribed sets independently.
     const supersetId = group.supersetId;
     const label = labels.get(supersetId)!; // always set — labelSupersetGroups uses the identical "2+ members" definition of a real superset
-    const size = group.members.length;
-    const counts = group.members.map(effectiveSetCount);
-    const maxRounds = Math.max(...counts);
-
-    for (let round = 1; round <= maxRounds; round++) {
-      group.members.forEach((item, idx) => {
-        const total = counts[idx];
-        if (round > total) return; // this member has dropped out of the rotation
-        const setBearing = isSetBearing(item.itemType);
-        const setNumber = setBearing ? round : null;
-        steps.push({
-          key: stepKey(item, setNumber),
-          item,
-          setNumber,
-          isFirstOfItem: round === 1,
-          isLastOfItem: round === total,
-          superset: { supersetId, label, position: idx + 1, size },
-        });
-      });
-    }
+    steps.push({
+      key: supersetId,
+      members: group.members.map(toMember),
+      superset: { supersetId, label },
+    });
   }
 
   return steps;
 }
 
-/** Locate the resume step for a saved (currentItemId, currentSetNumber) pointer — null if not found (e.g. the item was deleted since pausing), signalling "restart from step 1." */
-export function findResumeStepIndex(
-  steps: RunnerStep[],
-  currentItemId: string | null,
-  currentSetNumber: number | null
-): number | null {
+/** Locate the resume step for a saved currentItemId pointer — null if not found (e.g. the item was deleted since pausing), signalling "restart from step 1." No longer matches on a set number: a step now shows every set for its item(s) at once, so which set the player was on when they paused doesn't change which step to land on. */
+export function findResumeStepIndex(steps: RunnerStep[], currentItemId: string | null): number | null {
   if (!currentItemId) return null;
-  const idx = steps.findIndex(
-    s => s.item.id === currentItemId && (s.setNumber ?? null) === (currentSetNumber ?? null)
-  );
+  const idx = steps.findIndex(s => s.members.some(m => m.item.id === currentItemId));
   return idx === -1 ? null : idx;
 }

@@ -400,29 +400,38 @@ export interface GymSessionItemResult {
 }
 
 /**
+ * One member of a RunnerStep — one session item, plus which set numbers to
+ * show editable rows for on that step's single page. Every prescribed set
+ * for the item is listed here (2026-09-04: previously each set got its own
+ * RunnerStep/page — Joanne asked for all of one exercise's sets on one
+ * screen instead of paging set-by-set). `setNumbers` is `[1..item.sets]` for
+ * 'exercise'/'conditioning', `[1]` for 'running' (no real per-set concept,
+ * but still one editable actual-distance cell — see PlayerStepRunning), and
+ * `[]` for 'timer'/'note'/'section' (nothing to record, rendered as a single
+ * display-only control instead of a per-set table).
+ */
+export interface RunnerStepMember {
+  item: GymSessionItem;
+  setNumbers: number[];
+}
+
+/**
  * One screen of the player runner, produced by runnerSteps.ts's
- * buildStepSequence from a session's items. Non-superset exercise/
- * conditioning items expand to one RunnerStep per prescribed set;
- * everything else (running/timer/note/section, and any non-set-bearing
- * type) is a single step with setNumber null. Superset members are
- * interleaved round-by-round — see buildStepSequence's own comment for the
- * drop-out-on-exhaustion rule when members have unequal set counts.
+ * buildStepSequence from a session's items. A standalone item is its own
+ * step (one member); a superset's members are all shown together on one
+ * step (2+ members) since they're already performed as one physical block —
+ * this replaced the old round-by-round interleaved single-set steps, per
+ * the same 2026-09-04 change noted on RunnerStepMember above.
  */
 export interface RunnerStep {
-  /** Stable resume pointer — `${item.id}:${setNumber ?? ''}`. Not a DB id. */
+  /** Stable resume/React key — the item id for a standalone step, the supersetId for a group step. Not always a DB row id (a superset step has no row of its own). */
   key: string;
-  item: GymSessionItem;
-  /** Null for types with no per-set breakdown (running/timer/note/section). */
-  setNumber: number | null;
-  isFirstOfItem: boolean;
-  isLastOfItem: boolean;
-  /** Non-null iff item.supersetId is set — drives the "Superset A · 1 of 2" badge. */
+  /** One member for a standalone step; 2+ for a superset step, shown together in that order. */
+  members: RunnerStepMember[];
+  /** Non-null iff this is a superset step — drives the "Superset A" badge. */
   superset: {
     supersetId: string;
-    /** "A"/"B"/"C"… — this session's supersets in order of first appearance, from supersetDnd.ts's labelSupersetGroups(). The single source of truth for lettering; don't re-derive it from `position` (that's this item's position within its OWN group, unrelated to which letter the group itself gets). */
+    /** "A"/"B"/"C"… — this session's supersets in order of first appearance, from supersetDnd.ts's labelSupersetGroups(). The single source of truth for lettering. */
     label: string;
-    /** 1-based position of this item within its superset group (stable across rounds — not the round number). */
-    position: number;
-    size: number;
   } | null;
 }

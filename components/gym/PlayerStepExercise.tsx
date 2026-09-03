@@ -1,27 +1,25 @@
 // components/gym/PlayerStepExercise.tsx
-// Runner step content for an 'exercise' item — one set at a time. Reps and
-// Load(kg) are editable (recorded to gym_session_item_results); Sets/
-// Intensity/Tempo stay fixed, shown via itemMetaText as prescribed reference.
+// Runner step content for an 'exercise' item — every prescribed set on one
+// page (2026-09-04: previously one set per page). Reps and Load(kg) are
+// editable per set (recorded to gym_session_item_results); Sets/Intensity/
+// Tempo stay fixed, shown via itemMetaText as prescribed reference.
 
 import React from 'react';
 import { RefreshCw } from 'lucide-react';
-import type { RunnerStep } from './types';
+import type { GymSessionItem } from './types';
 import { itemDisplayName, itemMetaText, sideLabel } from './itemDisplay';
 
 export function PlayerStepExercise({
-  step,
-  reps,
-  loadKg,
-  onRepsChange,
-  onLoadKgChange,
+  item,
+  setNumbers,
+  getValue,
+  onChange,
 }: {
-  step: RunnerStep;
-  reps: number | null;
-  loadKg: number | null;
-  onRepsChange: (v: number | null) => void;
-  onLoadKgChange: (v: number | null) => void;
+  item: GymSessionItem;
+  setNumbers: number[];
+  getValue: (setNumber: number) => { reps: number | null; loadKg: number | null };
+  onChange: (setNumber: number, field: 'reps' | 'loadKg', value: number | null) => void;
 }) {
-  const item = step.item;
   return (
     <div>
       <div className="flex items-center gap-1.5 flex-wrap">
@@ -40,28 +38,39 @@ export function PlayerStepExercise({
       </div>
       <p className="text-[13px] text-slate-400 mt-1">Prescribed: {itemMetaText(item)}</p>
 
-      <div className="grid grid-cols-2 gap-3 mt-6">
-        <label className="block">
-          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Reps</span>
-          <input
-            type="number"
-            inputMode="numeric"
-            value={reps ?? ''}
-            onChange={e => onRepsChange(e.target.value === '' ? null : Number(e.target.value))}
-            className="mt-1 w-full h-14 px-3 text-[22px] font-semibold text-center border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </label>
-        <label className="block">
-          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Load (kg)</span>
-          <input
-            type="number"
-            inputMode="decimal"
-            step="0.5"
-            value={loadKg ?? ''}
-            onChange={e => onLoadKgChange(e.target.value === '' ? null : Number(e.target.value))}
-            className="mt-1 w-full h-14 px-3 text-[22px] font-semibold text-center border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </label>
+      <div className="mt-5">
+        <div className="flex items-center gap-2 px-1 mb-1.5">
+          <span className="w-12 shrink-0" />
+          <span className="flex-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-center">Reps</span>
+          <span className="flex-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-center">Load (kg)</span>
+        </div>
+        <div className="space-y-2">
+          {setNumbers.map(setNumber => {
+            const v = getValue(setNumber);
+            return (
+              <div key={setNumber} className="flex items-center gap-2">
+                <span className="w-12 shrink-0 text-[12px] font-semibold text-slate-400">Set {setNumber}</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  aria-label={`Set ${setNumber} reps`}
+                  value={v.reps ?? ''}
+                  onChange={e => onChange(setNumber, 'reps', e.target.value === '' ? null : Number(e.target.value))}
+                  className="flex-1 h-12 px-2 text-[18px] font-semibold text-center border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  step="0.5"
+                  aria-label={`Set ${setNumber} load in kilograms`}
+                  value={v.loadKg ?? ''}
+                  onChange={e => onChange(setNumber, 'loadKg', e.target.value === '' ? null : Number(e.target.value))}
+                  className="flex-1 h-12 px-2 text-[18px] font-semibold text-center border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

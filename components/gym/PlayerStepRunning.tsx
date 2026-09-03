@@ -6,19 +6,18 @@
 // reference via itemMetaText, same as the staff/read-only views.
 
 import React from 'react';
-import type { RunnerStep } from './types';
+import type { GymSessionItem } from './types';
 import { itemDisplayName, itemMetaText } from './itemDisplay';
 
 export function PlayerStepRunning({
-  step,
+  item,
   distanceMeters,
   onDistanceMetersChange,
 }: {
-  step: RunnerStep;
+  item: GymSessionItem;
   distanceMeters: number | null;
   onDistanceMetersChange: (v: number | null) => void;
 }) {
-  const item = step.item;
   return (
     <div>
       <h2 className="text-[19px] font-semibold text-slate-900">{itemDisplayName(item)}</h2>
