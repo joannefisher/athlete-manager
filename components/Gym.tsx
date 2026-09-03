@@ -13,7 +13,7 @@ import { ArrowLeft, ChevronLeft, Dumbbell, Library, Loader2, Settings, Users, X 
 import { supabase } from '@/lib/supabase';
 import type { Role } from './AthleteManager';
 import { GymUI2Root } from './gym/GymUI2Root';
-import { PlayerSessionsView, PlayerDefaultsView } from './gym/PlayerGymView';
+import { PlayerRunnerRoot } from './gym/PlayerRunnerRoot';
 import { ExerciseBankAdmin } from './gym/ExerciseBankAdmin';
 import { GroupPicker } from './gym/GroupPicker';
 import { GymSetup } from './gym/GymSetup';
@@ -100,20 +100,29 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
 
   useEffect(() => { loadSessionGroups(); }, [loadSessionGroups]);
 
-  const navItems: { id: Page; label: string; Icon: any }[] = isPlayer
-    ? [
-        { id: 'sessions', label: 'My Sessions', Icon: Dumbbell },
-        { id: 'defaults', label: 'My Defaults', Icon: Settings },
-      ]
-    : [
-        { id: 'sessions', label: 'Sessions', Icon: Dumbbell },
-        ...(canEdit ? [{ id: 'groups' as Page, label: 'Groups', Icon: Users }] : []),
-        { id: 'exercise-bank', label: 'Exercises', Icon: Library },
-        ...(canEdit ? [{ id: 'setup' as Page, label: 'Setup', Icon: Settings }] : []),
-      ];
+  // Players get an entirely separate, dedicated mobile-first shell — not the
+  // staff sidebar/header chrome below at all (2026-09-03: previously
+  // PlayerSessionsView/PlayerDefaultsView were mounted *inside* that shared
+  // shell; PlayerRunnerRoot now owns its own top bar/bottom nav and adds the
+  // Start/Pause/Resume session-runner flow neither of those had). Returned
+  // before navItems/pageTitle below since those are staff-shell-only concerns.
+  if (isPlayer) {
+    return (
+      <GymUndoProvider>
+        <PlayerRunnerRoot athleteId={linkedAthleteId} clubId={clubId} userId={authUser.id} loading={loading} onBack={onBack} />
+      </GymUndoProvider>
+    );
+  }
+
+  const navItems: { id: Page; label: string; Icon: any }[] = [
+    { id: 'sessions', label: 'Sessions', Icon: Dumbbell },
+    ...(canEdit ? [{ id: 'groups' as Page, label: 'Groups', Icon: Users }] : []),
+    { id: 'exercise-bank', label: 'Exercises', Icon: Library },
+    ...(canEdit ? [{ id: 'setup' as Page, label: 'Setup', Icon: Settings }] : []),
+  ];
 
   const pageTitle = {
-    sessions: isPlayer ? 'My Sessions' : 'Gym Sessions',
+    sessions: 'Gym Sessions',
     groups: 'Manage Groups',
     'exercise-bank': 'Exercises',
     defaults: 'My Defaults',
@@ -123,7 +132,7 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
   return (
     <GymUndoProvider>
     <div className="min-h-screen bg-slate-50 flex">
-      {/* Sidebar — same shell pattern as RehabPlanner/MainSchedule, shown to every role including Player */}
+      {/* Sidebar — same shell pattern as RehabPlanner/MainSchedule (staff only — Players get PlayerRunnerRoot's own shell above) */}
       <aside className="hidden md:flex flex-col w-52 shrink-0 bg-slate-900 sticky top-0 h-screen">
         <div className="px-4 py-5 border-b border-white/[0.06]">
           <button onClick={onBack} className="flex items-center gap-1.5 text-white/40 hover:text-white/70 text-[11px] mb-3 transition-colors">
@@ -152,7 +161,8 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
               <p className="text-[9px] font-semibold text-white/25 uppercase tracking-[0.9px] mb-1">View as</p>
               <select value={viewingAs} onChange={e => { setViewingAs(e.target.value as Role); setPage('sessions'); }}
                 className="w-full h-7 px-2 text-[11px] rounded bg-white/[0.06] text-white/70 border border-white/10 focus:outline-none">
-                {(['Admin', 'S&C', 'Physio', 'Coach', 'Player'] as Role[]).map(r => <option key={r} value={r} className="bg-slate-900">{r}</option>)}
+                {/* Coach removed from this preview list 2026-09-03 — Coach no longer has any Gym access, so there's nothing meaningful to preview "as Coach" anymore. */}
+                {(['Admin', 'S&C', 'Physio', 'Player'] as Role[]).map(r => <option key={r} value={r} className="bg-slate-900">{r}</option>)}
               </select>
             </div>
           )}
@@ -179,7 +189,7 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
               </button>
             ))}
           </div>
-          {!isPlayer && <GymUndoButton variant="mobile" />}
+          <GymUndoButton variant="mobile" />
         </header>
 
         {/* Desktop page header */}
@@ -190,31 +200,16 @@ export function Gym({ role, clubId, authUser, onBack }: { role: Role; clubId: st
               {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
             </p>
           </div>
-          {!isPlayer && (
-            <div className="flex items-center gap-3">
-              {/* Undo lives here — on the main content header, not tucked into the sidebar — so it's visible whatever page is open. */}
-              <GymUndoButton variant="canvas" />
-            </div>
-          )}
+          <div className="flex items-center gap-3">
+            {/* Undo lives here — on the main content header, not tucked into the sidebar — so it's visible whatever page is open. */}
+            <GymUndoButton variant="canvas" />
+          </div>
         </div>
 
         {loading ? (
           <div className="flex-1 flex items-center justify-center">
             <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
           </div>
-        ) : isPlayer ? (
-          !linkedAthleteId ? (
-            <div className="flex-1 flex items-center justify-center p-4">
-              <div className="bg-white rounded-xl p-6 max-w-sm w-full text-center border border-slate-200">
-                <p className="text-slate-700 font-medium mb-2">No player profile linked</p>
-                <p className="text-slate-400 text-sm">Ask your club admin to link your login to an athlete record.</p>
-              </div>
-            </div>
-          ) : page === 'defaults' ? (
-            <PlayerDefaultsView athleteId={linkedAthleteId} clubId={clubId} userId={authUser.id} />
-          ) : (
-            <PlayerSessionsView athleteId={linkedAthleteId} />
-          )
         ) : page === 'groups' ? (
           <GroupPicker
             clubId={clubId}

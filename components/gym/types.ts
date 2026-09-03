@@ -138,6 +138,16 @@ export interface GymSessionGroup {
   memberAthleteIds: string[];
 }
 
+/**
+ * Player session-runner lifecycle (migration 0015). 'planned' is the
+ * default/original state (matches every pre-existing session — nothing
+ * migrates existing rows out of it). Transitions only ever happen through
+ * the four security-definer RPCs (player_start_session/pause/resume/
+ * complete_session in gymApi.ts) — never a raw update — since only those
+ * verify the caller owns the session via linked_athlete_id.
+ */
+export type GymSessionStatus = 'planned' | 'in_progress' | 'paused' | 'completed';
+
 export interface GymSession {
   id: string;
   clubId: string;
@@ -150,6 +160,17 @@ export interface GymSession {
   updatedBy: string | null;
   updatedAt: string;
   items?: GymSessionItem[];
+
+  // Player session-runner fields (migration 0015).
+  status: GymSessionStatus;
+  /** Resume pointer — the session_item this player was on when they paused. Null once completed/never started, or if that item was deleted since (see currentItemId comment on PlayerSessionRunner — a null/dangling value there means "restart from step 1"). */
+  currentItemId: string | null;
+  currentSetNumber: number | null;
+  startedAt: string | null;
+  pausedAt: string | null;
+  completedAt: string | null;
+  /** Present when fetched via gymApi.fetchSessionWithResults — one row per (session_item_id, set_number) already recorded for this session. */
+  results?: GymSessionItemResult[];
 }
 
 /**
@@ -351,4 +372,55 @@ export interface GymGroupPlanConflict {
   exerciseGroupTypeId: string | null;
   /** The plan item's Superset grouping key at the time of this conflict, applied to the member's item if accepted. Null for a 'delete' conflict (unused). */
   supersetId: string | null;
+}
+
+// ── Player session runner (migration 0015) ─────────────────────────────────
+
+/**
+ * One recorded set for a session item — what the player actually did,
+ * separate from the item's prescribed sets/reps/load. One row per
+ * (sessionItemId, setNumber); saved via gymApi.saveSetResult (upsert).
+ * 'running'/'timer' items (no real per-set breakdown) always use setNumber 1.
+ */
+export interface GymSessionItemResult {
+  id: string;
+  sessionId: string;
+  sessionItemId: string;
+  setNumber: number;
+  /** 'exercise' + 'conditioning' — reps actually done this set. */
+  actualReps: number | null;
+  /** 'exercise' only — load actually used this set, in kg. */
+  actualLoadKg: number | null;
+  /** 'conditioning' only — the new Time field, in seconds, actually done this set. */
+  actualDurationSeconds: number | null;
+  /** 'running' only — one editable actual-distance value for the whole item (setNumber 1), in metres. */
+  actualDistanceMeters: number | null;
+  updatedBy: string | null;
+  updatedAt: string;
+}
+
+/**
+ * One screen of the player runner, produced by runnerSteps.ts's
+ * buildStepSequence from a session's items. Non-superset exercise/
+ * conditioning items expand to one RunnerStep per prescribed set;
+ * everything else (running/timer/note/section, and any non-set-bearing
+ * type) is a single step with setNumber null. Superset members are
+ * interleaved round-by-round — see buildStepSequence's own comment for the
+ * drop-out-on-exhaustion rule when members have unequal set counts.
+ */
+export interface RunnerStep {
+  /** Stable resume pointer — `${item.id}:${setNumber ?? ''}`. Not a DB id. */
+  key: string;
+  item: GymSessionItem;
+  /** Null for types with no per-set breakdown (running/timer/note/section). */
+  setNumber: number | null;
+  isFirstOfItem: boolean;
+  isLastOfItem: boolean;
+  /** Non-null iff item.supersetId is set — drives the "Superset A · 1 of 2" badge. */
+  superset: {
+    supersetId: string;
+    /** 1-based position of this item within its superset group (stable across rounds — not the round number). */
+    position: number;
+    size: number;
+  } | null;
 }

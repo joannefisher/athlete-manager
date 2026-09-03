@@ -17,6 +17,7 @@ import type {
   GymSession,
   GymSessionItem,
   GymSessionItemDraft,
+  GymSessionItemResult,
   GymGroupSessionPlan,
   GymGroupPlanItem,
   GymGroupPlanConflict,
@@ -652,6 +653,35 @@ function mapSessionItem(r: any): GymSessionItem {
   };
 }
 
+// Base gym_sessions columns, shared by every session fetch/create function
+// below — includes the player session-runner fields added by migration
+// 0015 (status/current_item_id/current_set_number/started_at/paused_at/
+// completed_at) so every GymSession this module returns is fully populated,
+// matching the (non-optional) GymSession type.
+const SESSION_BASE_SELECT =
+  'id, club_id, athlete_id, date, source_group_id, created_by, created_at, updated_by, updated_at, ' +
+  'status, current_item_id, current_set_number, started_at, paused_at, completed_at';
+
+function mapSessionBase(r: any): Omit<GymSession, 'items' | 'results'> {
+  return {
+    id: r.id,
+    clubId: r.club_id,
+    athleteId: r.athlete_id,
+    date: r.date,
+    sourceGroupId: r.source_group_id,
+    createdBy: r.created_by,
+    createdAt: r.created_at,
+    updatedBy: r.updated_by,
+    updatedAt: r.updated_at,
+    status: r.status,
+    currentItemId: r.current_item_id,
+    currentSetNumber: r.current_set_number,
+    startedAt: r.started_at,
+    pausedAt: r.paused_at,
+    completedAt: r.completed_at,
+  };
+}
+
 const SESSION_ITEM_SELECT =
   'id, session_id, sort_order, item_type, exercise_id, sets, reps, load, load_kg, tempo, is_primary, side, effective_exercise_id, was_swapped, note_text, section_name, distance_value, distance_unit, timer_label, duration_seconds, plan_item_id, superset_id, conditioning_exercise_id, running_exercise_id, created_by, created_at, updated_by, updated_at, ' +
   'exercise:gym_exercises!gym_session_items_exercise_id_fkey(name), ' +
@@ -664,23 +694,12 @@ const SESSION_ITEM_SELECT =
 export async function fetchSessionsForDate(clubId: string, date: string): Promise<GymSession[]> {
   const { data, error } = await supabase
     .from('gym_sessions')
-    .select(
-      `id, club_id, athlete_id, date, source_group_id, created_by, created_at, updated_by, updated_at,
-       gym_session_items(${SESSION_ITEM_SELECT})`
-    )
+    .select(`${SESSION_BASE_SELECT}, gym_session_items(${SESSION_ITEM_SELECT})`)
     .eq('club_id', clubId)
     .eq('date', date);
   if (error) throw error;
   return (data || []).map((r: any) => ({
-    id: r.id,
-    clubId: r.club_id,
-    athleteId: r.athlete_id,
-    date: r.date,
-    sourceGroupId: r.source_group_id,
-    createdBy: r.created_by,
-    createdAt: r.created_at,
-    updatedBy: r.updated_by,
-    updatedAt: r.updated_at,
+    ...mapSessionBase(r),
     items: (r.gym_session_items || []).sort((a: any, b: any) => a.sort_order - b.sort_order).map(mapSessionItem),
   }));
 }
@@ -690,23 +709,12 @@ export async function fetchSessionsForDateRange(clubId: string, dates: string[])
   if (dates.length === 0) return [];
   const { data, error } = await supabase
     .from('gym_sessions')
-    .select(
-      `id, club_id, athlete_id, date, source_group_id, created_by, created_at, updated_by, updated_at,
-       gym_session_items(${SESSION_ITEM_SELECT})`
-    )
+    .select(`${SESSION_BASE_SELECT}, gym_session_items(${SESSION_ITEM_SELECT})`)
     .eq('club_id', clubId)
     .in('date', dates);
   if (error) throw error;
   return (data || []).map((r: any) => ({
-    id: r.id,
-    clubId: r.club_id,
-    athleteId: r.athlete_id,
-    date: r.date,
-    sourceGroupId: r.source_group_id,
-    createdBy: r.created_by,
-    createdAt: r.created_at,
-    updatedBy: r.updated_by,
-    updatedAt: r.updated_at,
+    ...mapSessionBase(r),
     items: (r.gym_session_items || []).sort((a: any, b: any) => a.sort_order - b.sort_order).map(mapSessionItem),
   }));
 }
@@ -716,25 +724,39 @@ export async function fetchAthleteSessionsForDateRange(athleteId: string, dates:
   if (dates.length === 0) return [];
   const { data, error } = await supabase
     .from('gym_sessions')
-    .select(
-      `id, club_id, athlete_id, date, source_group_id, created_by, created_at, updated_by, updated_at,
-       gym_session_items(${SESSION_ITEM_SELECT})`
-    )
+    .select(`${SESSION_BASE_SELECT}, gym_session_items(${SESSION_ITEM_SELECT})`)
     .eq('athlete_id', athleteId)
     .in('date', dates);
   if (error) throw error;
   return (data || []).map((r: any) => ({
-    id: r.id,
-    clubId: r.club_id,
-    athleteId: r.athlete_id,
-    date: r.date,
-    sourceGroupId: r.source_group_id,
-    createdBy: r.created_by,
-    createdAt: r.created_at,
-    updatedBy: r.updated_by,
-    updatedAt: r.updated_at,
+    ...mapSessionBase(r),
     items: (r.gym_session_items || []).sort((a: any, b: any) => a.sort_order - b.sort_order).map(mapSessionItem),
   }));
+}
+
+/**
+ * A single session, fully loaded for the Player runner: its items (via the
+ * usual join) plus every recorded set result so far — one query instead of
+ * the runner having to separately fetch gym_session_item_results itself.
+ * Also used on resume to know which steps already have a saved value.
+ */
+export async function fetchSessionWithResults(sessionId: string): Promise<GymSession | null> {
+  const { data, error } = await supabase
+    .from('gym_sessions')
+    .select(
+      `${SESSION_BASE_SELECT}, gym_session_items(${SESSION_ITEM_SELECT}), ` +
+        'gym_session_item_results(id, session_id, session_item_id, set_number, actual_reps, actual_load_kg, actual_duration_seconds, actual_distance_meters, updated_by, updated_at)'
+    )
+    .eq('id', sessionId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  const r: any = data;
+  return {
+    ...mapSessionBase(r),
+    items: (r.gym_session_items || []).sort((a: any, b: any) => a.sort_order - b.sort_order).map(mapSessionItem),
+    results: (r.gym_session_item_results || []).map(mapSessionItemResult),
+  };
 }
 
 /** Get-or-create the session row for one athlete on one date. */
@@ -747,42 +769,20 @@ export async function getOrCreateSession(
 ): Promise<GymSession> {
   const { data: existing, error: findErr } = await supabase
     .from('gym_sessions')
-    .select('id, club_id, athlete_id, date, source_group_id, created_by, created_at, updated_by, updated_at')
+    .select(SESSION_BASE_SELECT)
     .eq('athlete_id', athleteId)
     .eq('date', date)
     .maybeSingle();
   if (findErr) throw findErr;
-  if (existing) {
-    return {
-      id: existing.id,
-      clubId: existing.club_id,
-      athleteId: existing.athlete_id,
-      date: existing.date,
-      sourceGroupId: existing.source_group_id,
-      createdBy: existing.created_by,
-      createdAt: existing.created_at,
-      updatedBy: existing.updated_by,
-      updatedAt: existing.updated_at,
-    };
-  }
+  if (existing) return mapSessionBase(existing);
 
   const { data, error } = await supabase
     .from('gym_sessions')
     .insert({ club_id: clubId, athlete_id: athleteId, date, created_by: createdBy, source_group_id: sourceGroupId })
-    .select('id, club_id, athlete_id, date, source_group_id, created_by, created_at, updated_by, updated_at')
+    .select(SESSION_BASE_SELECT)
     .single();
   if (error) throw error;
-  return {
-    id: data.id,
-    clubId: data.club_id,
-    athleteId: data.athlete_id,
-    date: data.date,
-    sourceGroupId: data.source_group_id,
-    createdBy: data.created_by,
-    createdAt: data.created_at,
-    updatedBy: data.updated_by,
-    updatedAt: data.updated_at,
-  };
+  return mapSessionBase(data);
 }
 
 /** Assign a session to every member of a gym group — one independent session per athlete. */
@@ -1590,4 +1590,102 @@ export async function moveSessionItems(
   for (const item of originalItems) await deleteSessionItem(item.id);
 
   return { athleteId, movedCount: originalItems.length, destinationHadExisting, movedItemIds, originalItems };
+}
+
+// ── Player session runner (migration 0015) ──────────────────────────────
+// Lifecycle transitions (start/pause/resume/complete) never go through a
+// raw update — they're security-definer RPCs so the database itself checks
+// the caller owns the session (via linked_athlete_id) before touching it,
+// the same way merge_gym_exercises above is Admin-checked server-side
+// rather than trusted to the client. Per-set results are ordinary table
+// writes — RLS on gym_session_item_results already scopes those to the
+// player's own, non-completed sessions (and to staff, club-wide, for
+// reporting) — see the migration's comments for the exact policies.
+
+function mapSessionItemResult(r: any): GymSessionItemResult {
+  return {
+    id: r.id,
+    sessionId: r.session_id,
+    sessionItemId: r.session_item_id,
+    setNumber: r.set_number,
+    actualReps: r.actual_reps,
+    actualLoadKg: r.actual_load_kg,
+    actualDurationSeconds: r.actual_duration_seconds,
+    actualDistanceMeters: r.actual_distance_meters,
+    updatedBy: r.updated_by,
+    updatedAt: r.updated_at,
+  };
+}
+
+/** Player taps "Start session" — planned -> in_progress, stamps started_at. No-op (not an error) if already in_progress; raises if the caller doesn't own this session. */
+export async function startSession(sessionId: string): Promise<void> {
+  const { error } = await supabase.rpc('player_start_session', { p_session_id: sessionId });
+  if (error) throw error;
+}
+
+/** Player taps "Pause" — records exactly where they were (the step's item + set number) so resumeSession can put them straight back there. */
+export async function pauseSession(sessionId: string, itemId: string, setNumber: number | null): Promise<void> {
+  const { error } = await supabase.rpc('player_pause_session', {
+    p_session_id: sessionId,
+    p_item_id: itemId,
+    p_set_number: setNumber,
+  });
+  if (error) throw error;
+}
+
+/** Player taps "Resume" on a paused session — paused -> in_progress. current_item_id/current_set_number are left as-is; the runner reads them back (via fetchSessionWithResults) to know which step to land on, and treats a null/dangling current_item_id (the item was deleted while paused) as "restart from step 1." */
+export async function resumeSession(sessionId: string): Promise<void> {
+  const { error } = await supabase.rpc('player_resume_session', { p_session_id: sessionId });
+  if (error) throw error;
+}
+
+/** Player reaches the end of the runner — in_progress -> completed, stamps completed_at. Once completed, gym_session_item_results becomes read-only for that session (enforced by RLS, not just the UI). */
+export async function completeSession(sessionId: string): Promise<void> {
+  const { error } = await supabase.rpc('player_complete_session', { p_session_id: sessionId });
+  if (error) throw error;
+}
+
+/**
+ * Record what the player actually did for one set — upserted by
+ * (session_item_id, set_number) so re-visiting a step (Back, or resuming)
+ * overwrites the same row rather than creating a duplicate. `values` only
+ * needs whichever fields that item type actually records (see
+ * GymSessionItemResult's field comments) — omitted fields are written as
+ * null. clubId/sessionId are denormalized onto the row for RLS/reporting,
+ * matching the migration's schema.
+ */
+export async function saveSetResult(
+  clubId: string,
+  sessionId: string,
+  sessionItemId: string,
+  setNumber: number,
+  values: {
+    actualReps?: number | null;
+    actualLoadKg?: number | null;
+    actualDurationSeconds?: number | null;
+    actualDistanceMeters?: number | null;
+  },
+  userId: string
+): Promise<GymSessionItemResult> {
+  const { data, error } = await supabase
+    .from('gym_session_item_results')
+    .upsert(
+      {
+        club_id: clubId,
+        session_id: sessionId,
+        session_item_id: sessionItemId,
+        set_number: setNumber,
+        actual_reps: values.actualReps ?? null,
+        actual_load_kg: values.actualLoadKg ?? null,
+        actual_duration_seconds: values.actualDurationSeconds ?? null,
+        actual_distance_meters: values.actualDistanceMeters ?? null,
+        updated_by: userId,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'session_item_id,set_number' }
+    )
+    .select('id, session_id, session_item_id, set_number, actual_reps, actual_load_kg, actual_duration_seconds, actual_distance_meters, updated_by, updated_at')
+    .single();
+  if (error) throw error;
+  return mapSessionItemResult(data);
 }

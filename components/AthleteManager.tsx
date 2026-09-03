@@ -58,7 +58,14 @@ const APPS: AppDef[] = [
     description: 'Strength & conditioning session plans',
     Icon: Dumbbell,
     color: 'bg-orange-600',
-    allowedRoles: ['Admin', 'S&C', 'Physio', 'Coach', 'Player'],
+    // Coach removed 2026-09-03, per Joanne's explicit request — Coach no
+    // longer has any access to the Gym app (was previously full edit
+    // parity with Admin via gymCanEdit; see permissions.ts). Player keeps
+    // today's read-only "My Sessions"/self-service "My Defaults" view for
+    // now, pending a separate, purpose-built Player UI Joanne is scoping
+    // next — this list is NOT the place that'll change for that; Player's
+    // own Gym.tsx branch (isPlayer) is.
+    allowedRoles: ['Admin', 'S&C', 'Physio', 'Player'],
   },
   {
     id: 'user-management',
