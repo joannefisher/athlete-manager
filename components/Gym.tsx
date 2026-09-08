@@ -9,11 +9,12 @@
 // looks and feels native to the rest of the app.
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { ArrowLeft, ChevronLeft, Dumbbell, Library, Loader2, Settings, Users, X } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, Dumbbell, Library, Loader2, Settings, Users, X, Zap } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import type { Role } from './AthleteManager';
 import { GymUI2Root } from './gym/GymUI2Root';
 import { PlayerRunnerRoot } from './gym/PlayerRunnerRoot';
+import { QuickSessionPlanner } from './gym/QuickSessionPlanner';
 import { ExerciseBankAdmin } from './gym/ExerciseBankAdmin';
 import { GroupPicker } from './gym/GroupPicker';
 import { GymSetup } from './gym/GymSetup';
@@ -22,7 +23,7 @@ import { gymCanEdit } from './gym/permissions';
 import { GymUndoProvider, GymUndoButton } from './gym/GymUndoContext';
 import type { GymAthlete, GymSessionGroup, GymTeamPosition } from './gym/types';
 
-type Page = 'sessions' | 'groups' | 'exercise-bank' | 'defaults' | 'setup';
+type Page = 'sessions' | 'quick' | 'groups' | 'exercise-bank' | 'defaults' | 'setup';
 
 export function Gym({ role, clubId, authUser, displayName, onBack }: { role: Role; clubId: string; authUser: any; displayName?: string | null; onBack: () => void }) {
   // Admin can impersonate other roles to preview their view — same pattern
@@ -118,6 +119,11 @@ export function Gym({ role, clubId, authUser, displayName, onBack }: { role: Rol
 
   const navItems: { id: Page; label: string; Icon: any }[] = [
     { id: 'sessions', label: 'Sessions', Icon: Dumbbell },
+    // Quick Session: a fast, mobile-first single-player session builder for
+    // S&C/Physio (2026-09-08) — same canEdit gate as Groups/Setup below,
+    // since it's a write-capable screen, not something a read-only role
+    // should see in the nav.
+    ...(canEdit ? [{ id: 'quick' as Page, label: 'Quick Session', Icon: Zap }] : []),
     ...(canEdit ? [{ id: 'groups' as Page, label: 'Groups', Icon: Users }] : []),
     { id: 'exercise-bank', label: 'Exercises', Icon: Library },
     ...(canEdit ? [{ id: 'setup' as Page, label: 'Setup', Icon: Settings }] : []),
@@ -125,6 +131,7 @@ export function Gym({ role, clubId, authUser, displayName, onBack }: { role: Rol
 
   const pageTitle = {
     sessions: 'Gym Sessions',
+    quick: 'Quick Session',
     groups: 'Manage Groups',
     'exercise-bank': 'Exercises',
     defaults: 'My Defaults',
@@ -212,6 +219,8 @@ export function Gym({ role, clubId, authUser, displayName, onBack }: { role: Rol
           <div className="flex-1 flex items-center justify-center">
             <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
           </div>
+        ) : page === 'quick' ? (
+          <QuickSessionPlanner athletes={athletes} clubId={clubId} userId={authUser.id} />
         ) : page === 'groups' ? (
           <GroupPicker
             clubId={clubId}
