@@ -34,7 +34,7 @@
 // own still-open investigation entirely rather than depending on it.
 
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
-import { AlertCircle, Keyboard, Loader2, Table2 } from 'lucide-react';
+import { AlertCircle, Keyboard, Loader2, RefreshCw, Table2 } from 'lucide-react';
 import type {
   GymAthlete as Athlete, GymConditioningExercise, GymExercise, GymExerciseGroupType,
   GymRunningExercise, GymSession, GymSessionItem, GymSessionItemDraft, GymSessionItemType,
@@ -75,32 +75,50 @@ export const QuickSessionPlanner = ({
   const [runningExercises, setRunningExercises] = useState<GymRunningExercise[]>([]);
   const [frequentSectionNames, setFrequentSectionNames] = useState<string[]>([]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoadingReference(true);
-      try {
-        const [exs, groups, condExs, runExs, sections] = await Promise.all([
-          fetchExercises(clubId),
-          fetchExerciseGroupTypes(clubId),
-          fetchConditioningExercises(clubId),
-          fetchRunningExercises(clubId),
-          fetchFrequentSectionNames(clubId),
-        ]);
-        if (cancelled) return;
-        setExercises(exs);
-        setExerciseGroupTypes(groups);
-        setConditioningExercises(condExs);
-        setRunningExercises(runExs);
-        setFrequentSectionNames(sections);
-      } catch (err) {
-        console.error('[QuickSessionPlanner] failed to load reference data', err);
-      } finally {
-        if (!cancelled) setLoadingReference(false);
-      }
-    })();
-    return () => { cancelled = true; };
+  // Exercise/conditioning/running/section reference lists are fetched once
+  // when this screen loads for a club, not re-fetched on every keystroke of
+  // a search — so an exercise added to the bank *after* this screen was
+  // opened (e.g. via the Exercise Bank admin screen in another tab, or by
+  // someone else) won't show up here as a match until this refetches. Kept
+  // as its own function (not inlined in the effect) so both the mount
+  // effect and the manual "Refresh" control below can call it.
+  const referenceLoadSeq = useRef(0);
+  const loadReferenceData = useCallback(async () => {
+    const seq = ++referenceLoadSeq.current; // ignore a stale response if a newer refresh started since
+    setLoadingReference(true);
+    try {
+      const [exs, groups, condExs, runExs, sections] = await Promise.all([
+        fetchExercises(clubId),
+        fetchExerciseGroupTypes(clubId),
+        fetchConditioningExercises(clubId),
+        fetchRunningExercises(clubId),
+        fetchFrequentSectionNames(clubId),
+      ]);
+      if (seq !== referenceLoadSeq.current) return;
+      setExercises(exs);
+      setExerciseGroupTypes(groups);
+      setConditioningExercises(condExs);
+      setRunningExercises(runExs);
+      setFrequentSectionNames(sections);
+    } catch (err) {
+      console.error('[QuickSessionPlanner] failed to load reference data', err);
+    } finally {
+      if (seq === referenceLoadSeq.current) setLoadingReference(false);
+    }
   }, [clubId]);
+
+  useEffect(() => {
+    loadReferenceData();
+  }, [loadReferenceData]);
+
+  // Also refetch whenever this tab/window regains focus — covers the exact
+  // scenario above (added the exercise in another tab, switched back here)
+  // without needing to find and click the manual refresh control.
+  useEffect(() => {
+    const onFocus = () => loadReferenceData();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [loadReferenceData]);
 
   const [loadingItems, setLoadingItems] = useState(false);
   const [session, setSession] = useState<GymSession | null>(null);
@@ -260,6 +278,14 @@ export const QuickSessionPlanner = ({
               <span className="text-[13px] font-semibold text-slate-700 truncate">{selectedAthlete?.name} · {dateLabel}</span>
               <div className="flex items-center gap-2 shrink-0">
                 {loadingItems && <Loader2 className="w-3.5 h-3.5 text-slate-300 animate-spin" />}
+                <button
+                  onClick={() => loadReferenceData()}
+                  disabled={loadingReference}
+                  title="Refresh exercise/conditioning/running lists — use this if you just added one and it's not showing up as a match yet"
+                  className="p-1 rounded hover:bg-slate-200/70 text-slate-400 hover:text-slate-600 disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingReference ? 'animate-spin' : ''}`} />
+                </button>
                 <div className="flex bg-slate-200/70 rounded-md p-0.5 text-[11px] font-medium">
                   <button onClick={() => setMode('table')} className={`px-2 py-1 rounded flex items-center gap-1 ${mode === 'table' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>
                     <Table2 className="w-3 h-3" />Table
