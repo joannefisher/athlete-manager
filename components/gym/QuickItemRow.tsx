@@ -225,7 +225,7 @@ export const QuickItemRow = ({
   if (draft.itemType === 'exercise') {
     fields = (
       <div className="flex flex-wrap items-center gap-1.5">
-        {renderBankPicker(draft.exerciseId, draft.exerciseName, exerciseMatches, 'No match in the Exercise Bank — ask an Admin to add it there first.', (id, name) => {
+        {renderBankPicker(draft.exerciseId, draft.exerciseName, exerciseMatches, `No match in the Exercise Bank (${exercises.length} loaded) — ask an Admin to add it there first.`, (id, name) => {
           const patch = { exerciseId: id || null, exerciseName: name || undefined };
           if (!id) { patchDraft(patch); return; } // "Change" clicked — just reopen the search box, don't clear the saved item yet
           if (isNew) commitCreate(patch); else { patchDraft(patch); commitFieldUpdate(patch); }
@@ -238,7 +238,7 @@ export const QuickItemRow = ({
   } else if (draft.itemType === 'conditioning') {
     fields = (
       <div className="flex flex-wrap items-center gap-1.5">
-        {renderBankPicker(draft.conditioningExerciseId, draft.conditioningExerciseName, conditioningMatches, 'No match — ask an Admin to add it to the conditioning list first.', (id, name) => {
+        {renderBankPicker(draft.conditioningExerciseId, draft.conditioningExerciseName, conditioningMatches, `No match (${conditioningExercises.length} loaded) — ask an Admin to add it to the conditioning list first.`, (id, name) => {
           const patch = { conditioningExerciseId: id || null, conditioningExerciseName: name || undefined };
           if (!id) { patchDraft(patch); return; }
           if (isNew) commitCreate(patch); else { patchDraft(patch); commitFieldUpdate(patch); }
@@ -254,7 +254,7 @@ export const QuickItemRow = ({
           draft.runningExerciseId,
           draft.runningExerciseName ? `${draft.runningExerciseName}${draft.runningExerciseDistanceMeters != null ? ` · ${draft.runningExerciseDistanceMeters}m` : ''}` : undefined,
           runningMatches,
-          'No match — ask an Admin to add it to the running list first.',
+          `No match (${runningExercises.length} loaded) — ask an Admin to add it to the running list first.`,
           (id, name, extra) => {
             const patch = { runningExerciseId: id || null, runningExerciseName: name || undefined, runningExerciseDistanceMeters: extra?.distanceMeters ?? null };
             if (!id) { patchDraft(patch); return; }

@@ -82,6 +82,7 @@ export const QuickSessionPlanner = ({
   // someone else) won't show up here as a match until this refetches. Kept
   // as its own function (not inlined in the effect) so both the mount
   // effect and the manual "Refresh" control below can call it.
+  const [referenceError, setReferenceError] = useState<string | null>(null);
   const referenceLoadSeq = useRef(0);
   const loadReferenceData = useCallback(async () => {
     const seq = ++referenceLoadSeq.current; // ignore a stale response if a newer refresh started since
@@ -100,8 +101,15 @@ export const QuickSessionPlanner = ({
       setConditioningExercises(condExs);
       setRunningExercises(runExs);
       setFrequentSectionNames(sections);
-    } catch (err) {
+      setReferenceError(null);
+    } catch (err: any) {
+      // Previously this only went to console.error — silent from the user's point of view.
+      // Left unnoticed, the exercise/conditioning/running lists stay empty and every single
+      // search then shows "no match", which looks exactly like the item genuinely isn't in
+      // the bank even when it is. Surfacing it as a visible, retryable banner instead (below)
+      // makes a failed load impossible to mistake for "that exercise doesn't exist."
       console.error('[QuickSessionPlanner] failed to load reference data', err);
+      if (seq === referenceLoadSeq.current) setReferenceError(err?.message || 'Failed to load the exercise/conditioning/running lists.');
     } finally {
       if (seq === referenceLoadSeq.current) setLoadingReference(false);
     }
@@ -296,6 +304,13 @@ export const QuickSessionPlanner = ({
                 </div>
               </div>
             </div>
+
+            {referenceError && (
+              <div className="px-3 py-2 border-b border-red-100 bg-red-50 flex items-center justify-between gap-2">
+                <span className="text-[12px] text-red-700">Couldn't load the exercise/conditioning/running lists — every search will wrongly show "no match" until this loads. {referenceError}</span>
+                <button onClick={() => loadReferenceData()} className="text-[11px] font-medium text-red-700 hover:underline shrink-0">Retry</button>
+              </div>
+            )}
 
             {items.length === 0 && !loadingItems && mode === 'text' && (
               <div className="px-3 py-4 text-center text-[13px] text-slate-400">Nothing added yet — type below to add the first item.</div>
