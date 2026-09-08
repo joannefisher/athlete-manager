@@ -248,8 +248,15 @@ export const QuickSessionPlanner = ({
         <div className="bg-white rounded-lg border border-slate-200 py-8 flex justify-center"><Loader2 className="w-4 h-4 text-slate-300 animate-spin" /></div>
       ) : (
         <>
-          <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-            <div className="px-3 py-2.5 border-b border-slate-100 bg-slate-50 flex items-center justify-between gap-2">
+          {/* Deliberately no overflow-hidden here (unlike the old single-panel layout): the type
+              picker and exercise/conditioning/running search dropdowns are absolutely-positioned
+              and open *below* their row, including the trailing blank row at the very bottom of
+              this card — overflow-hidden clipped them clean off, which is what made the type
+              toggle and the exercise search look broken (they were opening, just invisible and
+              unclickable outside the card's bounds). rounded-t-lg on the header below keeps the
+              top corners tidy without needing to clip the whole card. */}
+          <div className="bg-white rounded-lg border border-slate-200">
+            <div className="px-3 py-2.5 border-b border-slate-100 bg-slate-50 rounded-t-lg flex items-center justify-between gap-2">
               <span className="text-[13px] font-semibold text-slate-700 truncate">{selectedAthlete?.name} · {dateLabel}</span>
               <div className="flex items-center gap-2 shrink-0">
                 {loadingItems && <Loader2 className="w-3.5 h-3.5 text-slate-300 animate-spin" />}

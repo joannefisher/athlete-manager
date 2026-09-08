@@ -323,7 +323,11 @@ export const QuickItemRow = ({
     <div
       ref={rowRef}
       onBlur={handleRowBlur}
-      className={`flex items-start gap-2 px-3 py-2 border-b border-slate-100 last:border-b-0 ${isNew ? 'bg-slate-50/60' : ''}`}
+      // A left accent border (not a background tint) marks the blank "new" row — a tinted
+      // background here would sit flush against the parent card's rounded bottom corners
+      // now that the card no longer clips its own contents (see QuickSessionPlanner.tsx),
+      // and would poke a square corner out past them.
+      className={`flex items-start gap-2 px-3 py-2 border-b border-slate-100 last:border-b-0 last:rounded-b-lg ${isNew ? 'border-l-2 border-l-blue-200 bg-blue-50/30' : ''}`}
     >
       <div className="pt-1.5 shrink-0">
         {isNew && onTypeChange ? (
