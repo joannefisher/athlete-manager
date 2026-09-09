@@ -6,7 +6,7 @@
 // opens the full SessionEditor in a modal overlay, so an exercise can be
 // added without ever leaving Calendar mode.
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Clipboard, ClipboardCheck, Copy, Edit2, Loader2, Plus, StickyNote, X } from 'lucide-react';
 import type { GymAthlete as Athlete, GymConditioningExercise, GymExercise, GymExerciseGroupType, GymRunningExercise, GymSession, GymSessionGroup, GymSessionItem } from './types';
 import { fetchAthleteSessionsForDateRange, copySessionItems, deleteSessionItem } from './gymApi';
@@ -49,6 +49,7 @@ export const GymUI2Calendar = ({
   onExercisesChanged,
   selectedDate,
   onSelectDate,
+  onShiftMonth,
 }: {
   athlete?: Athlete;
   athleteId: string;
@@ -65,6 +66,7 @@ export const GymUI2Calendar = ({
   onExercisesChanged: () => void;
   selectedDate: string;
   onSelectDate: (date: string) => void;
+  onShiftMonth?: (dir: 1 | -1) => void;
 }) => {
   const { pushUndo } = useGymUndo();
   const [loading, setLoading] = useState(true);
@@ -72,6 +74,28 @@ export const GymUI2Calendar = ({
   const [addModalDate, setAddModalDate] = useState<string | null>(null);
   const [clipboard, setClipboard] = useState<{ date: string; items: GymSessionItem[] } | null>(null);
   const [pasting, setPasting] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const wheelCooldown = useRef(false);
+
+  // Round 29: let a mouse/trackpad scroll gesture over the calendar step the
+  // month back/forward, in addition to the existing arrow-click stepper.
+  // Uses a native (non-passive) listener so we can preventDefault and stop
+  // the page itself from scrolling while the cursor is over the grid, and a
+  // short cooldown so one scroll gesture moves one month, not several.
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || !onShiftMonth) return;
+    const handleWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) < 2) return;
+      e.preventDefault();
+      if (wheelCooldown.current) return;
+      wheelCooldown.current = true;
+      onShiftMonth(e.deltaY > 0 ? 1 : -1);
+      setTimeout(() => { wheelCooldown.current = false; }, 420);
+    };
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, [onShiftMonth]);
 
   const grid = monthGridDates(monthAnchor);
   const gridDates = grid.map(g => g.iso);
@@ -132,7 +156,7 @@ export const GymUI2Calendar = ({
   };
 
   return (
-    <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+    <div ref={rootRef} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100 bg-slate-50">
         <span className="text-[13px] font-semibold text-slate-700">{monthLabel}</span>
         <div className="flex items-center gap-2">
@@ -167,13 +191,19 @@ export const GymUI2Calendar = ({
               key={iso}
               onClick={() => onSelectDate(iso)}
               className={`min-h-[132px] border-b border-r border-slate-100 flex flex-col cursor-pointer transition-colors ${
-                inMonth ? 'bg-white' : 'bg-slate-50/60'
-              } ${isSelected ? 'ring-2 ring-inset ring-slate-900' : 'hover:bg-slate-50'}`}
+                isToday ? 'bg-blue-600' : inMonth ? 'bg-white' : 'bg-slate-50/60'
+              } ${
+                isSelected
+                  ? `ring-2 ring-inset ${isToday ? 'ring-white' : 'ring-slate-900'}`
+                  : isToday
+                  ? 'hover:bg-blue-700'
+                  : 'hover:bg-slate-50'
+              }`}
             >
               <div className="flex items-center justify-between px-1.5 pt-1.5">
                 <span
-                  className={`text-[11px] leading-none px-1.5 py-0.5 rounded-full font-semibold ${
-                    isToday ? 'bg-blue-600 text-white' : inMonth ? 'text-slate-600' : 'text-slate-300'
+                  className={`text-[11px] leading-none px-1.5 py-0.5 rounded-full font-bold ${
+                    isToday ? 'bg-white text-blue-700' : inMonth ? 'text-slate-600' : 'text-slate-300'
                   }`}
                 >
                   {new Date(iso + 'T00:00:00').getDate()}
@@ -184,7 +214,9 @@ export const GymUI2Calendar = ({
                       <button
                         onClick={e => handleCopy(e, iso, items)}
                         title="Copy this day's session"
-                        className="p-0.5 rounded hover:bg-slate-200 text-slate-400 hover:text-slate-700"
+                        className={`p-0.5 rounded ${
+                          isToday ? 'text-white/85 hover:bg-white/20 hover:text-white' : 'text-slate-400 hover:bg-slate-200 hover:text-slate-700'
+                        }`}
                       >
                         <Copy className="w-3.5 h-3.5" />
                       </button>
@@ -194,7 +226,9 @@ export const GymUI2Calendar = ({
                         onClick={e => handlePaste(e, iso)}
                         disabled={pasting === iso}
                         title="Paste copied session here"
-                        className="p-0.5 rounded hover:bg-blue-100 text-blue-500 hover:text-blue-700 disabled:opacity-40"
+                        className={`p-0.5 rounded disabled:opacity-40 ${
+                          isToday ? 'text-white hover:bg-white/20' : 'text-blue-500 hover:bg-blue-100 hover:text-blue-700'
+                        }`}
                       >
                         {pasting === iso ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ClipboardCheck className="w-3.5 h-3.5" />}
                       </button>
@@ -205,7 +239,9 @@ export const GymUI2Calendar = ({
                         setAddModalDate(iso);
                       }}
                       title={items.length > 0 ? 'Edit session' : 'Add exercise'}
-                      className="p-0.5 rounded hover:bg-slate-200 text-slate-400 hover:text-slate-700"
+                      className={`p-0.5 rounded ${
+                        isToday ? 'text-white/85 hover:bg-white/20 hover:text-white' : 'text-slate-400 hover:bg-slate-200 hover:text-slate-700'
+                      }`}
                     >
                       {items.length > 0 ? <Edit2 className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
                     </button>
@@ -217,7 +253,7 @@ export const GymUI2Calendar = ({
                   <div
                     key={item.id}
                     className={`text-[10px] leading-tight px-1 py-0.5 rounded ${
-                      item.itemType === 'note' ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-600'
+                      item.itemType === 'note' ? 'bg-amber-50 text-amber-700' : isToday ? 'bg-white/90 text-slate-700' : 'bg-slate-100 text-slate-600'
                     }`}
                   >
                     {item.itemType === 'note' ? (

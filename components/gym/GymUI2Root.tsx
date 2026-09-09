@@ -313,6 +313,7 @@ export const GymUI2Root = ({
             onExercisesChanged={loadReferenceData}
             selectedDate={date}
             onSelectDate={setDate}
+            onShiftMonth={stepDate}
           />
         ) : (
           <GymUI2GroupCompare
@@ -379,6 +380,7 @@ export const GymUI2Root = ({
           onExercisesChanged={loadReferenceData}
           selectedDate={date}
           onSelectDate={setDate}
+          onShiftMonth={stepDate}
         />
       ) : (
         <GymUI2Compare
