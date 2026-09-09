@@ -87,7 +87,7 @@ export const ExerciseBankAdmin = ({ clubId, currentUserId, canEdit, role }: { cl
   const handleAssignReview = async (exerciseId: string) => {
     if (!isGroupTypeAttrsComplete(reviewAttrs)) return;
     const type = await findOrCreateExerciseGroupType(clubId, reviewAttrs, currentUserId);
-    await updateExerciseGroupType(exerciseId, type.id);
+    await updateExerciseGroupType(exerciseId, type.id, currentUserId);
     setReviewingId(null);
     load();
   };
@@ -197,7 +197,7 @@ export const ExerciseBankAdmin = ({ clubId, currentUserId, canEdit, role }: { cl
                       <button
                         onClick={async () => {
                           if (!editExerciseName.trim()) return;
-                          await updateExerciseName(ex.id, editExerciseName.trim());
+                          await updateExerciseName(ex.id, editExerciseName.trim(), currentUserId);
                           setEditingExerciseId(null);
                           load();
                         }}

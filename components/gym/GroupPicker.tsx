@@ -208,7 +208,7 @@ export const GroupPicker = ({
     for (const [groupId, removeIds] of byGroup) {
       const group = sessionGroups.find(g => g.id === groupId);
       if (!group) continue;
-      await setSessionGroupMembers(groupId, group.memberAthleteIds.filter(id => !removeIds.includes(id)));
+      await setSessionGroupMembers(groupId, group.memberAthleteIds.filter(id => !removeIds.includes(id)), userId);
     }
     setPendingCrossRemovals(prev => prev.filter(p => !relevantAthleteIds.includes(p.athleteId)));
   };
@@ -231,7 +231,7 @@ export const GroupPicker = ({
   const commitMemberEdits = async (groupId: string, members: string[]) => {
     setSaving(true);
     try {
-      await setSessionGroupMembers(groupId, members);
+      await setSessionGroupMembers(groupId, members, userId);
       await applyCrossRemovals(members);
       onChanged();
     } finally {
@@ -283,11 +283,11 @@ export const GroupPicker = ({
     setMovingAthleteId(athleteId);
     try {
       if (currentGroup) {
-        await setSessionGroupMembers(currentGroup.id, currentGroup.memberAthleteIds.filter(id => id !== athleteId));
+        await setSessionGroupMembers(currentGroup.id, currentGroup.memberAthleteIds.filter(id => id !== athleteId), userId);
       }
       if (newGroupId) {
         const target = sessionGroups.find(g => g.id === newGroupId);
-        if (target) await setSessionGroupMembers(newGroupId, [...target.memberAthleteIds, athleteId]);
+        if (target) await setSessionGroupMembers(newGroupId, [...target.memberAthleteIds, athleteId], userId);
       }
       setPlayerRowMessage({ id: athleteId, text: newGroupId ? `Moved to ${sessionGroups.find(g => g.id === newGroupId)?.name || 'group'}` : `Removed from ${currentGroup?.name || 'group'}` });
       setTimeout(() => setPlayerRowMessage(cur => (cur?.id === athleteId ? null : cur)), 3000);
@@ -348,12 +348,20 @@ export const GroupPicker = ({
               .sort((a, b) => a.name.localeCompare(b.name))
               .map(a => {
                 const currentGroup = sessionGroups.find(g => g.memberAthleteIds.includes(a.id));
+                const memberDetail = currentGroup?.memberDetails.find(m => m.athleteId === a.id);
                 const msg = playerRowMessage?.id === a.id ? playerRowMessage : null;
                 return (
                   <div key={a.id} className="px-3.5 py-2.5 flex items-center gap-3">
                     <p className="flex-1 min-w-0 text-[13px] font-medium text-slate-800 truncate">{a.name}</p>
                     {msg && (
                       <p className={`text-[11px] ${msg.error ? 'text-red-600' : 'text-emerald-600'} whitespace-nowrap`}>{msg.text}</p>
+                    )}
+                    {!msg && (
+                      <p className="text-[11px] text-slate-400 whitespace-nowrap hidden sm:block">
+                        {memberDetail
+                          ? <>Last modified by <span className="text-slate-500 font-medium">{memberDetail.addedByName || 'someone'}</span> on {new Date(memberDetail.addedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</>
+                          : '—'}
+                      </p>
                     )}
                     <div className="relative shrink-0">
                       <select

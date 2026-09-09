@@ -90,6 +90,12 @@ export interface GymExercise {
   createdBy: string | null;
   createdByName?: string; // convenience, joined in for display (Admin review queue)
   createdAt: string;
+  // Round 31 — nullable, no DB default (migration 0017): stays null until an
+  // actual edit (rename / change type) happens, so "modified since creation"
+  // is just `updatedAt != null`, no timestamp-diffing needed.
+  updatedBy: string | null;
+  updatedByName?: string;
+  updatedAt: string | null;
   // Exercise-bank cleanup: every new exercise starts 'pending' so it's
   // flagged to Admins, but stays usable immediately (non-blocking). Merging
   // one exercise into another archives the merged-away row instead of
@@ -136,6 +142,11 @@ export interface GymSessionGroup {
   createdBy: string | null;
   createdAt: string;
   memberAthleteIds: string[];
+  /** Round 31 — per-member "who added them to this group, and when" (see
+   *  gymApi.setSessionGroupMembers's comment for why a membership row's own
+   *  created_by/created_at already means "last modified" for that player).
+   *  One entry per memberAthleteIds entry, same athleteId values. */
+  memberDetails: { athleteId: string; addedBy: string | null; addedByName?: string; addedAt: string }[];
 }
 
 /**
@@ -266,6 +277,7 @@ export interface GymSessionItem {
   createdByName?: string;
   createdAt: string;
   updatedBy: string | null;
+  updatedByName?: string;
   updatedAt: string;
 }
 

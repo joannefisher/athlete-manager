@@ -58,6 +58,18 @@ const emptyDraft: GymSessionItemDraft = {
 const fmtDate = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
 const sideLabel = (side: string) => (side === 'left' ? 'Left' : side === 'right' ? 'Right' : '');
 
+// gym_session_items.updated_at is NOT NULL DEFAULT NOW() (migration 0001), so
+// every row — even one that's never been edited — already has a non-null
+// updated_at close to its created_at. Unlike gym_exercises (nullable, no
+// default — see migration 0017), "genuinely modified since creation" here
+// has to be a timestamp diff rather than a null check. A few seconds'
+// tolerance covers insert/select round-trip clock skew without hiding a
+// real same-minute edit.
+const MODIFIED_TOLERANCE_MS = 60_000;
+const wasModifiedSinceCreation = (createdAt: string, updatedAt: string) =>
+  new Date(updatedAt).getTime() - new Date(createdAt).getTime() > MODIFIED_TOLERANCE_MS;
+const fmtDateTime = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+
 export const SessionEditor = ({
   athlete,
   athleteId,
@@ -1109,6 +1121,9 @@ export const SessionEditor = ({
             </>
           )}
           {item.createdByName && <p className="text-[10px] text-slate-300 mt-1">added by {item.createdByName}</p>}
+          {item.createdAt && item.updatedAt && wasModifiedSinceCreation(item.createdAt, item.updatedAt) && (
+            <p className="text-[10px] text-slate-300">last modified by {item.updatedByName || 'someone'} on {fmtDateTime(item.updatedAt)}</p>
+          )}
         </div>
         {canEdit && (
           <div className="flex items-center gap-0.5 flex-shrink-0">

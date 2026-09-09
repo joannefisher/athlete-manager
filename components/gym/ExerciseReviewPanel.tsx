@@ -117,6 +117,11 @@ export const ExerciseReviewPanel = ({ clubId, currentUserId, onChanged }: { club
                       <div className="min-w-0">
                         <p className="text-sm font-medium truncate">{ex.name} <span className="text-xs text-slate-400">({ex.exerciseGroupTypeLabel || 'no type set'})</span></p>
                         <p className="text-[11px] text-slate-400">added by {ex.createdByName || 'someone'}</p>
+                        {ex.updatedAt && (
+                          <p className="text-[11px] text-slate-400">
+                            last modified by {ex.updatedByName || 'someone'} on {new Date(ex.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </p>
+                        )}
                       </div>
                       <button
                         onClick={() => handleApprove(ex.id)}

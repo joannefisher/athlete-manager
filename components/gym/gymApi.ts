@@ -98,8 +98,9 @@ export async function findOrCreateExerciseGroupType(clubId: string, attrs: Group
 // ── Exercise bank ────────────────────────────────────────────────────────
 
 const EXERCISE_SELECT =
-  'id, club_id, name, exercise_group_type_id, created_by, created_at, status, archived, merged_into_id, ' +
-  `gym_exercise_group_types(${GROUP_TYPE_SELECT}), creator:user_profiles!gym_exercises_created_by_fkey(full_name)`;
+  'id, club_id, name, exercise_group_type_id, created_by, created_at, updated_by, updated_at, status, archived, merged_into_id, ' +
+  `gym_exercise_group_types(${GROUP_TYPE_SELECT}), creator:user_profiles!gym_exercises_created_by_fkey(full_name), ` +
+  'updater:user_profiles!gym_exercises_updated_by_fkey(full_name)';
 
 function mapExercise(r: any): GymExercise {
   return {
@@ -111,6 +112,12 @@ function mapExercise(r: any): GymExercise {
     createdBy: r.created_by,
     createdByName: r.creator?.full_name,
     createdAt: r.created_at,
+    // Nullable, no default (migration 0017) — stays null until an actual
+    // edit, so "was this modified since creation" is just `updatedAt != null`,
+    // no timestamp-diffing needed (unlike session items — see mapSessionItem).
+    updatedBy: r.updated_by ?? null,
+    updatedByName: r.updater?.full_name,
+    updatedAt: r.updated_at ?? null,
     status: r.status,
     archived: r.archived,
     mergedIntoId: r.merged_into_id,
@@ -168,8 +175,10 @@ export async function createExercise(clubId: string, name: string, exerciseGroup
  *  existing exercise's type and, in the Exercises admin screen's "Needs
  *  review" list, to assign one to a legacy exercise the round-17 auto-map
  *  migration couldn't confidently place. */
-export async function updateExerciseGroupType(exerciseId: string, exerciseGroupTypeId: string): Promise<void> {
-  const { error } = await supabase.from('gym_exercises').update({ exercise_group_type_id: exerciseGroupTypeId }).eq('id', exerciseId);
+export async function updateExerciseGroupType(exerciseId: string, exerciseGroupTypeId: string, updatedBy: string): Promise<void> {
+  const { error } = await supabase.from('gym_exercises')
+    .update({ exercise_group_type_id: exerciseGroupTypeId, updated_by: updatedBy, updated_at: new Date().toISOString() })
+    .eq('id', exerciseId);
   if (error) throw error;
 }
 
@@ -195,10 +204,12 @@ export async function approveExercise(exerciseId: string): Promise<void> {
 }
 
 /** Rename an exercise bank entry in place (its group assignment is unchanged). */
-export async function updateExerciseName(exerciseId: string, name: string): Promise<void> {
+export async function updateExerciseName(exerciseId: string, name: string, updatedBy: string): Promise<void> {
   const trimmed = name.trim();
   if (!trimmed) return;
-  const { error } = await supabase.from('gym_exercises').update({ name: trimmed }).eq('id', exerciseId);
+  const { error } = await supabase.from('gym_exercises')
+    .update({ name: trimmed, updated_by: updatedBy, updated_at: new Date().toISOString() })
+    .eq('id', exerciseId);
   if (error) throw error;
 }
 
@@ -549,21 +560,36 @@ export async function fetchFrequentSectionNames(clubId: string, limit = 8): Prom
 
 // ── Gym-only session groups ─────────────────────────────────────────────
 
+// gym_session_group_members' created_by/created_at (migration 0017) is
+// deliberately the ONLY audit info on a membership row — see
+// setSessionGroupMembers below for why that alone already means "who moved
+// this player here, and when."
+const GROUP_MEMBER_SELECT =
+  'athlete_id, created_by, created_at, adder:user_profiles!gym_session_group_members_created_by_fkey(full_name)';
+
+function mapGroupMemberDetail(m: any): { athleteId: string; addedBy: string | null; addedByName?: string; addedAt: string } {
+  return { athleteId: m.athlete_id, addedBy: m.created_by, addedByName: m.adder?.full_name, addedAt: m.created_at };
+}
+
 export async function fetchSessionGroups(clubId: string): Promise<GymSessionGroup[]> {
   const { data, error } = await supabase
     .from('gym_session_groups')
-    .select('id, club_id, name, created_by, created_at, gym_session_group_members(athlete_id)')
+    .select(`id, club_id, name, created_by, created_at, gym_session_group_members(${GROUP_MEMBER_SELECT})`)
     .eq('club_id', clubId)
     .order('name');
   if (error) throw error;
-  return (data || []).map((r: any) => ({
-    id: r.id,
-    clubId: r.club_id,
-    name: r.name,
-    createdBy: r.created_by,
-    createdAt: r.created_at,
-    memberAthleteIds: (r.gym_session_group_members || []).map((m: any) => m.athlete_id),
-  }));
+  return (data || []).map((r: any) => {
+    const memberDetails = (r.gym_session_group_members || []).map(mapGroupMemberDetail);
+    return {
+      id: r.id,
+      clubId: r.club_id,
+      name: r.name,
+      createdBy: r.created_by,
+      createdAt: r.created_at,
+      memberAthleteIds: memberDetails.map((m: any) => m.athleteId),
+      memberDetails,
+    };
+  });
 }
 
 export async function createSessionGroup(
@@ -579,11 +605,14 @@ export async function createSessionGroup(
     .single();
   if (error) throw error;
 
+  let memberDetails: { athleteId: string; addedBy: string | null; addedByName?: string; addedAt: string }[] = [];
   if (memberAthleteIds.length > 0) {
-    const { error: memErr } = await supabase
+    const { data: memRows, error: memErr } = await supabase
       .from('gym_session_group_members')
-      .insert(memberAthleteIds.map(athleteId => ({ group_id: data.id, athlete_id: athleteId })));
+      .insert(memberAthleteIds.map(athleteId => ({ group_id: data.id, athlete_id: athleteId, created_by: createdBy })))
+      .select(GROUP_MEMBER_SELECT);
     if (memErr) throw memErr;
+    memberDetails = (memRows || []).map(mapGroupMemberDetail);
   }
 
   return {
@@ -593,17 +622,39 @@ export async function createSessionGroup(
     createdBy: data.created_by,
     createdAt: data.created_at,
     memberAthleteIds,
+    memberDetails,
   };
 }
 
-export async function setSessionGroupMembers(groupId: string, memberAthleteIds: string[]): Promise<void> {
-  const { error: delErr } = await supabase.from('gym_session_group_members').delete().eq('group_id', groupId);
-  if (delErr) throw delErr;
-  if (memberAthleteIds.length > 0) {
-    const { error: insErr } = await supabase
+/**
+ * Replaces a group's membership with `memberAthleteIds` — but, since round
+ * 31, only touches the rows that actually changed: it diffs against who's
+ * currently in the group and deletes/inserts just the difference, instead of
+ * the old blanket delete-everything-then-reinsert-everything. That matters
+ * now that a membership row's created_by/created_at (migration 0017) is
+ * meaningful "last modified by/at for this player" data for the Gym groups
+ * "By player" screen — the old approach would have reset EVERY member's
+ * created_at to "now" and created_by to whoever made ANY change, the moment
+ * a single player was added or removed, which would have made that column
+ * meaningless within one call of this function.
+ */
+export async function setSessionGroupMembers(groupId: string, memberAthleteIds: string[], userId: string): Promise<void> {
+  const { data: existing, error: fetchErr } = await supabase.from('gym_session_group_members').select('athlete_id').eq('group_id', groupId);
+  if (fetchErr) throw fetchErr;
+  const existingIds = new Set((existing || []).map((r: any) => r.athlete_id as string));
+  const nextIds = new Set(memberAthleteIds);
+  const toRemove = [...existingIds].filter(id => !nextIds.has(id));
+  const toAdd = [...nextIds].filter(id => !existingIds.has(id));
+
+  if (toRemove.length > 0) {
+    const { error } = await supabase.from('gym_session_group_members').delete().eq('group_id', groupId).in('athlete_id', toRemove);
+    if (error) throw error;
+  }
+  if (toAdd.length > 0) {
+    const { error } = await supabase
       .from('gym_session_group_members')
-      .insert(memberAthleteIds.map(athleteId => ({ group_id: groupId, athlete_id: athleteId })));
-    if (insErr) throw insErr;
+      .insert(toAdd.map(athleteId => ({ group_id: groupId, athlete_id: athleteId, created_by: userId })));
+    if (error) throw error;
   }
 }
 
@@ -649,6 +700,7 @@ function mapSessionItem(r: any): GymSessionItem {
     createdByName: r.creator?.full_name,
     createdAt: r.created_at,
     updatedBy: r.updated_by,
+    updatedByName: r.updater?.full_name,
     updatedAt: r.updated_at,
   };
 }
@@ -711,7 +763,8 @@ const SESSION_ITEM_SELECT =
   'effective_exercise:gym_exercises!gym_session_items_effective_exercise_id_fkey(name), ' +
   'conditioning_exercise:gym_conditioning_exercises(name), ' +
   'running_exercise:gym_running_exercises(name, distance_meters), ' +
-  'creator:user_profiles!gym_session_items_created_by_fkey(full_name)';
+  'creator:user_profiles!gym_session_items_created_by_fkey(full_name), ' +
+  'updater:user_profiles!gym_session_items_updated_by_fkey(full_name)';
 
 // 2026-09-04: migration 0015 added gym_sessions.current_item_id, a FK
 // *pointing into* gym_session_items (the resume pointer) — alongside the

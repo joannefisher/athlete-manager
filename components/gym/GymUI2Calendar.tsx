@@ -17,7 +17,15 @@ import { useGymUndo } from './GymUndoContext';
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-function monthGridDates(monthAnchor: string): { iso: string; inMonth: boolean }[] {
+// rowOffset shifts the whole grid by whole weeks, independent of monthAnchor
+// — this is what lets wheel-scrolling glide the grid one row at a time
+// (Round 31) instead of snapping a whole month per gesture. "inMonth" (and
+// the header label, computed by the caller) is no longer tied to the
+// anchor's month once shifted — it's based on whichever month owns the
+// majority of the currently-visible cells, i.e. the cell at the grid's
+// midpoint, so a mostly-October grid reads as October even while
+// monthAnchor is still nominally September.
+function monthGridDates(monthAnchor: string, rowOffset = 0): { iso: string; inMonth: boolean }[] {
   const anchor = new Date(monthAnchor + 'T00:00:00');
   const year = anchor.getFullYear();
   const month = anchor.getMonth();
@@ -26,11 +34,19 @@ function monthGridDates(monthAnchor: string): { iso: string; inMonth: boolean }[
   const gridStart = new Date(year, month, 1 - firstWeekday);
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const totalCells = Math.ceil((firstWeekday + daysInMonth) / 7) * 7;
-  return Array.from({ length: totalCells }, (_, i) => {
+  gridStart.setDate(gridStart.getDate() + rowOffset * 7);
+  const dates = Array.from({ length: totalCells }, (_, i) => {
     const d = new Date(gridStart);
     d.setDate(gridStart.getDate() + i);
-    return { iso: d.toISOString().split('T')[0], inMonth: d.getMonth() === month };
+    return d;
   });
+  const reference = dates[Math.floor(totalCells / 2)];
+  const refMonth = reference.getMonth();
+  const refYear = reference.getFullYear();
+  return dates.map(d => ({
+    iso: d.toISOString().split('T')[0],
+    inMonth: d.getMonth() === refMonth && d.getFullYear() === refYear,
+  }));
 }
 
 export const GymUI2Calendar = ({
@@ -75,32 +91,48 @@ export const GymUI2Calendar = ({
   const [clipboard, setClipboard] = useState<{ date: string; items: GymSessionItem[] } | null>(null);
   const [pasting, setPasting] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
-  const wheelCooldown = useRef(false);
+  const wheelAccum = useRef(0);
 
-  // Round 29: let a mouse/trackpad scroll gesture over the calendar step the
-  // month back/forward, in addition to the existing arrow-click stepper.
-  // Uses a native (non-passive) listener so we can preventDefault and stop
-  // the page itself from scrolling while the cursor is over the grid, and a
-  // short cooldown so one scroll gesture moves one month, not several.
+  // Round 31: replaced the whole-month-per-gesture wheel stepping with a
+  // rolling, row-at-a-time scroll — deltaY accumulates and only converts to
+  // a row (one week) once it crosses ROW_STEP_PX, so small trackpad nudges
+  // glide the grid gradually instead of snapping a whole month at once. A
+  // big fling can still cross several rows in one gesture (the while loop
+  // below drains the accumulator). Purely local state — arrow-click/date
+  // picker navigation (via monthAnchor) always resets it back to a clean,
+  // aligned month view (see the effect beneath this one).
+  const [rowOffset, setRowOffset] = useState(0);
   useEffect(() => {
     const el = rootRef.current;
-    if (!el || !onShiftMonth) return;
+    if (!el) return;
+    const ROW_STEP_PX = 80;
     const handleWheel = (e: WheelEvent) => {
       if (Math.abs(e.deltaY) < 2) return;
       e.preventDefault();
-      if (wheelCooldown.current) return;
-      wheelCooldown.current = true;
-      onShiftMonth(e.deltaY > 0 ? 1 : -1);
-      setTimeout(() => { wheelCooldown.current = false; }, 420);
+      wheelAccum.current += e.deltaY;
+      while (Math.abs(wheelAccum.current) >= ROW_STEP_PX) {
+        const dir = wheelAccum.current > 0 ? 1 : -1;
+        wheelAccum.current -= dir * ROW_STEP_PX;
+        setRowOffset(r => r + dir);
+      }
     };
     el.addEventListener('wheel', handleWheel, { passive: false });
     return () => el.removeEventListener('wheel', handleWheel);
-  }, [onShiftMonth]);
+  }, []);
 
-  const grid = monthGridDates(monthAnchor);
+  // Arrow-click / date-picker navigation changes monthAnchor — snap back to
+  // a clean, unshifted month view whenever that happens.
+  useEffect(() => {
+    setRowOffset(0);
+    wheelAccum.current = 0;
+  }, [monthAnchor]);
+
+  const grid = monthGridDates(monthAnchor, rowOffset);
   const gridDates = grid.map(g => g.iso);
   const today = todayIso();
-  const monthLabel = new Date(monthAnchor + 'T00:00:00').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  const referenceIso = gridDates[Math.floor(gridDates.length / 2)];
+  const monthLabel = new Date(referenceIso + 'T00:00:00').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  const gridRangeKey = `${gridDates[0]}_${gridDates[gridDates.length - 1]}`;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -115,7 +147,7 @@ export const GymUI2Calendar = ({
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [athleteId, monthAnchor]);
+  }, [athleteId, gridRangeKey]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -248,7 +280,7 @@ export const GymUI2Calendar = ({
                   </div>
                 )}
               </div>
-              <div className="flex-1 overflow-y-auto px-1.5 pb-1.5 pt-1 space-y-0.5 max-h-[110px]">
+              <div className="flex-1 px-1.5 pb-1.5 pt-1 space-y-0.5">
                 {items.map(item => (
                   <div
                     key={item.id}
