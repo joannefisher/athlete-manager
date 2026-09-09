@@ -218,10 +218,19 @@ export const GymSetup = ({
         <div className="bg-white rounded-lg border border-slate-200 overflow-auto">
           <table className="min-w-full text-[12px] border-collapse">
             <thead>
+              {/* Round 33: header typography aligned to the app's established
+                  table convention (TrainingPlanner's/RehabPlanner's own
+                  tables) — text-[10px]/slate-400/uppercase/tracking-wider —
+                  instead of this file's own one-off slate-600/non-uppercase
+                  style, so this and every other tabular screen in the app
+                  read as the same design language. The sticky first column
+                  stays (this is a genuinely wide matrix, unlike a plain
+                  list), just with the same text treatment as every other
+                  column. */}
               <tr className="border-b border-slate-100 bg-slate-50">
-                <th className="sticky left-0 z-10 bg-slate-50 text-left px-3 py-2 font-semibold text-slate-600 whitespace-nowrap">Player</th>
+                <th className="sticky left-0 z-10 bg-slate-50 text-left px-3 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">Player</th>
                 {groupTypes.map(t => (
-                  <th key={t.id} className="px-2 py-2 font-semibold text-slate-600 text-left whitespace-nowrap min-w-[170px]">
+                  <th key={t.id} className="px-2 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider text-left whitespace-nowrap min-w-[170px]">
                     {groupTypeLabel(t)}
                   </th>
                 ))}

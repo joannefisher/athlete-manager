@@ -342,18 +342,29 @@ export const GroupPicker = ({
             toggleGroup={playerViewFilter.toggleGroup}
             togglePositionName={playerViewFilter.togglePositionName}
           />
-          {/* Round 32: laid out as an actual table — Player, then Group
-              (column 2, per Joanne's ask), then Last modified pushed to the
-              far right — using one shared grid template on the header and
-              every row so the three columns line up. Stacks to a single
-              column below sm, same as the rest of this screen's mobile
-              behaviour. */}
-          <div className="hidden sm:grid grid-cols-[minmax(0,1fr)_180px_240px] gap-3 px-3.5 pt-1 pb-1.5">
-            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Player</span>
-            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Group</span>
-            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-right">Last modified</span>
-          </div>
-          <div className="divide-y divide-slate-100 -mx-3.5 mt-1 sm:mt-0">
+          {/* Round 33: rebuilt as a real <table> (was a CSS-grid stand-in —
+              functionally fine, but visually its own one-off style next to
+              GymSetup.tsx's player-defaults matrix, which is a real table).
+              Header/body styling now matches the app's established table
+              convention exactly (see TrainingPlanner.tsx's End of Day Report
+              table, and GymSetup.tsx after this same round's pass over it):
+              bg-slate-50/border-b header row, text-[10px]/slate-400/
+              uppercase/tracking-wider column labels, divide-y body — and,
+              like every other table in the app, scrolls horizontally on a
+              narrow screen rather than stacking to one column, so this no
+              longer has its own bespoke mobile behaviour either. Columns
+              stay Player, then Group (column 2, per Joanne's ask), then
+              Last modified pushed to the far right. */}
+          <div className="-mx-3.5 mt-1 overflow-x-auto">
+            <table className="min-w-full text-[12px] border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-100">
+                  <th className="text-left px-3.5 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Player</th>
+                  <th className="text-left px-3.5 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Group</th>
+                  <th className="text-right px-3.5 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Last modified</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
             {playerViewFilter.visibleAthletes
               .filter(a => !playerSearch.trim() || a.name.toLowerCase().includes(playerSearch.trim().toLowerCase()))
               .sort((a, b) => a.name.localeCompare(b.name))
@@ -362,38 +373,46 @@ export const GroupPicker = ({
                 const memberDetail = currentGroup?.memberDetails.find(m => m.athleteId === a.id);
                 const msg = playerRowMessage?.id === a.id ? playerRowMessage : null;
                 return (
-                  <div key={a.id} className="px-3.5 py-2.5 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_180px_240px] items-center gap-1.5 sm:gap-3">
-                    <p className="min-w-0 text-[13px] font-medium text-slate-800 truncate">{a.name}</p>
-                    <div className="relative shrink-0">
-                      <select
-                        value={currentGroup?.id || ''}
-                        disabled={movingAthleteId === a.id}
-                        onChange={e => movePlayerToGroup(a.id, a.name, e.target.value)}
-                        className="w-full sm:w-auto h-8 pl-2.5 pr-7 rounded-md border border-slate-200 bg-white text-[12px] font-medium text-slate-700 appearance-none disabled:opacity-40"
-                      >
-                        <option value="">— Unassigned —</option>
-                        {sessionGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                      </select>
-                      {movingAthleteId === a.id
-                        ? <Loader2 className="w-3.5 h-3.5 text-slate-400 animate-spin absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-                        : <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-                      }
-                    </div>
-                    {msg ? (
-                      <p className={`text-[11px] sm:text-right ${msg.error ? 'text-red-600' : 'text-emerald-600'}`}>{msg.text}</p>
-                    ) : (
-                      <p className="text-[11px] text-slate-400 sm:text-right">
-                        {memberDetail
-                          ? <>Last modified by <span className="text-slate-500 font-medium">{memberDetail.addedByName || 'someone'}</span> on {new Date(memberDetail.addedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</>
-                          : '—'}
-                      </p>
-                    )}
-                  </div>
+                  <tr key={a.id}>
+                    <td className="px-3.5 py-2 font-medium text-slate-800 whitespace-nowrap">{a.name}</td>
+                    <td className="px-3.5 py-2">
+                      <div className="relative inline-block">
+                        <select
+                          value={currentGroup?.id || ''}
+                          disabled={movingAthleteId === a.id}
+                          onChange={e => movePlayerToGroup(a.id, a.name, e.target.value)}
+                          className="h-8 pl-2.5 pr-7 rounded-md border border-slate-200 bg-white text-[12px] font-medium text-slate-700 appearance-none disabled:opacity-40"
+                        >
+                          <option value="">— Unassigned —</option>
+                          {sessionGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                        </select>
+                        {movingAthleteId === a.id
+                          ? <Loader2 className="w-3.5 h-3.5 text-slate-400 animate-spin absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          : <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        }
+                      </div>
+                    </td>
+                    <td className="px-3.5 py-2 text-right whitespace-nowrap">
+                      {msg ? (
+                        <span className={`text-[11px] ${msg.error ? 'text-red-600' : 'text-emerald-600'}`}>{msg.text}</span>
+                      ) : (
+                        <span className="text-[11px] text-slate-400">
+                          {memberDetail
+                            ? <>Last modified by <span className="text-slate-500 font-medium">{memberDetail.addedByName || 'someone'}</span> on {new Date(memberDetail.addedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</>
+                            : '—'}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
                 );
               })}
-            {playerViewFilter.visibleAthletes.length === 0 && (
-              <p className="text-[12px] text-slate-400 text-center py-4">No players match the current filter.</p>
-            )}
+              {playerViewFilter.visibleAthletes.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="px-3.5 py-4 text-center text-slate-400">No players match the current filter.</td>
+                </tr>
+              )}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
