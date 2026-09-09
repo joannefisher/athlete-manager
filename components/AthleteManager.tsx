@@ -89,7 +89,16 @@ const LoginScreen = () => {
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true); setError('');
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    // Round 30: players sign in with a club-assigned username, not an
+    // email address (see 0016_player_username_login.sql). A username-based
+    // account's real auth.users email is a deterministic, never-delivered
+    // `<username>@players.invalid` — so anything typed here without an "@"
+    // is treated as a username and translated to that address client-side
+    // before signing in. Anything with an "@" is used as-is (staff, who
+    // still sign in with their real email).
+    const identifier = email.trim();
+    const resolvedEmail = identifier.includes('@') ? identifier : `${identifier.toLowerCase()}@players.invalid`;
+    const { error } = await supabase.auth.signInWithPassword({ email: resolvedEmail, password });
     if (error) setError(error.message);
     setLoading(false);
   };
@@ -118,7 +127,7 @@ const LoginScreen = () => {
           </p>
           {mode === 'signin' ? (
             <form onSubmit={handleSignIn} className="space-y-3">
-              <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)}
+              <input type="text" autoCapitalize="none" autoCorrect="off" placeholder="Username or email" value={email} onChange={e => setEmail(e.target.value)}
                 className="w-full h-10 px-3 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
               <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)}
                 className="w-full h-10 px-3 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
@@ -140,6 +149,7 @@ const LoginScreen = () => {
               </button>
               <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)}
                 className="w-full h-10 px-3 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <p className="text-[11px] text-slate-400">Log in with a username instead? Ask your club admin to reset your password — there's no email to send a link to.</p>
               {error && <p className="text-[11px] text-red-600">{error}</p>}
               {message && <p className="text-[11px] text-green-600">{message}</p>}
               <button type="submit" disabled={loading}
@@ -177,6 +187,7 @@ const UserManagementPanel = ({ clubId, currentUserId }: { clubId: string; curren
   const [editingDetailsUserId, setEditingDetailsUserId] = useState<string | null>(null);
   const [editFirstName, setEditFirstName] = useState('');
   const [editLastName, setEditLastName] = useState('');
+  const [editUsername, setEditUsername] = useState('');
   const [savingDetails, setSavingDetails] = useState(false);
   const [resettingPasswordId, setResettingPasswordId] = useState<string | null>(null);
   const [rowMessage, setRowMessage] = useState<{ id: string; text: string; error?: boolean } | null>(null);
@@ -184,10 +195,26 @@ const UserManagementPanel = ({ clubId, currentUserId }: { clubId: string; curren
   // filter of any kind before this.
   const [userSearchQuery, setUserSearchQuery] = useState('');
 
+  // Round 30 — "Create new user" now has two modes: the existing email
+  // invite (staff), and a new username+password login for players, who
+  // don't have their own email address. See create-player/route.ts.
+  const [createMode, setCreateMode] = useState<'email' | 'username'>('email');
+  const [newUsername, setNewUsername] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [newLinkedAthleteId, setNewLinkedAthleteId] = useState('');
+  const [creatingPlayer, setCreatingPlayer] = useState(false);
+  // Inline "set a new password" row for username-based accounts — the
+  // equivalent of the existing sendPasswordReset(), but a direct set
+  // (via reset-player-password/route.ts) since there's no inbox to email a
+  // reset link to.
+  const [settingPasswordUserId, setSettingPasswordUserId] = useState<string | null>(null);
+  const [newPlayerPassword, setNewPlayerPassword] = useState('');
+  const [savingPlayerPassword, setSavingPlayerPassword] = useState(false);
+
   const load = async () => {
     setLoading(true);
     const [{ data }, { data: emailData }, { data: athleteData }] = await Promise.all([
-      supabase.from('user_profiles').select('id, role, full_name, first_name, last_name, is_active, linked_athlete_id, created_at').eq('club_id', clubId).order('full_name'),
+      supabase.from('user_profiles').select('id, role, full_name, first_name, last_name, is_active, linked_athlete_id, username, created_at').eq('club_id', clubId).order('full_name'),
       supabase.rpc('get_user_emails', { club_uuid: clubId }),
       // Club-scoped (2026-08-26 fix) — this was the one query in the whole
       // panel with no club_id filter, which let an Admin link a login to
@@ -199,6 +226,59 @@ const UserManagementPanel = ({ clubId, currentUserId }: { clubId: string; curren
     setUsers((data || []).map((u: any) => ({ ...u, email: emailMap[u.id] || '—' })));
     setAthletes(athleteData || []);
     setLoading(false);
+  };
+
+  // Every call to the new admin/* API routes needs the caller's own access
+  // token (those routes verify it themselves server-side — see
+  // requireClubAdmin.ts — rather than trusting anything the client claims).
+  const authedFetch = async (url: string, body: any) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token || ''}` },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json?.error || 'Something went wrong.');
+    return json;
+  };
+
+  const createPlayerLogin = async () => {
+    const firstName = inviteFirstName.trim();
+    const lastName = inviteLastName.trim();
+    const username = newUsername.trim();
+    if (!firstName || !lastName) { setInviteError('First and last name are required'); return; }
+    if (!username) { setInviteError('Username is required'); return; }
+    if (!newPassword || newPassword.length < 6) { setInviteError('Password must be at least 6 characters'); return; }
+    setCreatingPlayer(true); setInviteError(''); setInviteSuccess('');
+    try {
+      await authedFetch('/api/admin/create-player', {
+        username, password: newPassword, firstName, lastName,
+        linkedAthleteId: newLinkedAthleteId || null,
+      });
+      setInviteSuccess(`Login created for ${username}`);
+      setInviteFirstName(''); setInviteLastName(''); setNewUsername(''); setNewPassword(''); setNewLinkedAthleteId('');
+      await load();
+    } catch (err: any) {
+      setInviteError(err.message);
+    } finally {
+      setCreatingPlayer(false);
+    }
+  };
+
+  const savePlayerPassword = async (userId: string) => {
+    if (!newPlayerPassword || newPlayerPassword.length < 6) { flash(userId, 'Password must be at least 6 characters', true); return; }
+    setSavingPlayerPassword(true);
+    try {
+      await authedFetch('/api/admin/reset-player-password', { userId, password: newPlayerPassword });
+      flash(userId, 'Password updated');
+      setSettingPasswordUserId(null);
+      setNewPlayerPassword('');
+    } catch (err: any) {
+      flash(userId, err.message, true);
+    } finally {
+      setSavingPlayerPassword(false);
+    }
   };
 
   useEffect(() => { load(); }, [clubId]);
@@ -244,20 +324,41 @@ const UserManagementPanel = ({ clubId, currentUserId }: { clubId: string; curren
     setEditingDetailsUserId(user.id);
     setEditFirstName(user.first_name || '');
     setEditLastName(user.last_name || '');
+    setEditUsername(user.username || '');
   };
 
-  const saveUserDetails = async (userId: string) => {
+  // Round 30 follow-up: username-based (player) accounts can now have their
+  // username changed here too, not just set once at creation. A username
+  // isn't just a label — see rename-player-username/route.ts — so a changed
+  // username goes through that API route (which keeps the account's real
+  // auth email in sync) before the ordinary name fields are saved directly,
+  // same as before.
+  const saveUserDetails = async (userId: string, isUsernameAccount: boolean) => {
     if (!editFirstName.trim() || !editLastName.trim()) { flash(userId, 'First and last name are both required', true); return; }
+    if (isUsernameAccount && !editUsername.trim()) { flash(userId, 'Username is required', true); return; }
     setSavingDetails(true);
     const fullName = `${editFirstName.trim()} ${editLastName.trim()}`.trim();
-    const { error } = await supabase.from('user_profiles')
-      .update({ first_name: editFirstName.trim(), last_name: editLastName.trim(), full_name: fullName })
-      .eq('id', userId).eq('club_id', clubId);
-    setSavingDetails(false);
-    if (error) { flash(userId, error.message, true); return; }
-    setUsers(prev => prev.map(u => u.id === userId ? { ...u, first_name: editFirstName.trim(), last_name: editLastName.trim(), full_name: fullName } : u));
-    setEditingDetailsUserId(null);
-    flash(userId, 'Details updated');
+    const newUsername = editUsername.trim();
+    try {
+      let savedUsername: string | undefined;
+      if (isUsernameAccount) {
+        const result = await authedFetch('/api/admin/rename-player-username', { userId, username: newUsername });
+        savedUsername = result.username;
+      }
+      const { error } = await supabase.from('user_profiles')
+        .update({ first_name: editFirstName.trim(), last_name: editLastName.trim(), full_name: fullName })
+        .eq('id', userId).eq('club_id', clubId);
+      if (error) throw new Error(error.message);
+      setUsers(prev => prev.map(u => u.id === userId
+        ? { ...u, first_name: editFirstName.trim(), last_name: editLastName.trim(), full_name: fullName, ...(savedUsername ? { username: savedUsername } : {}) }
+        : u));
+      setEditingDetailsUserId(null);
+      flash(userId, 'Details updated');
+    } catch (err: any) {
+      flash(userId, err.message, true);
+    } finally {
+      setSavingDetails(false);
+    }
   };
 
   // "Issue password reset emails but should not be able to access or view
@@ -359,26 +460,40 @@ const UserManagementPanel = ({ clubId, currentUserId }: { clubId: string; curren
               </div>
               <div className="flex-1 min-w-0">
                 {isEditingDetails ? (
-                  <div className="flex items-center gap-1.5">
-                    <input type="text" placeholder="First name" value={editFirstName} onChange={e => setEditFirstName(e.target.value)}
-                      className="w-24 h-7 px-2 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                    <input type="text" placeholder="Last name" value={editLastName} onChange={e => setEditLastName(e.target.value)}
-                      className="w-24 h-7 px-2 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                    <button onClick={() => saveUserDetails(user.id)} disabled={savingDetails} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded disabled:opacity-40">
-                      {savingDetails ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-                    </button>
-                    <button onClick={() => setEditingDetailsUserId(null)} className="p-1 text-slate-400 hover:bg-slate-100 rounded"><X className="w-3.5 h-3.5" /></button>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <input type="text" placeholder="First name" value={editFirstName} onChange={e => setEditFirstName(e.target.value)}
+                        className="w-24 h-7 px-2 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                      <input type="text" placeholder="Last name" value={editLastName} onChange={e => setEditLastName(e.target.value)}
+                        className="w-24 h-7 px-2 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                      <button onClick={() => saveUserDetails(user.id, !!user.username)} disabled={savingDetails} className="p-1 text-emerald-600 hover:bg-emerald-50 rounded disabled:opacity-40">
+                        {savingDetails ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                      </button>
+                      <button onClick={() => setEditingDetailsUserId(null)} className="p-1 text-slate-400 hover:bg-slate-100 rounded"><X className="w-3.5 h-3.5" /></button>
+                    </div>
+                    {user.username && (
+                      <div className="flex items-center gap-1">
+                        <span className="text-[11px] text-slate-400">@</span>
+                        <input type="text" autoCapitalize="none" autoCorrect="off" placeholder="username" value={editUsername}
+                          onChange={e => setEditUsername(e.target.value)}
+                          className="w-40 h-7 px-2 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="flex items-center gap-1.5">
                     <p className="text-[13px] font-semibold text-slate-900 truncate">{user.full_name || '—'}</p>
                     {!isActive && <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-slate-200 text-slate-500 shrink-0">Inactive</span>}
-                    <button onClick={() => startEditDetails(user)} className="p-0.5 text-slate-300 hover:text-slate-600 transition-colors shrink-0" title="Edit name">
+                    <button onClick={() => startEditDetails(user)} className="p-0.5 text-slate-300 hover:text-slate-600 transition-colors shrink-0" title={user.username ? 'Edit name / username' : 'Edit name'}>
                       <Edit2 className="w-3 h-3" />
                     </button>
                   </div>
                 )}
-                <p className="text-[11px] text-slate-400 truncate">{user.email}</p>
+                {!isEditingDetails && (
+                  <p className="text-[11px] text-slate-400 truncate">
+                    {user.username ? <>Username: <span className="font-mono text-slate-500">{user.username}</span></> : user.email}
+                  </p>
+                )}
               </div>
               <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${roleColor[user.role] || 'bg-slate-100 text-slate-500'}`}>{user.role}</span>
               {user.id === currentUserId
@@ -422,12 +537,32 @@ const UserManagementPanel = ({ clubId, currentUserId }: { clubId: string; curren
                   {isActive ? 'Deactivate' : 'Reactivate'}
                 </button>
               )}
-              <button onClick={() => sendPasswordReset(user.id, user.email)} disabled={resettingPasswordId === user.id}
-                className="h-7 px-2.5 text-[11px] rounded-lg border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 disabled:opacity-40 flex items-center gap-1">
-                {resettingPasswordId === user.id ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-                Send password reset
-              </button>
+              {user.username ? (
+                <button onClick={() => { setSettingPasswordUserId(settingPasswordUserId === user.id ? null : user.id); setNewPlayerPassword(''); }}
+                  className="h-7 px-2.5 text-[11px] rounded-lg border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 flex items-center gap-1">
+                  Set new password
+                </button>
+              ) : (
+                <button onClick={() => sendPasswordReset(user.id, user.email)} disabled={resettingPasswordId === user.id}
+                  className="h-7 px-2.5 text-[11px] rounded-lg border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 disabled:opacity-40 flex items-center gap-1">
+                  {resettingPasswordId === user.id ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                  Send password reset
+                </button>
+              )}
             </div>
+            {settingPasswordUserId === user.id && (
+              <div className="mt-2 flex items-center gap-1.5">
+                <input type="text" placeholder="New password (min 6 characters)" value={newPlayerPassword} onChange={e => setNewPlayerPassword(e.target.value)}
+                  className="flex-1 h-7 px-2 text-[11px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                <button onClick={() => savePlayerPassword(user.id)} disabled={savingPlayerPassword}
+                  className="h-7 px-2.5 text-[11px] rounded-lg bg-slate-900 text-white hover:bg-slate-700 disabled:opacity-50 flex items-center gap-1">
+                  {savingPlayerPassword ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}Save
+                </button>
+                <button onClick={() => { setSettingPasswordUserId(null); setNewPlayerPassword(''); }} className="p-1 text-slate-400 hover:bg-slate-100 rounded">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
             {msg && <p className={`mt-2 text-[11px] flex items-center gap-1 ${msg.error ? 'text-red-600' : 'text-emerald-600'}`}>
               {msg.error ? <AlertCircle className="w-3 h-3" /> : <Check className="w-3 h-3" />}{msg.text}
             </p>}
@@ -437,6 +572,17 @@ const UserManagementPanel = ({ clubId, currentUserId }: { clubId: string; curren
 
       <div className="bg-white rounded-xl border border-slate-200 p-4">
         <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-3">Create new user</p>
+        <div className="flex bg-slate-100 rounded-md p-0.5 text-[11.5px] font-medium mb-3 w-fit">
+          <button onClick={() => { setCreateMode('email'); setInviteError(''); setInviteSuccess(''); }}
+            className={`px-3 py-1.5 rounded ${createMode === 'email' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>
+            Email invite
+          </button>
+          <button onClick={() => { setCreateMode('username'); setInviteError(''); setInviteSuccess(''); }}
+            className={`px-3 py-1.5 rounded ${createMode === 'username' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>
+            Player login (username)
+          </button>
+        </div>
+
         <div className="space-y-2">
           <div className="flex gap-2">
             <div className="flex-1">
@@ -450,25 +596,65 @@ const UserManagementPanel = ({ clubId, currentUserId }: { clubId: string; curren
                 className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
             </div>
           </div>
-          <div>
-            <label className="block text-[11px] font-medium text-slate-500 mb-1">Email address <span className="text-red-500">*</span></label>
-            <input type="email" value={inviteEmail} onChange={e => { setInviteEmail(e.target.value); setInviteError(''); }}
-              className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
-          </div>
-          <div className="flex gap-2 items-end">
-            <div className="flex-1">
-              <label className="block text-[11px] font-medium text-slate-500 mb-1">Role <span className="text-red-500">*</span></label>
-              <select value={inviteRole} onChange={e => setInviteRole(e.target.value as Role)}
-                className="w-full h-9 px-2 text-[12px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
-                {ALL_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-              </select>
-            </div>
-            <button onClick={inviteUser} disabled={inviting}
-              className="h-9 px-4 bg-slate-900 text-white rounded-lg text-[12px] font-medium hover:bg-slate-700 disabled:opacity-50 flex items-center gap-1.5">
-              {inviting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
-              {inviting ? 'Sending…' : 'Invite'}
-            </button>
-          </div>
+
+          {createMode === 'email' ? (
+            <>
+              <div>
+                <label className="block text-[11px] font-medium text-slate-500 mb-1">Email address <span className="text-red-500">*</span></label>
+                <input type="email" value={inviteEmail} onChange={e => { setInviteEmail(e.target.value); setInviteError(''); }}
+                  className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              </div>
+              <div className="flex gap-2 items-end">
+                <div className="flex-1">
+                  <label className="block text-[11px] font-medium text-slate-500 mb-1">Role <span className="text-red-500">*</span></label>
+                  <select value={inviteRole} onChange={e => setInviteRole(e.target.value as Role)}
+                    className="w-full h-9 px-2 text-[12px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    {ALL_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
+                <button onClick={inviteUser} disabled={inviting}
+                  className="h-9 px-4 bg-slate-900 text-white rounded-lg text-[12px] font-medium hover:bg-slate-700 disabled:opacity-50 flex items-center gap-1.5">
+                  {inviting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                  {inviting ? 'Sending…' : 'Invite'}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-[11px] text-slate-400 -mt-0.5">
+                No email needed — you set a username and password directly, and the player signs in with those. Role is always Player.
+              </p>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="block text-[11px] font-medium text-slate-500 mb-1">Username <span className="text-red-500">*</span></label>
+                  <input type="text" autoCapitalize="none" autoCorrect="off" placeholder="e.g. jsmith" value={newUsername}
+                    onChange={e => { setNewUsername(e.target.value); setInviteError(''); }}
+                    className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-[11px] font-medium text-slate-500 mb-1">Password <span className="text-red-500">*</span></label>
+                  <input type="text" placeholder="min 6 characters" value={newPassword}
+                    onChange={e => { setNewPassword(e.target.value); setInviteError(''); }}
+                    className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                </div>
+              </div>
+              <div className="flex gap-2 items-end">
+                <div className="flex-1">
+                  <label className="block text-[11px] font-medium text-slate-500 mb-1">Link to athlete (optional)</label>
+                  <select value={newLinkedAthleteId} onChange={e => setNewLinkedAthleteId(e.target.value)}
+                    className="w-full h-9 px-2 text-[12px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    <option value="">— Unlinked —</option>
+                    {athletes.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                </div>
+                <button onClick={createPlayerLogin} disabled={creatingPlayer}
+                  className="h-9 px-4 bg-slate-900 text-white rounded-lg text-[12px] font-medium hover:bg-slate-700 disabled:opacity-50 flex items-center gap-1.5">
+                  {creatingPlayer ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                  {creatingPlayer ? 'Creating…' : 'Create login'}
+                </button>
+              </div>
+            </>
+          )}
           {inviteError && <p className="text-[11px] text-red-600 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{inviteError}</p>}
           {inviteSuccess && <p className="text-[11px] text-green-600 flex items-center gap-1"><Check className="w-3 h-3" />{inviteSuccess}</p>}
         </div>

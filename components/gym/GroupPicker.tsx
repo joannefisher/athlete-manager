@@ -14,7 +14,7 @@
 // not on every pill click.
 
 import React, { useMemo, useState } from 'react';
-import { AlertTriangle, ArrowLeft, Check, Loader2, Plus, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Check, ChevronDown, Loader2, Plus, Search, Trash2, X } from 'lucide-react';
 import type { GymAthlete as Athlete, GymTeamPosition } from './types';
 import type { GymSessionGroup } from './types';
 import { createSessionGroup, setSessionGroupMembers, deleteSessionGroup } from './gymApi';
@@ -131,6 +131,19 @@ export const GroupPicker = ({
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [editingMembers, setEditingMembers] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+
+  // Round 30 — a second, player-first view of the exact same data: one row
+  // per player with their current group in a dropdown, instead of one
+  // section per group with a pill grid. Both views read/write the same
+  // sessionGroups, so nothing about how groups themselves work changes —
+  // this is just an alternate way to see and edit the same assignments,
+  // toggled per Joanne's ask ("existing UI should remain as well as a
+  // toggle"). Defaults to the existing Groups view.
+  const [viewMode, setViewMode] = useState<'groups' | 'players'>('groups');
+  const [playerSearch, setPlayerSearch] = useState('');
+  const [movingAthleteId, setMovingAthleteId] = useState<string | null>(null);
+  const [playerRowMessage, setPlayerRowMessage] = useState<{ id: string; text: string; error?: boolean } | null>(null);
+  const playerViewFilter = usePositionFilter(athletes, teamStructure);
 
   // A player can only belong to one gym group at a time. Adding someone
   // who's already in a different group is allowed, but only after they
@@ -259,14 +272,115 @@ export const GroupPicker = ({
     onChanged();
   };
 
+  // Player-view equivalent of toggleMember + commitMemberEdits/applyCrossRemovals
+  // combined: the dropdown's own current value already tells you where the
+  // player is coming from, so there's no ambiguity to confirm — just remove
+  // them from their old group (if any) and add them to the new one (if any
+  // was chosen; empty = unassigned) in one go.
+  const movePlayerToGroup = async (athleteId: string, athleteName: string, newGroupId: string) => {
+    const currentGroup = sessionGroups.find(g => g.memberAthleteIds.includes(athleteId));
+    if ((currentGroup?.id || '') === newGroupId) return;
+    setMovingAthleteId(athleteId);
+    try {
+      if (currentGroup) {
+        await setSessionGroupMembers(currentGroup.id, currentGroup.memberAthleteIds.filter(id => id !== athleteId));
+      }
+      if (newGroupId) {
+        const target = sessionGroups.find(g => g.id === newGroupId);
+        if (target) await setSessionGroupMembers(newGroupId, [...target.memberAthleteIds, athleteId]);
+      }
+      setPlayerRowMessage({ id: athleteId, text: newGroupId ? `Moved to ${sessionGroups.find(g => g.id === newGroupId)?.name || 'group'}` : `Removed from ${currentGroup?.name || 'group'}` });
+      setTimeout(() => setPlayerRowMessage(cur => (cur?.id === athleteId ? null : cur)), 3000);
+      onChanged();
+    } catch (err: any) {
+      setPlayerRowMessage({ id: athleteId, text: err?.message || 'Failed to move this player', error: true });
+    } finally {
+      setMovingAthleteId(null);
+    }
+  };
+
   return (
     <div className="w-full p-4 md:p-6 space-y-3">
       <button onClick={handleBack} className="flex items-center gap-1 text-[13px] text-slate-500 hover:text-slate-700 mb-3">
         <ArrowLeft className="w-3.5 h-3.5" /> Back
       </button>
 
-      <h2 className="text-[15px] font-bold text-slate-900 mb-3">Gym groups</h2>
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h2 className="text-[15px] font-bold text-slate-900">Gym groups</h2>
+        <div className="flex bg-slate-100 rounded-md p-0.5 text-[12px] font-medium">
+          <button
+            onClick={() => setViewMode('groups')}
+            className={`px-3 py-1.5 rounded ${viewMode === 'groups' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}
+          >
+            By group
+          </button>
+          <button
+            onClick={() => setViewMode('players')}
+            className={`px-3 py-1.5 rounded ${viewMode === 'players' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}
+          >
+            By player
+          </button>
+        </div>
+      </div>
 
+      {viewMode === 'players' && (
+        <div className="bg-white rounded-lg border border-slate-200 p-3.5 mb-3">
+          <div className="relative mb-2.5">
+            <Search className="w-3.5 h-3.5 text-slate-300 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Search players by name…"
+              value={playerSearch}
+              onChange={e => setPlayerSearch(e.target.value)}
+              className="w-full h-9 pl-9 pr-3 text-[12px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+          <PositionFilterRow
+            selectedGroups={playerViewFilter.selectedGroups}
+            selectedPositionNames={playerViewFilter.selectedPositionNames}
+            uniquePositionNames={playerViewFilter.uniquePositionNames}
+            toggleGroup={playerViewFilter.toggleGroup}
+            togglePositionName={playerViewFilter.togglePositionName}
+          />
+          <div className="divide-y divide-slate-100 -mx-3.5 mt-1">
+            {playerViewFilter.visibleAthletes
+              .filter(a => !playerSearch.trim() || a.name.toLowerCase().includes(playerSearch.trim().toLowerCase()))
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map(a => {
+                const currentGroup = sessionGroups.find(g => g.memberAthleteIds.includes(a.id));
+                const msg = playerRowMessage?.id === a.id ? playerRowMessage : null;
+                return (
+                  <div key={a.id} className="px-3.5 py-2.5 flex items-center gap-3">
+                    <p className="flex-1 min-w-0 text-[13px] font-medium text-slate-800 truncate">{a.name}</p>
+                    {msg && (
+                      <p className={`text-[11px] ${msg.error ? 'text-red-600' : 'text-emerald-600'} whitespace-nowrap`}>{msg.text}</p>
+                    )}
+                    <div className="relative shrink-0">
+                      <select
+                        value={currentGroup?.id || ''}
+                        disabled={movingAthleteId === a.id}
+                        onChange={e => movePlayerToGroup(a.id, a.name, e.target.value)}
+                        className="h-8 pl-2.5 pr-7 rounded-md border border-slate-200 bg-white text-[12px] font-medium text-slate-700 appearance-none disabled:opacity-40"
+                      >
+                        <option value="">— Unassigned —</option>
+                        {sessionGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                      </select>
+                      {movingAthleteId === a.id
+                        ? <Loader2 className="w-3.5 h-3.5 text-slate-400 animate-spin absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        : <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      }
+                    </div>
+                  </div>
+                );
+              })}
+            {playerViewFilter.visibleAthletes.length === 0 && (
+              <p className="text-[12px] text-slate-400 text-center py-4">No players match the current filter.</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {viewMode === 'groups' && (
       <div className="bg-white rounded-lg border border-slate-200 divide-y divide-slate-100 overflow-hidden mb-3">
         {sessionGroups.map(group => {
           const isEditing = editingGroupId === group.id;
@@ -335,6 +449,7 @@ export const GroupPicker = ({
         })}
         {sessionGroups.length === 0 && !creating && <div className="p-6 text-center text-[13px] text-slate-400">No groups yet.</div>}
       </div>
+      )}
 
       {creating ? (
         <div className="bg-white rounded-lg border border-slate-200 p-3.5">
