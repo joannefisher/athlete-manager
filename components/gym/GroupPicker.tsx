@@ -342,7 +342,18 @@ export const GroupPicker = ({
             toggleGroup={playerViewFilter.toggleGroup}
             togglePositionName={playerViewFilter.togglePositionName}
           />
-          <div className="divide-y divide-slate-100 -mx-3.5 mt-1">
+          {/* Round 32: laid out as an actual table — Player, then Group
+              (column 2, per Joanne's ask), then Last modified pushed to the
+              far right — using one shared grid template on the header and
+              every row so the three columns line up. Stacks to a single
+              column below sm, same as the rest of this screen's mobile
+              behaviour. */}
+          <div className="hidden sm:grid grid-cols-[minmax(0,1fr)_180px_240px] gap-3 px-3.5 pt-1 pb-1.5">
+            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Player</span>
+            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Group</span>
+            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-right">Last modified</span>
+          </div>
+          <div className="divide-y divide-slate-100 -mx-3.5 mt-1 sm:mt-0">
             {playerViewFilter.visibleAthletes
               .filter(a => !playerSearch.trim() || a.name.toLowerCase().includes(playerSearch.trim().toLowerCase()))
               .sort((a, b) => a.name.localeCompare(b.name))
@@ -351,24 +362,14 @@ export const GroupPicker = ({
                 const memberDetail = currentGroup?.memberDetails.find(m => m.athleteId === a.id);
                 const msg = playerRowMessage?.id === a.id ? playerRowMessage : null;
                 return (
-                  <div key={a.id} className="px-3.5 py-2.5 flex items-center gap-3">
-                    <p className="flex-1 min-w-0 text-[13px] font-medium text-slate-800 truncate">{a.name}</p>
-                    {msg && (
-                      <p className={`text-[11px] ${msg.error ? 'text-red-600' : 'text-emerald-600'} whitespace-nowrap`}>{msg.text}</p>
-                    )}
-                    {!msg && (
-                      <p className="text-[11px] text-slate-400 whitespace-nowrap hidden sm:block">
-                        {memberDetail
-                          ? <>Last modified by <span className="text-slate-500 font-medium">{memberDetail.addedByName || 'someone'}</span> on {new Date(memberDetail.addedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</>
-                          : '—'}
-                      </p>
-                    )}
+                  <div key={a.id} className="px-3.5 py-2.5 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_180px_240px] items-center gap-1.5 sm:gap-3">
+                    <p className="min-w-0 text-[13px] font-medium text-slate-800 truncate">{a.name}</p>
                     <div className="relative shrink-0">
                       <select
                         value={currentGroup?.id || ''}
                         disabled={movingAthleteId === a.id}
                         onChange={e => movePlayerToGroup(a.id, a.name, e.target.value)}
-                        className="h-8 pl-2.5 pr-7 rounded-md border border-slate-200 bg-white text-[12px] font-medium text-slate-700 appearance-none disabled:opacity-40"
+                        className="w-full sm:w-auto h-8 pl-2.5 pr-7 rounded-md border border-slate-200 bg-white text-[12px] font-medium text-slate-700 appearance-none disabled:opacity-40"
                       >
                         <option value="">— Unassigned —</option>
                         {sessionGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
@@ -378,6 +379,15 @@ export const GroupPicker = ({
                         : <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
                       }
                     </div>
+                    {msg ? (
+                      <p className={`text-[11px] sm:text-right ${msg.error ? 'text-red-600' : 'text-emerald-600'}`}>{msg.text}</p>
+                    ) : (
+                      <p className="text-[11px] text-slate-400 sm:text-right">
+                        {memberDetail
+                          ? <>Last modified by <span className="text-slate-500 font-medium">{memberDetail.addedByName || 'someone'}</span> on {new Date(memberDetail.addedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</>
+                          : '—'}
+                      </p>
+                    )}
                   </div>
                 );
               })}

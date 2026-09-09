@@ -189,8 +189,15 @@ export const GymUI2Calendar = ({
 
   return (
     <div ref={rootRef} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100 bg-slate-50">
-        <span className="text-[13px] font-semibold text-slate-700">{monthLabel}</span>
+      {/* Round 32: shrunk from py-2.5 to a slimmer bar — the calendar is the
+          valuable space on this page, and this bar's own month label is now
+          the only place that shows which month you've actually scrolled to
+          via the row-by-row wheel scroll (GymUI2Root's own date-stepper
+          label above stays on whatever month you last arrow-clicked/picked
+          to — see the rowOffset comment on monthGridDates below), so it's
+          kept, just tightened rather than removed. */}
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-100 bg-slate-50">
+        <span className="text-[12px] font-semibold text-slate-700">{monthLabel}</span>
         <div className="flex items-center gap-2">
           {clipboard && (
             <span className="text-[11px] text-blue-700 bg-blue-50 border border-blue-100 rounded-full px-2 py-0.5 flex items-center gap-1">
@@ -205,7 +212,7 @@ export const GymUI2Calendar = ({
 
       <div className="grid grid-cols-7 border-b border-slate-100">
         {DAY_LABELS.map(l => (
-          <div key={l} className="text-center text-[10px] font-semibold text-slate-400 uppercase tracking-wide py-1.5">
+          <div key={l} className="text-center text-[10px] font-semibold text-slate-400 uppercase tracking-wide py-1">
             {l}
           </div>
         ))}

@@ -15,6 +15,18 @@ import { getSupabaseAdmin } from '@/lib/supabaseAdmin';
 import { requireClubAdmin } from '@/lib/requireClubAdmin';
 import { isValidUsername, syntheticEmailForUsername } from '@/lib/username';
 
+// Round 32: this used to hardcode role: 'Player' below with no way for the
+// caller to say otherwise — the UI form never offered a Role field either
+// (AthleteManager.tsx's "Player login (username)" mode), which blocked
+// creating any non-Player username-based account (e.g. a Coach/S&C/Physio
+// who also has no email address) from the User Management screen entirely.
+// Mirrors the same role list the existing Email-invite path already allows
+// (ALL_ROLES in AthleteManager.tsx) — this route is already gated to an
+// active Admin of the target club and always creates inside that Admin's
+// own club_id, same as every other write here, so there's no new privilege
+// this opens up beyond what the email-invite path already allows.
+const ALLOWED_ROLES = ['Admin', 'Coach', 'Physio', 'S&C', 'Player'];
+
 export async function POST(req: NextRequest) {
   const auth = await requireClubAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
@@ -24,8 +36,12 @@ export async function POST(req: NextRequest) {
   const password = String(body?.password || '');
   const firstName = String(body?.firstName || '').trim();
   const lastName = String(body?.lastName || '').trim();
+  const role = String(body?.role || 'Player').trim();
   const linkedAthleteId: string | null = body?.linkedAthleteId || null;
 
+  if (!ALLOWED_ROLES.includes(role)) {
+    return NextResponse.json({ error: 'Not a valid role.' }, { status: 400 });
+  }
   if (!isValidUsername(username)) {
     return NextResponse.json(
       { error: 'Username must be 3-32 characters: letters, numbers, dots, dashes or underscores, and can\'t start or end with a symbol.' },
@@ -68,7 +84,7 @@ export async function POST(req: NextRequest) {
   const { error: profileErr } = await admin.from('user_profiles').insert({
     id: created.user.id,
     club_id: auth.clubId!,
-    role: 'Player',
+    role,
     username,
     full_name: fullName,
     first_name: firstName,

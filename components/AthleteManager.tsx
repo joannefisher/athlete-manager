@@ -201,6 +201,13 @@ const UserManagementPanel = ({ clubId, currentUserId }: { clubId: string; curren
   const [createMode, setCreateMode] = useState<'email' | 'username'>('email');
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  // Round 32: username-login accounts were hardcoded to role: 'Player' on
+  // both sides (this form never offered a Role field, and create-player's
+  // API route always inserted 'Player' regardless) — that silently blocked
+  // creating a non-player username account (e.g. a Coach/S&C/Physio without
+  // an email address) from this screen. Now mirrors the Email invite side's
+  // Role dropdown exactly; defaults to Player so existing usage is unchanged.
+  const [newPlayerRole, setNewPlayerRole] = useState<Role>('Player');
   const [newLinkedAthleteId, setNewLinkedAthleteId] = useState('');
   const [creatingPlayer, setCreatingPlayer] = useState(false);
   // Inline "set a new password" row for username-based accounts — the
@@ -254,10 +261,11 @@ const UserManagementPanel = ({ clubId, currentUserId }: { clubId: string; curren
     try {
       await authedFetch('/api/admin/create-player', {
         username, password: newPassword, firstName, lastName,
+        role: newPlayerRole,
         linkedAthleteId: newLinkedAthleteId || null,
       });
       setInviteSuccess(`Login created for ${username}`);
-      setInviteFirstName(''); setInviteLastName(''); setNewUsername(''); setNewPassword(''); setNewLinkedAthleteId('');
+      setInviteFirstName(''); setInviteLastName(''); setNewUsername(''); setNewPassword(''); setNewLinkedAthleteId(''); setNewPlayerRole('Player');
       await load();
     } catch (err: any) {
       setInviteError(err.message);
@@ -622,7 +630,7 @@ const UserManagementPanel = ({ clubId, currentUserId }: { clubId: string; curren
           ) : (
             <>
               <p className="text-[11px] text-slate-400 -mt-0.5">
-                No email needed — you set a username and password directly, and the player signs in with those. Role is always Player.
+                No email needed — you set a username and password directly, and this person signs in with those.
               </p>
               <div className="flex gap-2">
                 <div className="flex-1">
@@ -638,7 +646,14 @@ const UserManagementPanel = ({ clubId, currentUserId }: { clubId: string; curren
                     className="w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500" />
                 </div>
               </div>
-              <div className="flex gap-2 items-end">
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="block text-[11px] font-medium text-slate-500 mb-1">Role <span className="text-red-500">*</span></label>
+                  <select value={newPlayerRole} onChange={e => setNewPlayerRole(e.target.value as Role)}
+                    className="w-full h-9 px-2 text-[12px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    {ALL_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
                 <div className="flex-1">
                   <label className="block text-[11px] font-medium text-slate-500 mb-1">Link to athlete (optional)</label>
                   <select value={newLinkedAthleteId} onChange={e => setNewLinkedAthleteId(e.target.value)}
@@ -647,6 +662,8 @@ const UserManagementPanel = ({ clubId, currentUserId }: { clubId: string; curren
                     {athletes.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
                   </select>
                 </div>
+              </div>
+              <div className="flex justify-end">
                 <button onClick={createPlayerLogin} disabled={creatingPlayer}
                   className="h-9 px-4 bg-slate-900 text-white rounded-lg text-[12px] font-medium hover:bg-slate-700 disabled:opacity-50 flex items-center gap-1.5">
                   {creatingPlayer ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}

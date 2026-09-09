@@ -151,9 +151,15 @@ export const GymUI2Root = ({
   }
 
   return (
-    <div className="w-full p-4 md:p-6 space-y-3">
-      {/* Scope switcher */}
-      <div className="bg-white rounded-lg border border-slate-200 p-3 flex items-center gap-2 flex-wrap">
+    <div className="w-full p-3 md:p-4 space-y-2">
+      {/* Round 32: scope switcher and date-stepper+tabs used to be two
+          separate white cards stacked with a gap between them — each with
+          its own border/padding, on a page where "the calendar is the
+          valuable space." Merged into one row (still flex-wrap, so it still
+          drops to multiple lines on a narrow screen exactly like the two
+          cards used to) so the whole controls area costs one card's worth
+          of padding+border instead of two, with nothing removed. */}
+      <div className="bg-white rounded-lg border border-slate-200 p-2 flex items-center gap-2 flex-wrap">
         <div className="flex bg-slate-100 rounded-md p-0.5 text-[12px] font-medium">
           <button
             onClick={() => setScopeMode('player')}
@@ -220,10 +226,9 @@ export const GymUI2Root = ({
             )}
           </>
         )}
-      </div>
 
-      {/* Date stepper + tabs */}
-      <div className="bg-white rounded-lg border border-slate-200 p-3 flex items-center gap-2 flex-wrap">
+        <div className="w-px self-stretch bg-slate-100 mx-0.5 hidden sm:block" />
+
         <button onClick={() => stepDate(-1)} className="p-1.5 rounded hover:bg-slate-100 text-slate-500">
           <ChevronLeft className="w-4 h-4" />
         </button>
