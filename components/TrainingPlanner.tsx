@@ -1532,10 +1532,15 @@ const EndOfDayReport = ({ athletes, setAthletes, teamStructure, date, onSaveEOD,
       </div>
 
       {/* Table */}
+      {/* Round 34: bounded max-height + sticky thead so the header stays fixed
+          while the athlete list scrolls — same recipe as the player/drill
+          matrix table further down this file (overflow-auto + max-height
+          makes this div the actual scrolling container, which a sticky
+          top-0 thead can then stick within). */}
       <div className="bg-white rounded-lg border border-slate-200 overflow-hidden mb-24">
-        <div className="overflow-x-auto">
+        <div className="overflow-auto max-h-[calc(100vh-220px)]">
           <table className="w-full">
-            <thead>
+            <thead className="sticky top-0 z-10">
               <tr className="bg-slate-50 border-b border-slate-100">
                 <th className="text-left px-3 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Athlete</th>
                 <th className="text-left px-3 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Position</th>

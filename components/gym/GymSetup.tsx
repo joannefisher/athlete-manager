@@ -215,9 +215,25 @@ export const GymSetup = ({
           No exercise group types set up yet — add one from the Exercises tab first.
         </div>
       ) : (
-        <div className="bg-white rounded-lg border border-slate-200 overflow-auto">
+        // Round 34: this table's wrapper had no bounded height, so `overflow-auto`
+        // never actually became a scroll container of its own — the whole PAGE
+        // scrolled instead, which meant a sticky `<thead>` had no scrolling
+        // ancestor to stick within and the header simply scrolled away with
+        // everything else ("not usable" per Joanne's report). Fixed by giving
+        // this div the same `max-h-[calc(100vh-220px)]` bound TrainingPlanner.tsx's
+        // own player/drill matrix already uses for exactly this reason (see that
+        // file's own comment above its table) — that turns this div into the
+        // scroll container, which is what makes `sticky top-0` on the thead
+        // below actually take effect, on both large matrices in the app alike.
+        <div className="bg-white rounded-lg border border-slate-200 overflow-auto max-h-[calc(100vh-220px)]">
           <table className="min-w-full text-[12px] border-collapse">
-            <thead>
+            {/* thead itself carries the vertical sticky (top-0) — the corner
+                cell below additionally carries its own sticky left-0 so it
+                stays put on BOTH axes, at a higher z so it stays above the
+                plain column headers (which only need to stick vertically)
+                and the body's sticky-left player-name column. Same pattern,
+                same z-index convention, as TrainingPlanner.tsx's matrix. */}
+            <thead className="sticky top-0 z-10">
               {/* Round 33: header typography aligned to the app's established
                   table convention (TrainingPlanner's/RehabPlanner's own
                   tables) — text-[10px]/slate-400/uppercase/tracking-wider —
@@ -228,7 +244,7 @@ export const GymSetup = ({
                   list), just with the same text treatment as every other
                   column. */}
               <tr className="border-b border-slate-100 bg-slate-50">
-                <th className="sticky left-0 z-10 bg-slate-50 text-left px-3 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">Player</th>
+                <th className="sticky left-0 z-20 bg-slate-50 text-left px-3 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">Player</th>
                 {groupTypes.map(t => (
                   <th key={t.id} className="px-2 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider text-left whitespace-nowrap min-w-[170px]">
                     {groupTypeLabel(t)}

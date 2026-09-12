@@ -354,10 +354,14 @@ export const GroupPicker = ({
               narrow screen rather than stacking to one column, so this no
               longer has its own bespoke mobile behaviour either. Columns
               stay Player, then Group (column 2, per Joanne's ask), then
-              Last modified pushed to the far right. */}
-          <div className="-mx-3.5 mt-1 overflow-x-auto">
+              Last modified pushed to the far right.
+
+              Round 34: bounded max-height + sticky thead (same recipe as
+              GymSetup.tsx and TrainingPlanner.tsx's End of Day Report table)
+              so the header row stays fixed while a long roster scrolls. */}
+          <div className="-mx-3.5 mt-1 overflow-auto max-h-[calc(100vh-220px)]">
             <table className="min-w-full text-[12px] border-collapse">
-              <thead>
+              <thead className="sticky top-0 z-10">
                 <tr className="bg-slate-50 border-b border-slate-100">
                   <th className="text-left px-3.5 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Player</th>
                   <th className="text-left px-3.5 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Group</th>
